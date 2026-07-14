@@ -371,3 +371,33 @@ export function randomScenario(source = Math.random) {
     style
   };
 }
+
+/** One fair, shared five-shot challenge per UTC day. */
+export function dailyScenario(date) {
+  const rng = createSeededRng(`daily-kick:${date}`);
+  const base = randomScenario({ rng });
+  const targetChoices = [TARGETS.lowLeft, TARGETS.lowRight, TARGETS.topLeft, TARGETS.topRight, TARGETS.topCenter];
+  const selectedTarget = targetChoices[Math.floor(sample(rng) * targetChoices.length)];
+  const gust = 0.04 + sample(rng) * 0.08;
+
+  return {
+    ...base,
+    id: `daily-${date}`,
+    cup: 'daily',
+    name: 'Daily Kick',
+    distance: 16 + sample(rng) * 4.5,
+    offsetX: (sample(rng) - 0.5) * 7,
+    wall: 2 + Math.floor(sample(rng) * 4),
+    keeper: 0.32 + sample(rng) * 0.25,
+    attempts: 5,
+    objective: objective('daily-score', 'Five shots. Chase today\'s high score.', { attempts: 5 }),
+    wind: wind((sample(rng) - 0.5) * 0.55, gust),
+    target: { ...selectedTarget },
+    movingTarget: {
+      range: 0.16 + sample(rng) * 0.09,
+      speed: 0.8 + sample(rng) * 0.45,
+      phase: sample(rng) * Math.PI * 2
+    },
+    reward: reward(0, 0)
+  };
+}

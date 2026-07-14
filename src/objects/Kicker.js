@@ -97,42 +97,44 @@ export class Kicker {
     this.cancelSequence();
     const token = this.sequenceToken;
     this.ambient?.pause();
-    this.sprite.setPosition(this.x - (reducedMotion ? 0 : 4), this.y).setRotation(0);
+    this.sprite.setPosition(this.x - (reducedMotion ? 0 : 6), this.y).setRotation(0);
     this.setPose('ready');
 
-    this._after(80, token, () => {
-      this.setPose('follow'); // authored plant / backswing pose
+    // The authored order is ready/run-up -> strike/contact -> follow-through.
+    // Keeping contact tied to the strike texture prevents the ball impulse from
+    // appearing a frame before or after the boot reaches it.
+    this._after(55, token, () => {
       if (!reducedMotion) {
         this.scene.tweens.add({
           targets: this.sprite,
-          x: this.x + 2,
+          x: this.x - 1,
           y: this.y - 1,
-          duration: 90,
-          ease: 'Cubic.easeInOut'
+          duration: 95,
+          ease: 'Cubic.easeIn'
         });
       }
     });
 
-    this._after(170, token, () => {
+    this._after(155, token, () => {
       this.setPose('strike');
-      this.sprite.setPosition(this.x + (reducedMotion ? 0 : 7), this.y - (reducedMotion ? 0 : 1));
+      this.sprite.setPosition(this.x + (reducedMotion ? 0 : 4), this.y - (reducedMotion ? 0 : 1));
       onContact?.();
     });
 
-    this._after(300, token, () => {
+    this._after(245, token, () => {
       this.setPose('follow');
       if (!reducedMotion) {
         this.scene.tweens.add({
           targets: this.sprite,
-          x: this.x + 3,
+          x: this.x + 7,
           y: this.y,
-          duration: 120,
+          duration: 130,
           ease: 'Cubic.easeOut'
         });
       }
     });
 
-    this._after(420, token, () => {
+    this._after(440, token, () => {
       this.setPose('ready');
       this.sprite.setPosition(this.x, this.y).setRotation(0);
       this.ambient?.resume();

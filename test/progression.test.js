@@ -5,8 +5,10 @@ import {
   CUPS,
   LEVELS,
   createSeededRng,
+  dailyScenario,
   randomScenario
 } from '../src/data/levels.js';
+import { getDailyMissions } from '../src/data/progression.js';
 import {
   COSMETICS,
   COSMETIC_CATEGORIES,
@@ -89,6 +91,23 @@ test('seeded scenarios and RNG are deterministic while preserving RNG injection'
   assert.equal(fixed.distance, 18);
   assert.equal(fixed.offsetX, 0);
   assert.equal(fixed.wall, 4);
+});
+
+test('daily challenge and mission rotation are deterministic and fair', () => {
+  const first = dailyScenario('2026-07-14');
+  const repeated = dailyScenario('2026-07-14');
+  assert.deepEqual(first, repeated);
+  assert.notDeepEqual(first, dailyScenario('2026-07-15'));
+  assert.equal(first.attempts, 5);
+  assert.ok(first.wall >= 2 && first.wall <= 5);
+  assert.ok(first.keeper >= 0.32 && first.keeper <= 0.57);
+  assert.ok(first.movingTarget.range <= 0.25);
+
+  const missions = getDailyMissions('2026-07-14');
+  assert.equal(missions.length, 3);
+  assert.equal(new Set(missions.map((mission) => mission.id)).size, 3);
+  assert.equal(new Set(missions.map((mission) => mission.metric)).size, 3);
+  assert.deepEqual(missions, getDailyMissions('2026-07-14'));
 });
 
 test('cosmetics are unique, visual-only and include a valid starter per category', () => {
@@ -208,4 +227,46 @@ test('settings, stats, daily records and continue state persist through reload',
   assert.equal(SaveManager.getDaily().missions.curl, 2);
   assert.equal(SaveManager.getBestDaily('2026-07-12'), 2400);
   assert.equal(SaveManager.getLastPlayedLevelIndex(), 12);
+});
+
+test('daily missions, streak rewards and replay protection persist', () => {
+  const date = '2026-07-14';
+  SaveManager.ensureDaily(date);
+  SaveManager.trackMissions({ shots: 20, goals: 10, curvedGoals: 5, topCorners: 3, score: 10000 }, date);
+  const missions = SaveManager.getDailyMissionStates(date);
+  assert.ok(missions.every((mission) => mission.completed));
+
+  const expectedMissionCoins = missions.reduce((sum, mission) => sum + mission.reward, 0);
+  for (const mission of missions) assert.equal(SaveManager.claimDailyMission(mission.id, date).success, true);
+  assert.equal(SaveManager.getCoins(), expectedMissionCoins);
+  assert.equal(SaveManager.claimDailyMission(missions[0].id, date).success, false);
+
+  const first = SaveManager.completeDaily(date, 9000);
+  assert.equal(first.firstCompletion, true);
+  assert.equal(first.streak, 1);
+  assert.equal(first.reward, 60);
+  const replay = SaveManager.completeDaily(date, 12000);
+  assert.equal(replay.firstCompletion, false);
+  assert.equal(replay.reward, 0);
+  assert.equal(replay.best, 12000);
+
+  const next = SaveManager.completeDaily('2026-07-15', 8000);
+  assert.equal(next.streak, 2);
+  assert.equal(next.reward, 75);
+  assert.equal(SaveManager.getStats().dailyRuns, 2);
+});
+
+test('achievement rewards can be claimed once after the stat threshold', () => {
+  SaveManager.incrementStat('goals');
+  const state = SaveManager.getAchievementStates().find((achievement) => achievement.id === 'first-net');
+  assert.equal(state.completed, true);
+  assert.equal(state.claimed, false);
+  assert.equal(SaveManager.claimAchievement('first-net').success, true);
+  assert.equal(SaveManager.getCoins(), 50);
+  assert.equal(SaveManager.claimAchievement('first-net').success, false);
+  SaveManager.reload();
+  assert.equal(
+    SaveManager.getAchievementStates().find((achievement) => achievement.id === 'first-net').claimed,
+    true
+  );
 });
