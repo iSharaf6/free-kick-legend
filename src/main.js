@@ -4,6 +4,7 @@ import { BootScene } from './scenes/BootScene.js';
 import { MenuScene } from './scenes/MenuScene.js';
 import { LevelSelectScene } from './scenes/LevelSelectScene.js';
 import { LockerScene } from './scenes/LockerScene.js';
+import { ProgressScene } from './scenes/ProgressScene.js';
 import { GameScene } from './scenes/GameScene.js';
 
 new Phaser.Game({
@@ -25,5 +26,5 @@ new Phaser.Game({
   input: {
     activePointers: 2
   },
-  scene: [BootScene, MenuScene, LevelSelectScene, LockerScene, GameScene]
+  scene: [BootScene, MenuScene, LevelSelectScene, LockerScene, ProgressScene, GameScene]
 });

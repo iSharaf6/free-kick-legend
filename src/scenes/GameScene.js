@@ -2,7 +2,8 @@ import Phaser from 'phaser';
 import {
   GAME_W, GAME_H, RENDER_SCALE, CAM, GOAL_W, GOAL_H, POST_R, BALL_R, WALL_DIST, PHYS, project
 } from '../config.js';
-import { LEVELS, randomScenario } from '../data/levels.js';
+import { LEVELS, dailyScenario, randomScenario } from '../data/levels.js';
+import { utcDateKey } from '../data/progression.js';
 import { getCosmetic } from '../data/cosmetics.js';
 import { Ball } from '../objects/Ball.js';
 import { Wall } from '../objects/Wall.js';
@@ -24,6 +25,14 @@ const ATTEMPTS = 3;
 const ARCADE_TIME = 60;
 const FIXED_STEP = PHYS.fixedStep;
 const MAX_STEPS = PHYS.maxSubsteps + 2;
+const CUP_TINTS = Object.freeze({
+  academy: 0xe8f5e9,
+  curve: 0xe6f1ff,
+  targets: 0xfff4cc,
+  pressure: 0xffe0d5,
+  legend: 0xe6dcff,
+  daily: 0xffedbd
+});
 
 function mixColor(a, b, t) {
   const f = Phaser.Math.Clamp(t, 0, 1);
@@ -46,14 +55,19 @@ export class GameScene extends Phaser.Scene {
     super('Game');
   }
 
-  init(data) {
+  init(data = {}) {
     this.mode = data.mode || 'career';
     this.levelIndex = data.levelIndex ?? 0;
+    this.dailyDate = data.dailyDate || utcDateKey();
     this.score = data.score || 0;
     this.goals = data.goals || 0;
     this.combo = data.combo || 0;
     this.timeLeft = data.timeLeft ?? ARCADE_TIME;
-    this.level = this.mode === 'career' ? LEVELS[this.levelIndex] : randomScenario();
+    this.level = this.mode === 'career'
+      ? LEVELS[this.levelIndex]
+      : this.mode === 'daily'
+        ? dailyScenario(this.dailyDate)
+        : randomScenario();
   }
 
   create() {
@@ -61,6 +75,7 @@ export class GameScene extends Phaser.Scene {
     this.settings = SaveManager.getSettings?.() || {};
     Audio.setMuted(Boolean(this.settings.muted || PlatformService.shouldMuteAudio()));
     Audio.setVolume(this.settings.sfxVolume ?? 1);
+    if (this.mode === 'daily') SaveManager.ensureDaily(this.dailyDate);
     PlatformService.gameplayStart();
     CAM.x = this.level.offsetX * 0.85;
     this.zGoal = CAM.ballDist + this.level.distance;
@@ -84,10 +99,15 @@ export class GameScene extends Phaser.Scene {
     this.ballCaught = false;
     this.keeperContactChecked = false;
     this.frameTouched = false;
+    this.frameImpactT = null;
     this.frameCollisionCooldown = 0;
     this.lastTickSecond = -1;
+    this.baseTarget = this.level.target ? { ...this.level.target } : null;
+    this.activeTarget = this.baseTarget ? { ...this.baseTarget } : null;
 
-    this.add.image(0, 0, 'crowd').setOrigin(0, 0).setDepth(0);
+    this.crowdImage = this.add.image(0, 0, 'crowd').setOrigin(0, 0).setDepth(0);
+    const atmosphereTint = CUP_TINTS[this.level.cup];
+    if (atmosphereTint) this.crowdImage.setTint(atmosphereTint);
     this.crowdGlow = this.add.rectangle(GAME_W / 2, CAM.horizonY / 2, GAME_W, CAM.horizonY, PAL.gold, 0)
       .setDepth(1)
       .setBlendMode('ADD');
@@ -128,7 +148,8 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.keeper = new Goalkeeper(this, this.level.keeper, this.zGoal, {
-      reducedMotion: this.settings.reducedMotion
+      reducedMotion: this.settings.reducedMotion,
+      style: this.level.style
     });
     this.buildWall();
 
@@ -332,10 +353,25 @@ export class GameScene extends Phaser.Scene {
     // 1px shading under the crossbar
     frame.lineStyle(1, 0x9aa0a8, 1);
     frame.lineBetween(tl.x + lw, tl.y + lw, tr.x - lw, tr.y + lw);
+
+    // Once a goal is confirmed, this foreground mesh sits over the ball so it
+    // reads as contained by the net instead of travelling through the texture.
+    this.netFront = this.add.graphics().setDepth(1000 - z * 10 + 1).setVisible(false);
+    this.netFront.lineStyle(1, 0xf4f7f6, 0.2);
+    for (let x = -HW; x <= HW + 0.01; x += 0.6) {
+      const t = project(x, GOAL_H * 0.92, zb);
+      const b = project(x, 0, zb);
+      this.netFront.lineBetween(t.x, t.y, b.x, b.y);
+    }
+    for (let y = 0; y <= GOAL_H * 0.92 + 0.01; y += 0.45) {
+      const l = project(-HW, y, zb);
+      const r = project(HW, y, zb);
+      this.netFront.lineBetween(l.x, l.y, r.x, r.y);
+    }
   }
 
   drawTargetZone() {
-    const target = this.level.target;
+    const target = this.activeTarget;
     if (!target || typeof target !== 'object') return;
     const geometry = targetGeometry(target, GOAL_W, GOAL_H);
     const worldX = geometry.x;
@@ -345,8 +381,12 @@ export class GameScene extends Phaser.Scene {
     const edgeY = project(worldX, worldY + geometry.ry, this.zGoal + 0.08);
     const radiusX = Math.max(Math.abs(edgeX.x - centre.x), 4);
     const radiusY = Math.max(Math.abs(edgeY.y - centre.y), 4);
-    const g = this.add.graphics().setDepth(4).setAlpha(0.78);
-    g.fillStyle(0xf3c449, 0.12);
+    // The target is a gameplay reticle, so it stays readable over the wall and
+    // keeper while its geometry remains anchored to the goal plane.
+    const g = this.add.graphics().setDepth(1200).setAlpha(0.9);
+    this.targetGfx = g;
+    this.targetAnchorScreenX = centre.x;
+    g.fillStyle(0xf3c449, 0.2);
     g.fillEllipse(centre.x, centre.y, radiusX * 2, radiusY * 2);
     g.lineStyle(2, 0xf3c449, 0.9);
     g.strokeEllipse(centre.x, centre.y, radiusX * 2, radiusY * 2);
@@ -354,7 +394,29 @@ export class GameScene extends Phaser.Scene {
     g.lineBetween(centre.x - radiusX * 0.62, centre.y, centre.x + radiusX * 0.62, centre.y);
     g.lineBetween(centre.x, centre.y - radiusY * 0.62, centre.x, centre.y + radiusY * 0.62);
     if (!this.settings.reducedMotion) {
-      this.tweens.add({ targets: g, alpha: 0.38, duration: 620, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+      this.tweens.add({ targets: g, alpha: 0.56, duration: 620, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    }
+  }
+
+  updateConditions() {
+    const moving = this.level.movingTarget;
+    if (moving && this.activeTarget && this.baseTarget) {
+      const offset = Math.sin(this.simTime * moving.speed + moving.phase) * moving.range;
+      this.activeTarget.x = Phaser.Math.Clamp(this.baseTarget.x + offset, -0.78, 0.78);
+      const geometry = targetGeometry(this.activeTarget, GOAL_W, GOAL_H);
+      const centre = project(geometry.x, geometry.y, this.zGoal + 0.08);
+      this.targetGfx?.setX(centre.x - this.targetAnchorScreenX);
+    }
+
+    const wind = this.level.wind;
+    if (wind && typeof wind === 'object' && this.ball) {
+      const gust = Number(wind.gust || 0);
+      const gustX = gust > 0 ? Math.sin(this.simTime * 2.15 + this.level.distance) * gust : 0;
+      this.ball.setWind({
+        x: Number(wind.x || 0) + gustX,
+        y: Number(wind.y || 0),
+        z: Number(wind.z || 0)
+      });
     }
   }
 
@@ -440,6 +502,31 @@ export class GameScene extends Phaser.Scene {
         }).setOrigin(0.5).setDepth(2000));
         this.tweens.add({ targets: this.hint, alpha: 0.35, duration: 600, yoyo: true, repeat: -1 });
       }
+    } else if (this.mode === 'daily') {
+      bodyText(this, 91, 11, `DAILY KICK  ·  ${this.dailyDate}`, {
+        fontSize: '6px', color: '#f3c449', letterSpacing: 0.32
+      }).setDepth(2000);
+      bodyText(this, 91, 24, 'FIVE SHOTS  ·  ONE SHARED CHALLENGE', {
+        fontFamily: FONT, fontSize: '7px', color: '#f3e7c3', letterSpacing: 0.18
+      }).setDepth(2000);
+      this.scoreTxt = bodyText(this, 302, 18, `SCORE ${this.score}`, {
+        originX: 0.5, fontFamily: FONT, fontSize: '9px', color: '#f3e7c3'
+      }).setDepth(2000);
+      const shots = makeStatChip(this, GAME_W - 42, 18, 70, 'icon-star', `1/${this.maxAttempts}`, {
+        height: 23, fill: PAL.night, border: PAL.goldDark, color: '#f3c449', fontSize: '9px'
+      }).setDepth(2000);
+      this.dailyShotsTxt = shots.valueText;
+
+      const objectivePlate = this.add.graphics().setDepth(1975);
+      drawPanel(objectivePlate, 137, GAME_H - 39, 337, 34, {
+        fill: PAL.panel, border: PAL.goldDark, corner: PAL.gold, alpha: 0.93
+      });
+      bodyText(this, 148, GAME_H - 29, 'DAILY BONUS', {
+        fontFamily: FONT, fontSize: '6px', color: '#f3c449', letterSpacing: 0.45
+      }).setDepth(2000);
+      bodyText(this, 148, GAME_H - 17, 'Hit the moving target for +650 points. Every goal counts.', {
+        fontSize: '7px', color: '#d7dfda', letterSpacing: 0.12
+      }).setDepth(2000);
     } else {
       this.scoreTxt = bodyText(this, GAME_W / 2, 12, `SCORE ${this.score}`, {
         originX: 0.5, fontFamily: FONT, fontSize: '10px', color: '#f3e7c3'
@@ -601,6 +688,7 @@ export class GameScene extends Phaser.Scene {
 
   simulate(dt, renderTime) {
     this.simTime += dt;
+    this.updateConditions();
     this.frameCollisionCooldown = Math.max(0, this.frameCollisionCooldown - dt);
     if (this.wall) this.wall.update(dt);
     this.keeper.update(dt, renderTime);
@@ -705,6 +793,15 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
+    // A frame rebound travelling clearly back into the pitch is already
+    // decided; end the shot promptly instead of waiting for a long airborne
+    // arc to time out. Forward glances still remain live and can roll in.
+    if (this.frameTouched && ball.vz < 0 && this.frameImpactT != null &&
+        this.simTime - this.frameImpactT > 0.65 && ball.z < this.zGoal - 1.1) {
+      this.resolve('POST');
+      return;
+    }
+
     // weak shot never reached the goal, or something went long
     if (this.flightT > 7 || (ball.vz < 0.6 && ball.y <= BALL_R + 0.01 && this.flightT > 1.2)) {
       this.resolve(this.frameTouched ? 'POST' : 'MISS');
@@ -713,6 +810,7 @@ export class GameScene extends Phaser.Scene {
 
   handleFrameImpact(contact, point) {
     this.frameTouched = true;
+    this.frameImpactT = this.simTime;
     this.frameCollisionCooldown = 0.045;
     reboundFromGoalFrame(this.ball, point, contact, this.zGoal, 0.72);
     const screen = project(point.x, point.y, point.z ?? this.zGoal);
@@ -732,7 +830,7 @@ export class GameScene extends Phaser.Scene {
       point: pt,
       shot: this.lastShot,
       streak: outcome === 'GOAL' ? this.combo : 0,
-      target: this.level.target,
+      target: this.activeTarget,
       goalWidth: GOAL_W,
       goalHeight: GOAL_H
     });
@@ -741,6 +839,7 @@ export class GameScene extends Phaser.Scene {
     switch (outcome) {
       case 'GOAL': {
         this.ball.enterNet(this.zGoal + 2.15);
+        this.netFront?.setVisible(true);
         this.time.delayedCall(180, () => this.kicker?.celebrate(720));
         const spos = project(pt.x, pt.y, this.zGoal);
         this.confetti.explode(60, spos.x, spos.y);
@@ -781,20 +880,14 @@ export class GameScene extends Phaser.Scene {
         Audio.groan();
     }
 
+    this.recordShotOutcome(outcome, shotRating);
+
     if (this.mode === 'arcade') {
-      SaveManager.incrementStat('shots');
       if (outcome === 'GOAL') {
-        SaveManager.incrementStat('goals');
-        if (shotRating.topCorner) SaveManager.incrementStat('topCorners');
-        if (Math.abs(this.lastShot?.spin || 0) >= 0.3) SaveManager.incrementStat('curvedGoals');
         this.combo++;
         this.goals++;
         this.score += shotRating.points;
       } else {
-        if (outcome === 'SAVE' || outcome === 'CAUGHT') SaveManager.incrementStat('saves');
-        else if (outcome === 'WALL') SaveManager.incrementStat('wallHits');
-        else if (outcome === 'POST') SaveManager.incrementStat('postHits');
-        else SaveManager.incrementStat('misses');
         this.combo = 0;
         this.score += shotRating.points;
       }
@@ -811,13 +904,75 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
+    if (this.mode === 'daily') {
+      this.handleDailyOutcome(outcome, shotRating);
+      return;
+    }
+
     this.handleCareerOutcome(outcome, pt, shotRating);
+  }
+
+  recordShotOutcome(outcome, rating) {
+    const scored = outcome === 'GOAL';
+    const curvedGoal = scored && Math.abs(this.lastShot?.spin || 0) >= 0.3;
+    SaveManager.incrementStat('shots');
+    if (scored) SaveManager.incrementStat('goals');
+    else if (outcome === 'SAVE' || outcome === 'CAUGHT') SaveManager.incrementStat('saves');
+    else if (outcome === 'WALL') SaveManager.incrementStat('wallHits');
+    else if (outcome === 'POST') SaveManager.incrementStat('postHits');
+    else SaveManager.incrementStat('misses');
+    if (scored && rating.topCorner) SaveManager.incrementStat('topCorners');
+    if (curvedGoal) SaveManager.incrementStat('curvedGoals');
+    SaveManager.trackMissions({
+      shots: 1,
+      goals: scored ? 1 : 0,
+      topCorners: scored && rating.topCorner ? 1 : 0,
+      curvedGoals: curvedGoal ? 1 : 0,
+      score: rating.points || 0
+    });
+  }
+
+  handleDailyOutcome(outcome, rating) {
+    if (outcome === 'GOAL') {
+      this.combo++;
+      this.goals++;
+    } else {
+      this.combo = 0;
+    }
+    this.score += rating.points || 0;
+    this.bestShotScore = Math.max(this.bestShotScore, rating.points || 0);
+    this.scoreTxt?.setText(`SCORE ${this.score}`);
+    this.dailyShotsTxt?.setText(`${this.attempt}/${this.maxAttempts}`);
+
+    if (this.attempt >= this.maxAttempts) {
+      this.time.delayedCall(1400, () => this.showDailyComplete());
+      return;
+    }
+
+    this.attempt++;
+    const remaining = this.maxAttempts - this.attempt + 1;
+    this.dailyShotsTxt?.setText(`${this.attempt}/${this.maxAttempts}`);
+    this.time.delayedCall(550, () => this.showSwipeHintMessage(
+      outcome === 'GOAL'
+        ? `${rating.label.toUpperCase()}  ·  ${remaining} SHOTS LEFT`
+        : `${remaining} SHOTS LEFT  ·  BUILD THE SCORE`
+    ));
+    this.time.delayedCall(1350, () => this.resetAttempt());
   }
 
   objectiveCheck(outcome, point, rating) {
     const objective = this.level.objective || { type: 'score', goals: 1 };
     const shot = this.lastShot || {};
-    if (outcome !== 'GOAL') return { qualifies: false, finish: null };
+    if (outcome !== 'GOAL') {
+      const reasons = {
+        SAVE: 'KEEPER READ IT — CHANGE CORNER OR ADD CURL',
+        CAUGHT: 'TOO CLOSE TO THE KEEPER — AIM WIDER',
+        WALL: 'WALL BLOCKED IT — LIFT OR BEND THE SHOT',
+        POST: 'INCHES AWAY — USE SLIGHTLY LESS WIDTH',
+        MISS: 'OFF TARGET — FINISH THE SWIPE TOWARD GOAL'
+      };
+      return { qualifies: false, finish: null, reason: reasons[outcome] || 'SHOT DID NOT COUNT' };
+    }
 
     const curveAmount = Math.abs(shot.spin || 0);
     const curveDirectionOk = !objective.curveDirection ||
@@ -826,7 +981,7 @@ export class GameScene extends Phaser.Scene {
     const heightAtWall = this.wallClearanceY ?? point?.y ?? 0;
     const highEnough = objective.minimumHeight == null || heightAtWall >= objective.minimumHeight;
     const lowEnough = objective.maximumHeight == null || heightAtWall <= objective.maximumHeight;
-    const targetOk = !this.level.target || rating.targetHit;
+    const targetOk = !this.activeTarget || rating.targetHit;
 
     let qualifies;
     switch (objective.type) {
@@ -852,8 +1007,21 @@ export class GameScene extends Phaser.Scene {
         : (shot.power ?? 0) >= 0.86
           ? 'power'
           : point?.y < 0.95 ? 'low' : 'placed';
-    if (objective.type === 'final' && this.finishTypes.has(finish)) qualifies = false;
-    return { qualifies, finish };
+    const duplicateFinish = objective.type === 'final' && this.finishTypes.has(finish);
+    if (duplicateFinish) qualifies = false;
+
+    let reason = null;
+    if (!qualifies) {
+      if (duplicateFinish) reason = 'USE A DIFFERENT FINISH THIS TIME';
+      else if (!targetOk) reason = 'GOAL SCORED, BUT THE GOLD TARGET WAS MISSED';
+      else if (!curveDirectionOk) reason = `CURVE THE OTHER WAY — ${objective.curveDirection?.toUpperCase()}`;
+      else if (!curveOk) reason = 'MORE BEND NEEDED — ARC THE END OF YOUR SWIPE';
+      else if (!highEnough) reason = 'TOO LOW — SWIPE LONGER AND STEEPER';
+      else if (!lowEnough) reason = 'TOO HIGH — USE A SHORTER, FLATTER SWIPE';
+      else if (objective.type === 'power') reason = 'MORE POWER NEEDED — USE A LONGER SWIPE';
+      else reason = 'GOAL SCORED, BUT THE OBJECTIVE WAS NOT MET';
+    }
+    return { qualifies, finish, reason };
   }
 
   handleCareerOutcome(outcome, point, rating) {
@@ -862,20 +1030,12 @@ export class GameScene extends Phaser.Scene {
     const scored = outcome === 'GOAL';
     this.bestShotScore = Math.max(this.bestShotScore, rating.points || 0);
 
-    SaveManager.incrementStat('shots');
-    if (scored) SaveManager.incrementStat('goals');
-    else if (outcome === 'SAVE' || outcome === 'CAUGHT') SaveManager.incrementStat('saves');
-    else if (outcome === 'WALL') SaveManager.incrementStat('wallHits');
-    else if (outcome === 'POST') SaveManager.incrementStat('postHits');
-    else SaveManager.incrementStat('misses');
-    if (rating.topCorner) SaveManager.incrementStat('topCorners');
-    if (scored && Math.abs(this.lastShot?.spin || 0) >= 0.3) SaveManager.incrementStat('curvedGoals');
-
     if (scored && check.qualifies) {
       if (check.finish) this.finishTypes.add(check.finish);
       this.goalsThisLevel++;
       this.objectiveStreak++;
     } else {
+      this.lastObjectiveFeedback = check.reason;
       this.objectiveStreak = 0;
       if (objective.consecutive) this.goalsThisLevel = 0;
     }
@@ -905,8 +1065,8 @@ export class GameScene extends Phaser.Scene {
       this.time.delayedCall(1350, () => this.showLevelFailed());
     } else {
       const message = scored && !check.qualifies
-        ? `GOAL, BUT: ${objective.label}`
-        : scored ? `${this.goalsThisLevel}/${needed} DONE — ${remaining} SHOTS LEFT` : `${remaining} SHOTS LEFT`;
+        ? check.reason
+        : scored ? `${this.goalsThisLevel}/${needed} DONE — ${remaining} SHOTS LEFT` : `${check.reason}  ·  ${remaining} LEFT`;
       this.time.delayedCall(550, () => this.showSwipeHintMessage(message));
       this.time.delayedCall(1350, () => this.resetAttempt());
     }
@@ -919,7 +1079,9 @@ export class GameScene extends Phaser.Scene {
     this.ballCaught = false;
     this.keeperContactChecked = false;
     this.frameTouched = false;
+    this.frameImpactT = null;
     this.frameCollisionCooldown = 0;
+    this.netFront?.setVisible(false);
     this.ballSpr.setVisible(true);
     this.shadowSpr.setVisible(true);
     this.keeper.reset();
@@ -955,6 +1117,67 @@ export class GameScene extends Phaser.Scene {
     this.time.delayedCall(1150, () => this.requestNaturalBreakAd());
   }
 
+  showDailyComplete() {
+    if (this.over) return;
+    this.over = true;
+    this.state = 'OVERLAY';
+    this.swipe.enabled = false;
+    PlatformService.gameplayStop();
+    const result = SaveManager.completeDaily(this.dailyDate, this.score);
+    this.dailyCompletion = result;
+    const buttons = [];
+    if (result.firstCompletion && result.reward > 0 && PlatformService.supportsAds()) {
+      buttons.push({
+        label: '2X COINS', color: PAL.green, hover: PAL.greenHi,
+        cb: () => this.requestDailyBonus(result.reward)
+      });
+    } else {
+      buttons.push({
+        label: 'RETRY', color: PAL.blue, hover: PAL.blueHi,
+        cb: () => this.scene.restart({ mode: 'daily', dailyDate: this.dailyDate })
+      });
+    }
+    buttons.push({
+      label: 'MISSIONS', color: PAL.goldDark, hover: PAL.gold,
+      cb: () => this.scene.start('Progress', { tab: 'daily' })
+    });
+    buttons.push({
+      label: 'MENU', color: PAL.panelHi, hover: PAL.border,
+      cb: () => this.scene.start('Menu')
+    });
+
+    const rewardLine = result.reward > 0
+      ? `STREAK ${result.streak}  ·  +${result.reward} COINS`
+      : `STREAK ${result.streak}  ·  DAILY REWARD CLAIMED`;
+    this.showOverlay('DAILY COMPLETE', [
+      `SCORE ${this.score}  ·  BEST ${result.best}`,
+      `${this.goals}/${this.maxAttempts} GOALS  ·  BEST SHOT ${this.bestShotScore}`,
+      rewardLine
+    ], buttons);
+  }
+
+  async requestDailyBonus(reward) {
+    if (this.adRequestActive || !PlatformService.supportsAds()) return;
+    this.adRequestActive = true;
+    const wasMuted = Audio.muted;
+    const blocker = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, PAL.ink, 0.28)
+      .setDepth(4000).setInteractive();
+    const status = bodyText(this, GAME_W / 2, GAME_H - 18, 'REWARD VIDEO', {
+      originX: 0.5, fontFamily: FONT, fontSize: '7px', color: '#f3c449', letterSpacing: 0.5
+    }).setDepth(4001);
+    const shown = await PlatformService.requestRewardedAd({
+      onStarted: () => Audio.setMuted(true)
+    });
+    Audio.setMuted(Boolean(wasMuted || this.settings.muted));
+    blocker.destroy();
+    status.destroy();
+    this.adRequestActive = false;
+    if (!shown) return;
+    const bonus = SaveManager.claimDailyBonus(this.dailyDate, reward);
+    if (bonus.success) Audio.coin();
+    this.scene.start('Progress', { tab: 'daily' });
+  }
+
   showLevelClear(stars) {
     this.state = 'OVERLAY';
     PlatformService.gameplayStop();
@@ -984,7 +1207,10 @@ export class GameScene extends Phaser.Scene {
   showLevelFailed() {
     this.state = 'OVERLAY';
     PlatformService.gameplayStop();
-    this.showOverlay('TRY AGAIN', [this.level.objective?.label || 'Out of attempts'], [
+    this.showOverlay('TRY AGAIN', [
+      this.lastObjectiveFeedback || this.level.objective?.label || 'Out of attempts',
+      'TIP: CHANGE ONE THING — HEIGHT, POWER, OR CURVE'
+    ], [
       {
         label: 'RETRY', color: 0x1976d2, hover: 0x2196f3,
         cb: () => this.scene.restart({ mode: 'career', levelIndex: this.levelIndex })
@@ -1012,11 +1238,23 @@ export class GameScene extends Phaser.Scene {
           GAME_W / 2 + (i - 1) * 34,
           112,
           i < stars ? 'icon-star' : 'icon-star-empty'
-        ).setDepth(3001).setScale(0.88);
-        this.tweens.add({
-          targets: star, scale: 2.25, delay: 200 + i * 180, duration: 300, ease: 'Back.easeOut',
-          onStart: () => { if (i < stars) Audio.star(i); }
-        });
+        ).setDepth(3001).setScale(this.settings.reducedMotion ? 1 : 0.94);
+        if (!this.settings.reducedMotion) {
+          this.tweens.add({
+            targets: star,
+            scale: 1.06,
+            delay: 180 + i * 180,
+            duration: 120,
+            ease: 'Cubic.easeOut',
+            onStart: () => { if (i < stars) Audio.star(i); },
+            onComplete: () => this.tweens.add({
+              targets: star,
+              scale: 1,
+              duration: 80,
+              ease: 'Cubic.easeInOut'
+            })
+          });
+        }
       }
     }
 

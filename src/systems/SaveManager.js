@@ -4,6 +4,14 @@ import {
   STARTER_COSMETICS,
   getCosmetic
 } from '../data/cosmetics.js';
+import {
+  ACHIEVEMENTS,
+  DAILY_STREAK_REWARDS,
+  dayDistance,
+  getAchievement,
+  getDailyMissions,
+  utcDateKey
+} from '../data/progression.js';
 import { PlatformService } from './PlatformService.js';
 
 export const SAVE_KEY = 'fkl-save-v2';
@@ -177,8 +185,16 @@ function normalizedDaily(rawDaily) {
     completed: rawDaily?.completed === true,
     rewardClaimed: rawDaily?.rewardClaimed === true,
     completedDates: uniqueStrings(rawDaily?.completedDates, (date) => dateString(date) !== null, 400),
-    missions
+    missions,
+    claimedMissions: uniqueStrings(rawDaily?.claimedMissions, (id) => id.length <= 64, 100),
+    streak: integer(rawDaily?.streak, 0, 100_000),
+    lastCompletedDate: dateString(rawDaily?.lastCompletedDate),
+    bonusClaimed: rawDaily?.bonusClaimed === true
   };
+}
+
+function normalizedAchievementClaims(rawClaims) {
+  return uniqueStrings(rawClaims, (id) => Boolean(getAchievement(id)), ACHIEVEMENTS.length);
 }
 
 function normalizedBestDaily(rawDaily) {
@@ -231,7 +247,8 @@ function createDefaultSave() {
     daily: normalizedDaily(null),
     lastPlayed: normalizedLastPlayed(null),
     tutorial: normalizedTutorial(null),
-    rewardClaims: {}
+    rewardClaims: {},
+    achievementClaims: []
   };
 }
 
@@ -259,7 +276,8 @@ function normalizeSave(rawSave) {
     daily: normalizedDaily(rawSave.daily),
     lastPlayed: normalizedLastPlayed(rawSave.lastPlayed),
     tutorial: normalizedTutorial(rawSave.tutorial),
-    rewardClaims: normalizedRewardClaims(rawSave.rewardClaims, stars)
+    rewardClaims: normalizedRewardClaims(rawSave.rewardClaims, stars),
+    achievementClaims: normalizedAchievementClaims(rawSave.achievementClaims)
   };
 }
 
@@ -590,8 +608,26 @@ export const SaveManager = {
     return data.stats[key];
   },
 
-  getDaily() {
-    return clone(this.load().daily);
+  ensureDaily(date = utcDateKey()) {
+    const validDate = dateString(date) ?? utcDateKey();
+    const data = this.load();
+    if (data.daily.currentDate !== validDate) {
+      data.daily = normalizedDaily({
+        ...data.daily,
+        currentDate: validDate,
+        completed: false,
+        rewardClaimed: false,
+        missions: {},
+        claimedMissions: [],
+        bonusClaimed: false
+      });
+      this.save();
+    }
+    return clone(data.daily);
+  },
+
+  getDaily(date = null) {
+    return date ? this.ensureDaily(date) : clone(this.load().daily);
   },
 
   updateDaily(daily) {
@@ -607,6 +643,132 @@ export const SaveManager = {
     });
     this.save();
     return clone(data.daily);
+  },
+
+  getDailyMissionStates(date = utcDateKey()) {
+    const daily = this.ensureDaily(date);
+    return getDailyMissions(date).map((mission) => {
+      const progress = Math.min(integer(daily.missions[mission.id], 0), mission.target);
+      return {
+        ...mission,
+        progress,
+        completed: progress >= mission.target,
+        claimed: daily.claimedMissions.includes(mission.id)
+      };
+    });
+  },
+
+  trackMissions(event = {}, date = utcDateKey()) {
+    this.ensureDaily(date);
+    const data = this.load();
+    const selected = getDailyMissions(date);
+    for (const mission of selected) {
+      const increase = finiteNumber(event[mission.metric], 0);
+      if (increase <= 0) continue;
+      const previous = integer(data.daily.missions[mission.id], 0);
+      data.daily.missions[mission.id] = Math.min(previous + increase, mission.target);
+    }
+    this.save();
+    return this.getDailyMissionStates(date);
+  },
+
+  claimDailyMission(id, date = utcDateKey()) {
+    this.ensureDaily(date);
+    const mission = getDailyMissions(date).find((item) => item.id === id);
+    const data = this.load();
+    if (!mission) return { success: false, reason: 'unknown-mission', coins: data.coins };
+    const progress = integer(data.daily.missions[id], 0);
+    if (progress < mission.target) return { success: false, reason: 'incomplete', coins: data.coins };
+    if (data.daily.claimedMissions.includes(id)) {
+      return { success: false, reason: 'already-claimed', coins: data.coins };
+    }
+    data.daily.claimedMissions.push(id);
+    data.coins = Math.min(data.coins + mission.reward, MAX_CURRENCY);
+    this.save();
+    return { success: true, reward: mission.reward, coins: data.coins };
+  },
+
+  getAchievementStates() {
+    const data = this.load();
+    return ACHIEVEMENTS.map((achievement) => {
+      const progress = Math.min(finiteNumber(data.stats[achievement.stat], 0), achievement.target);
+      return {
+        ...achievement,
+        progress,
+        completed: progress >= achievement.target,
+        claimed: data.achievementClaims.includes(achievement.id)
+      };
+    });
+  },
+
+  claimAchievement(id) {
+    const achievement = getAchievement(id);
+    const data = this.load();
+    if (!achievement) return { success: false, reason: 'unknown-achievement', coins: data.coins };
+    const progress = finiteNumber(data.stats[achievement.stat], 0);
+    if (progress < achievement.target) return { success: false, reason: 'incomplete', coins: data.coins };
+    if (data.achievementClaims.includes(id)) {
+      return { success: false, reason: 'already-claimed', coins: data.coins };
+    }
+    data.achievementClaims.push(id);
+    data.coins = Math.min(data.coins + achievement.reward, MAX_CURRENCY);
+    this.save();
+    return { success: true, reward: achievement.reward, coins: data.coins };
+  },
+
+  completeDaily(date = utcDateKey(), score = 0) {
+    this.ensureDaily(date);
+    const data = this.load();
+    const safeScore = integer(score, 0);
+    data.best.daily[date] = Math.max(data.best.daily[date] ?? 0, safeScore);
+
+    if (data.daily.completed) {
+      this.save();
+      return {
+        firstCompletion: false,
+        reward: 0,
+        best: data.best.daily[date],
+        streak: data.daily.streak,
+        coins: data.coins
+      };
+    }
+
+    const distance = data.daily.lastCompletedDate
+      ? dayDistance(data.daily.lastCompletedDate, date)
+      : null;
+    data.daily.streak = distance === 1 ? data.daily.streak + 1 : 1;
+    data.daily.lastCompletedDate = date;
+    data.daily.completed = true;
+    data.daily.rewardClaimed = true;
+    data.daily.completedDates = uniqueStrings(
+      [...data.daily.completedDates, date],
+      (value) => dateString(value) !== null,
+      400
+    );
+    const reward = DAILY_STREAK_REWARDS[(data.daily.streak - 1) % DAILY_STREAK_REWARDS.length];
+    data.coins = Math.min(data.coins + reward, MAX_CURRENCY);
+    data.stats.dailyRuns = Math.min(data.stats.dailyRuns + 1, MAX_STAT);
+    this.save();
+    return {
+      firstCompletion: true,
+      reward,
+      best: data.best.daily[date],
+      streak: data.daily.streak,
+      coins: data.coins
+    };
+  },
+
+  claimDailyBonus(date = utcDateKey(), amount = 0) {
+    this.ensureDaily(date);
+    const data = this.load();
+    const reward = integer(amount, 0, MAX_CURRENCY);
+    if (!data.daily.completed || data.daily.bonusClaimed || reward <= 0) {
+      return { success: false, coins: data.coins };
+    }
+    data.daily.bonusClaimed = true;
+    data.coins = Math.min(data.coins + reward, MAX_CURRENCY);
+    this.save();
+    return { success: true, reward, coins: data.coins };
   },
 
   getLastPlayed() {

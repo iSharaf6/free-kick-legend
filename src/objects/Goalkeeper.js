@@ -3,6 +3,17 @@ import { project, GOAL_W, GOAL_H, BALL_R, PHYS } from '../config.js';
 const KEEPER_H = 1.95;
 const DIVE_H = 1.35;
 const HALF_GOAL = GOAL_W / 2;
+const STYLE_PROFILES = Object.freeze({
+  training: Object.freeze({ reaction: 1.18, error: 1.22, read: -0.06, speed: 0.9, set: 1.08 }),
+  calm: Object.freeze({ reaction: 1.06, error: 1.02, read: 0, speed: 0.96, set: 1 }),
+  balanced: Object.freeze({ reaction: 1, error: 1, read: 0, speed: 1, set: 1 }),
+  'late-dive': Object.freeze({ reaction: 1.12, error: 0.82, read: 0.04, speed: 1.08, set: 0.95 }),
+  'line-reader': Object.freeze({ reaction: 0.96, error: 0.78, read: 0.08, speed: 1, set: 0.92 }),
+  aggressive: Object.freeze({ reaction: 0.88, error: 1.08, read: -0.02, speed: 1.12, set: 0.82 }),
+  anticipator: Object.freeze({ reaction: 0.84, error: 0.72, read: 0.1, speed: 1.08, set: 0.86 }),
+  legend: Object.freeze({ reaction: 0.8, error: 0.62, read: 0.12, speed: 1.14, set: 0.82 }),
+  boss: Object.freeze({ reaction: 0.76, error: 0.54, read: 0.14, speed: 1.18, set: 0.78 })
+});
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -40,6 +51,8 @@ export class Goalkeeper {
     this.z = zGoal - 0.4;
     this.rng = typeof options.rng === 'function' ? options.rng : null;
     this.reducedMotion = Boolean(options.reducedMotion);
+    this.style = STYLE_PROFILES[options.style] ? options.style : 'balanced';
+    this.profile = STYLE_PROFILES[this.style];
     this.seed = (options.seed ?? defaultSeed(this.skill, zGoal)) >>> 0;
 
     this.x = 0;
@@ -86,9 +99,9 @@ export class Goalkeeper {
     // Weak keepers under-read curl and have more perception error, but the
     // error sequence is seeded/replayable instead of depending on Math.random.
     const curl = 0.5 * ball.spin * PHYS.magnus * Math.max(ball.vz, 0) * flightT * flightT;
-    const curlRead = 0.52 + this.skill * 0.43;
-    const errorX = (this._random() * 2 - 1) * (0.28 + (1 - this.skill) * 1.05);
-    const errorY = (this._random() * 2 - 1) * (0.12 + (1 - this.skill) * 0.30);
+    const curlRead = clamp(0.52 + this.skill * 0.43 + this.profile.read, 0.42, 0.98);
+    const errorX = (this._random() * 2 - 1) * (0.28 + (1 - this.skill) * 1.05) * this.profile.error;
+    const errorY = (this._random() * 2 - 1) * (0.12 + (1 - this.skill) * 0.30) * this.profile.error;
 
     this.targetX = clamp(
       prediction.x - curl * (1 - curlRead) + errorX,
@@ -103,9 +116,9 @@ export class Goalkeeper {
       HALF_GOAL - 0.55
     );
 
-    this.reactT = 0.13 + (1 - this.skill) * 0.25;
-    this.setT = 0.045 + (1 - this.skill) * 0.09;
-    this.diveDuration = 0.30 + (1 - this.skill) * 0.12;
+    this.reactT = (0.13 + (1 - this.skill) * 0.25) * this.profile.reaction;
+    this.setT = (0.045 + (1 - this.skill) * 0.09) * this.profile.set;
+    this.diveDuration = (0.30 + (1 - this.skill) * 0.12) / Math.sqrt(this.profile.speed);
     this.state = 'read';
     this.pose = 'ready';
     this.stateT = 0;
@@ -132,6 +145,7 @@ export class Goalkeeper {
       case 'read':
         this.stateT += dt;
         this.pose = 'ready';
+        this.x += (this.moveTargetX * 0.18 - this.x) * Math.min(dt * 5, 1);
         if (this.stateT >= this.reactT) {
           this.state = 'set';
           this.stateT = 0;
@@ -141,6 +155,7 @@ export class Goalkeeper {
       case 'set':
         this.stateT += dt;
         this.pose = 'ready';
+        this.x += (this.moveTargetX * 0.42 - this.x) * Math.min(dt * 8, 1);
         if (this.stateT >= this.setT) {
           this.state = 'dive';
           this.pose = 'dive';
@@ -154,8 +169,8 @@ export class Goalkeeper {
         this.pose = 'dive';
         this.diveP = clamp(this.stateT / this.diveDuration, 0, 1);
 
-        const maxSpeed = 4.8 + this.skill * 4.2;
-        const acceleration = 22 + this.skill * 20;
+        const maxSpeed = (4.8 + this.skill * 4.2) * this.profile.speed;
+        const acceleration = (22 + this.skill * 20) * this.profile.speed;
         const deltaX = this.moveTargetX - this.x;
         const desiredVx = clamp(deltaX * 13, -maxSpeed, maxSpeed);
         this.moveVx += clamp(desiredVx - this.moveVx, -acceleration * dt, acceleration * dt);
@@ -249,7 +264,9 @@ export class Goalkeeper {
         baseScale * (setting ? 1.055 : reading ? 1.018 : 1) * pulse,
         baseScale * (setting ? 0.925 : reading ? 0.985 : 1) * pulse
       );
-      this.spr.setRotation?.(0);
+      this.spr.setRotation?.(
+        this.reducedMotion ? 0 : this.diveDir * (setting ? 0.018 : reading ? 0.008 : 0)
+      );
     }
     this.spr.setDepth(1000 - this.z * 10);
   }

@@ -9,6 +9,7 @@ import { Audio } from '../systems/AudioSynth.js';
 import { LEVELS } from '../data/levels.js';
 import { PAL } from '../pixelart.js';
 import { Kicker } from '../objects/Kicker.js';
+import { utcDateKey } from '../data/progression.js';
 
 function levelId(level, index) {
   return level?.id ?? index;
@@ -35,11 +36,17 @@ export class MenuScene extends Phaser.Scene {
     const lastPlayed = SaveManager.getLastPlayed?.();
     const continueIndex = this.resolveContinueIndex(lastPlayed, unlocked);
     const equippedKit = SaveManager.getEquippedCosmetic?.('kit') ?? 'kit-home';
+    const today = utcDateKey();
+    const daily = SaveManager.ensureDaily(today);
+    const readyClaims = [
+      ...SaveManager.getDailyMissionStates(today),
+      ...SaveManager.getAchievementStates()
+    ].filter((state) => state.completed && !state.claimed).length;
 
-    this.makeHeader(totalStars, coins, muted);
+    this.makeHeader(totalStars, coins, muted, readyClaims);
     this.makeHero(equippedKit, totalStars);
     this.makeLogo();
-    this.makeActions(continueIndex);
+    this.makeActions(continueIndex, daily, today);
 
     bodyText(this, GAME_W / 2, GAME_H - 8,
       'SWIPE UP  ·  BEND LATE  ·  FIND THE CORNER', {
@@ -78,7 +85,7 @@ export class MenuScene extends Phaser.Scene {
     shade.fillTriangle(24, 30, 176, 30, 123, 235);
   }
 
-  makeHeader(totalStars, coins, muted) {
+  makeHeader(totalStars, coins, muted, readyClaims) {
     const bar = this.add.graphics().setDepth(200);
     drawPanel(bar, 7, 5, GAME_W - 14, 25, {
       fill: PAL.panel,
@@ -117,6 +124,26 @@ export class MenuScene extends Phaser.Scene {
         hitWidth: 30,
         hitHeight: 27
       }).setDepth(203);
+
+    makeIconButton(this, 288, 17, 19, 'icon-cup', () => this.scene.start('Progress'), {
+      color: readyClaims ? PAL.green : PAL.panelHi,
+      hover: PAL.blue,
+      border: readyClaims ? PAL.gold : PAL.borderDark,
+      iconScale: 0.68,
+      hitWidth: 31,
+      hitHeight: 27
+    }).setDepth(203);
+    if (readyClaims) {
+      const badge = this.add.graphics().setDepth(205);
+      badge.fillStyle(PAL.red, 1);
+      badge.fillCircle(296, 9, 5);
+      bodyText(this, 296, 9, String(Math.min(readyClaims, 9)), {
+        originX: 0.5,
+        fontSize: '6px',
+        color: '#ffffff',
+        strokeThickness: 0
+      }).setDepth(206);
+    }
   }
 
   toggleSound() {
@@ -190,10 +217,10 @@ export class MenuScene extends Phaser.Scene {
     }).setDepth(221);
   }
 
-  makeActions(continueIndex) {
+  makeActions(continueIndex, daily, today) {
     const actionX = 344;
     const actionW = 198;
-    const actionH = 29;
+    const actionH = 25;
     const make = (y, label, icon, cb, color, hover) => makeButton(
       this, actionX, y, actionW, actionH, label, cb, {
         color,
@@ -201,13 +228,13 @@ export class MenuScene extends Phaser.Scene {
         icon,
         iconScale: 0.82,
         iconX: 17,
-        fontSize: '10px',
+        fontSize: '9px',
         letterSpacing: 0.45,
-        hitHeight: 31
+        hitHeight: 28
       }
     ).setDepth(230);
 
-    make(116, `CONTINUE  ·  LV ${String(continueIndex + 1).padStart(2, '0')}`, 'icon-play', () => {
+    make(112, `CONTINUE  ·  LV ${String(continueIndex + 1).padStart(2, '0')}`, 'icon-play', () => {
       const level = LEVELS[continueIndex];
       SaveManager.setLastPlayed?.({ mode: 'career', levelId: levelId(level, continueIndex) });
       this.kicker.previewStrike(() => {
@@ -215,16 +242,26 @@ export class MenuScene extends Phaser.Scene {
       });
     }, PAL.green, PAL.greenHi);
 
-    make(150, 'CAREER  ·  FIVE CUP TOUR', 'icon-cup', () => {
+    make(141, 'CAREER  ·  FIVE CUP TOUR', 'icon-cup', () => {
       this.scene.start('LevelSelect');
     }, PAL.blue, PAL.blueHi);
 
-    make(184, 'TIME ATTACK  ·  60 SEC', 'icon-clock', () => {
+    const dailyLabel = daily.completed
+      ? `DAILY KICK  ·  BEST ${formatCompact(SaveManager.getBestDaily(today))}`
+      : daily.streak > 0
+        ? `DAILY KICK  ·  ${daily.streak} DAY STREAK`
+        : 'DAILY KICK  ·  NEW CHALLENGE';
+    make(170, dailyLabel, 'icon-star', () => {
+      SaveManager.setLastPlayed?.({ mode: 'daily', levelId: LEVELS[continueIndex]?.id });
+      this.scene.start('Game', { mode: 'daily', dailyDate: today });
+    }, PAL.goldDark, PAL.gold);
+
+    make(199, 'TIME ATTACK  ·  60 SEC', 'icon-clock', () => {
       SaveManager.setLastPlayed?.({ mode: 'arcade', levelId: null });
       this.scene.start('Game', { mode: 'arcade' });
     }, PAL.orange, 0xe47c3e);
 
-    make(218, 'LOCKER  ·  MAKE IT YOURS', 'icon-locker', () => {
+    make(228, 'LOCKER  ·  MAKE IT YOURS', 'icon-locker', () => {
       this.scene.start('Locker');
     }, 0x594b82, 0x7664a2);
   }

@@ -11,8 +11,9 @@ A polished, portal-ready pixel football game built with Phaser 3 and Vite. Draw 
 - Pose-based goalkeeper contact with deterministic read, set, dive, catch, parry, and recovery states.
 - Robust mouse/touch swipes with pointer isolation, smoothing, resampling, invalid-gesture feedback, and live power/curl presentation.
 - Score, combo, shot grades, top-corner/target bonuses, three-star mastery, first-clear rewards, and Time Attack.
+- A deterministic five-shot Daily Kick, moving bonus target, seven-day reward cycle, three rotating missions, 12 achievements, claimable coins, and replay-safe rewards.
 - A functional Locker with six kits, six balls, six trails, earned coins, progression gates, and no pay-to-win upgrades.
-- Versioned saves with v1 migration, validation, settings, lifetime stats, daily-ready records, and CrazyGames Data fallback.
+- Versioned saves with v1 migration, validation, settings, lifetime stats, daily streaks/claims, achievements, and CrazyGames Data fallback.
 - CrazyGames SDK v3 lifecycle, cloud-data, completion, happy-time, and natural-break ad hooks; the bridge remains safe when the SDK is disabled or unavailable.
 - True 1920×1080 Full-HD rendering over stable logical coordinates, 4× text rasterization, high-density original striker/keeper/defender sprites, responsive safe areas, and layered synthesized stadium audio.
 
@@ -41,7 +42,8 @@ src/
 ├── pixelart.js                 authored procedural sprite maps and palette
 ├── ui.js                       tactile UI primitives and scene chrome
 ├── data/
-│   ├── levels.js               50 levels, five cups, targets, rewards, seeded arcade
+│   ├── levels.js               50 levels, five cups, targets, seeded arcade/daily
+│   ├── progression.js          daily missions, streak rewards, achievements
 │   └── cosmetics.js            visual-only kit, ball, and trail catalog
 ├── systems/
 │   ├── SwipeInput.js           gesture capture, smoothing, shot mapping
@@ -57,9 +59,10 @@ src/
 │   └── Kicker.js               striker pose/celebration presentation
 └── scenes/
     ├── BootScene.js            SDK init and generated texture atlas
-    ├── MenuScene.js            continue, career, arcade, locker
+    ├── MenuScene.js            continue, career, daily, arcade, locker
     ├── LevelSelectScene.js     five-cup career browser
     ├── LockerScene.js          purchase/equip customization flow
+    ├── ProgressScene.js        missions, achievements, streak reward track
     └── GameScene.js            fixed-step match state machine and results
 ```
 
@@ -69,7 +72,7 @@ src/
 2. Zip the contents of `dist/` with `index.html` at the archive root. The repository's `free-kick-legend.zip` is the current ready-to-upload build.
 3. Upload to the CrazyGames Developer Portal and test it in their preview environment.
 4. The official SDK v3 script is already included in `index.html`. `BootScene` waits for initialization, `PlatformService` uses CrazyGames Data when available, and `GameScene` reports gameplay start/stop and career completion.
-5. Midgame ads are requested only after a completed level or finished Time Attack run. Gameplay is already stopped, input is blocked while the request resolves, audio mutes only after `adStarted`, and `adError` safely restores the UI. No rewarded button is shown during Basic Launch.
+5. Midgame ads are requested only after a completed level or finished Time Attack run. Gameplay is already stopped, input is blocked while the request resolves, audio mutes only after `adStarted`, and `adError` safely restores the UI. Daily Kick also offers one optional rewarded video to double the first-completion coin reward; failure or unavailability never removes the earned base reward.
 
 For other portals, the bridge falls back to local storage and no-op lifecycle/ad calls. If a portal forbids third-party SDK scripts, remove the CrazyGames script tag and keep the same game bundle.
 
