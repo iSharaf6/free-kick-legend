@@ -1,0 +1,11 @@
+node_modules/
+dist/
+tmp/
+*.zip
+.DS_Store
+.mcp.json
+.agents/
+.claude/
+.codex/
+.impeccable/
+

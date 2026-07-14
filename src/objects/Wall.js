@@ -1,0 +1,103 @@
+import { project, PLAYER_H, BALL_R, PHYS } from '../config.js';
+
+const SPACING = 0.58;      // shoulder-to-shoulder without sealing the goal
+const JUMP_GRAVITY = 11;
+
+function deterministicJumpSpeed(index, count) {
+  // Stable variation keeps the silhouettes organic without making an
+  // identical shot change outcome between retries or replay recordings.
+  const bucket = (index * 37 + count * 17 + 11) % 9;
+  return 3.55 + bucket * 0.075;
+}
+
+function deterministicBuild(index, count) {
+  const bucket = (index * 29 + count * 13 + 5) % 7;
+  const heightFactor = 0.86 + bucket * 0.028;
+  return {
+    height: PLAYER_H * heightFactor,
+    halfWidth: 0.255 + (bucket % 3) * 0.018
+  };
+}
+
+// The defensive wall: a row of defenders that jumps as the ball arrives.
+// A well-timed low shot can sneak under a jumping wall.
+export class Wall {
+  constructor(scene, count, zWall, centerX, options = {}) {
+    this.z = zWall;
+    this.centerX = centerX;
+    this.jumped = false;
+    this.rng = typeof options === 'function' ? options : options?.rng;
+    this.players = [];
+    for (let i = 0; i < count; i++) {
+      const x = centerX + (i - (count - 1) / 2) * SPACING;
+      const hd = Boolean(scene.textures?.exists?.('defender-hd'));
+      const spr = scene.add.sprite(0, 0, hd ? 'defender-hd' : (i % 2 ? 'defender2' : 'defender'))
+        .setOrigin(0.5, 1)
+        .setFlipX(hd && i % 2 === 1);
+      const jumpSpeed = this.rng
+        ? 3.55 + Math.max(0, Math.min(1, Number(this.rng()) || 0)) * 0.60
+        : deterministicJumpSpeed(i, count);
+      const build = deterministicBuild(i, count);
+      this.players.push({ x, jumpY: 0, vy: 0, jumpSpeed, spr, ...build });
+    }
+    this.draw();
+  }
+
+  jump() {
+    if (this.jumped) return;
+    this.jumped = true;
+    for (const p of this.players) p.vy = p.jumpSpeed;
+  }
+
+  update(dt) {
+    if (!Number.isFinite(dt) || dt <= 0) return;
+    const boundedDt = Math.min(dt, PHYS.maxFrameDt);
+    const steps = Math.min(
+      PHYS.maxSubsteps,
+      Math.max(1, Math.ceil(boundedDt / PHYS.fixedStep - 1e-8))
+    );
+    const stepDt = boundedDt / steps;
+    for (let i = 0; i < steps; i++) this.step(stepDt);
+    this.draw();
+  }
+
+  step(dt = PHYS.fixedStep) {
+    for (const p of this.players) {
+      if (p.vy !== 0 || p.jumpY > 0) {
+        p.vy -= JUMP_GRAVITY * dt;
+        p.jumpY += p.vy * dt;
+        if (p.jumpY <= 0) {
+          p.jumpY = 0;
+          p.vy = 0;
+        }
+      }
+    }
+  }
+
+  draw() {
+    for (const p of this.players) {
+      const pos = project(p.x, p.jumpY, this.z);
+      p.spr.setPosition(pos.x, pos.y);
+      const textureH = p.spr.texture?.source?.[0]?.height || 28;
+      p.spr.setScale((pos.s * p.height) / textureH);
+      p.spr.setDepth(1000 - this.z * 10);
+    }
+  }
+
+  // pt = interpolated {x, y} where the ball pierced the wall plane.
+  blocks(pt) {
+    for (const p of this.players) {
+      const footY = p.jumpY;
+      const headY = p.jumpY + p.height;
+      const overlapsX = Math.abs(pt.x - p.x) < p.halfWidth + BALL_R;
+      const overlapsY = pt.y + BALL_R > footY && pt.y - BALL_R < headY;
+      if (overlapsX && overlapsY) return true;
+    }
+    return false;
+  }
+
+  destroy() {
+    for (const p of this.players) p.spr.destroy();
+    this.players = [];
+  }
+}

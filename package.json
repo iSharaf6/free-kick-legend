@@ -1,0 +1,19 @@
+{
+  "name": "free-kick-legend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Free Kick Legend - swipe-to-shoot football game for web portals",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173 --strictPort",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "phaser": "^3.90.0"
+  },
+  "devDependencies": {
+    "vite": "^8.1.4"
+  }
+}
