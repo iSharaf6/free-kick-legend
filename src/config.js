@@ -12,10 +12,11 @@ export const RENDER_H = GAME_H * RENDER_SCALE;
 
 // Pseudo-3D camera: x = lateral, y = up, z = depth away from camera.
 export const CAM = {
-  focal: 260,     // pixels per meter at 1m depth
+  focal: 316,     // pixels per meter at 1m depth - tighter framing so the
+                  // goal, keeper and wall read big instead of miniature
   height: 2.3,    // camera height above the pitch
   horizonY: 95,   // screen y of the horizon line
-  ballDist: 6.5,  // camera sits this far behind the ball
+  ballDist: 5.7,  // camera sits this far behind the ball
   x: 0            // lateral camera position, set per level
 };
 

@@ -8,7 +8,7 @@ import { ProgressScene } from './scenes/ProgressScene.js';
 import { GameScene } from './scenes/GameScene.js';
 import { PuppetLabScene } from './scenes/PuppetLabScene.js';
 
-new Phaser.Game({
+const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'app',
   backgroundColor: '#071018',
@@ -40,3 +40,6 @@ new Phaser.Game({
   },
   scene: [BootScene, MenuScene, LevelSelectScene, LockerScene, ProgressScene, GameScene, PuppetLabScene]
 });
+
+// Debug handle used by automated playtests; harmless in production.
+window.__game = game;

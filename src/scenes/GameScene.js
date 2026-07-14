@@ -113,6 +113,16 @@ export class GameScene extends Phaser.Scene {
       .setBlendMode('ADD');
     this.buildCrowdWave();
     this.drawPitch();
+    // Floodlight beams angled onto the penalty area sell the night-match
+    // lighting; the vignette pulls focus toward the goalmouth.
+    const beams = this.add.graphics().setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
+    beams.fillStyle(PAL.flood, 0.05);
+    beams.fillTriangle(48, 14, 82, 14, 262, 236);
+    beams.fillTriangle(398, 14, 432, 14, 218, 236);
+    beams.fillStyle(PAL.flood, 0.035);
+    beams.fillTriangle(128, 14, 154, 14, 248, 208);
+    beams.fillTriangle(326, 14, 352, 14, 232, 208);
+    this.add.image(0, 0, 'vignette').setOrigin(0, 0).setDepth(1950);
     this.drawGoal();
     this.drawTargetZone();
 
@@ -138,10 +148,10 @@ export class GameScene extends Phaser.Scene {
     this.shadowSpr = this.add.image(0, 0, 'shadow');
 
     const ballStart = project(this.ball.x, this.ball.y, this.ball.z);
-    this.kicker = new Kicker(this, ballStart.x - 20, ballStart.y + 14, {
+    this.kicker = new Kicker(this, ballStart.x - 23, ballStart.y + 15, {
       kitId: this.loadout.kit,
       pose: 'ready',
-      scale: 2.05,
+      scale: 2.35,
       depth: 1260,
       ambient: !this.settings.reducedMotion,
       reducedMotion: this.settings.reducedMotion
@@ -339,17 +349,31 @@ export class GameScene extends Phaser.Scene {
     const frame = this.add.graphics().setDepth(1000 - z * 10 + 2);
     const s = project(0, 0, z).s;
     const lw = Math.max(Math.round(POST_R * 2 * s), 2);
-    frame.lineStyle(lw, 0xf8f8f4, 1);
     const bl = project(-HW, 0, z);
     const tl = project(-HW, GOAL_H, z);
     const tr = project(HW, GOAL_H, z);
     const br = project(HW, 0, z);
+    // dark under-stroke so the white frame pops off the crowd
+    frame.lineStyle(lw + 2, 0x131b25, 0.9);
+    frame.beginPath();
+    frame.moveTo(bl.x + 1, bl.y + 1);
+    frame.lineTo(tl.x + 1, tl.y + 1);
+    frame.lineTo(tr.x + 1, tr.y + 1);
+    frame.lineTo(br.x + 1, br.y + 1);
+    frame.strokePath();
+    frame.lineStyle(lw, 0xf8f8f4, 1);
     frame.beginPath();
     frame.moveTo(bl.x, bl.y);
     frame.lineTo(tl.x, tl.y);
     frame.lineTo(tr.x, tr.y);
     frame.lineTo(br.x, br.y);
     frame.strokePath();
+    // back stanchions give the frame its 3D structure
+    const tlb = project(-HW, GOAL_H * 0.92, zb);
+    const trb = project(HW, GOAL_H * 0.92, zb);
+    frame.lineStyle(1, 0xb9c2cc, 0.75);
+    frame.lineBetween(tl.x, tl.y, tlb.x, tlb.y);
+    frame.lineBetween(tr.x, tr.y, trb.x, trb.y);
     // 1px shading under the crossbar
     frame.lineStyle(1, 0x9aa0a8, 1);
     frame.lineBetween(tl.x + lw, tl.y + lw, tr.x - lw, tr.y + lw);
@@ -467,27 +491,34 @@ export class GameScene extends Phaser.Scene {
         fontFamily: FONT, fontSize: '8px', color: '#f3e7c3', letterSpacing: 0.2
       }).setDepth(2000);
 
+      // Slim one-line strip; fades away while the shot is live so the bottom
+      // of the pitch belongs to the ball, not a UI slab.
       const objectivePlate = this.add.graphics().setDepth(1975);
-      drawPanel(objectivePlate, 137, GAME_H - 39, 337, 34, {
+      drawPanel(objectivePlate, 137, GAME_H - 27, 337, 22, {
         fill: PAL.panel, border: PAL.borderDark, corner: PAL.goldDark, alpha: 0.93
       });
-      bodyText(this, 148, GAME_H - 29, 'OBJECTIVE', {
+      const objectiveLabel = bodyText(this, 148, GAME_H - 16, 'OBJECTIVE', {
         fontFamily: FONT, fontSize: '6px', color: '#f3c449', letterSpacing: 0.45
       }).setDepth(2000);
-      bodyText(this, 148, GAME_H - 17, this.level.objective?.label || 'Score the free kick', {
-        fontSize: '7px', color: '#d7dfda', wordWrap: { width: 260 }, letterSpacing: 0.15
+      const objectiveCopy = bodyText(this, 207, GAME_H - 16, this.level.objective?.label || 'Score the free kick', {
+        fontSize: '7px', color: '#d7dfda', letterSpacing: 0.15
       }).setDepth(2000);
+      this.objectiveUi = [objectivePlate, objectiveLabel, objectiveCopy];
 
       const needed = Math.max(1, this.level.objective?.goals || 1);
       if (needed > 1) {
-        this.objectiveProgressTxt = bodyText(this, 460, GAME_H - 22, `0/${needed}`, {
+        this.objectiveProgressTxt = bodyText(this, 464, GAME_H - 16, `0/${needed}`, {
           originX: 1, fontFamily: FONT, fontSize: '9px', color: '#f3c449'
         }).setDepth(2000);
+        this.objectiveUi.push(this.objectiveProgressTxt);
       }
       this.attemptIcons = [];
+      // Cosmetic balls ship at several native sizes (12px pixel art, 57px HD),
+      // so size the HUD icons from the texture instead of a fixed scale.
+      const iconTexW = this.textures.get(this.ballTexture).getSourceImage()?.width || 12;
       for (let i = 0; i < this.maxAttempts; i++) {
-        const icon = this.add.image(GAME_W - 14 - i * 15, 17, this.ballTexture)
-          .setScale(0.78).setDepth(2000);
+        const icon = this.add.image(GAME_W - 15 - i * 14, 18, this.ballTexture)
+          .setScale(11 / iconTexW).setDepth(2000);
         this.attemptIcons.push(icon);
       }
       const windX = typeof this.level.wind === 'object' ? Number(this.level.wind.x || 0) : Number(this.level.wind || 0);
@@ -497,7 +528,7 @@ export class GameScene extends Phaser.Scene {
         }).setDepth(2000);
       }
       if (this.levelIndex === 0) {
-        this.hint = crispText(this.add.text(GAME_W / 2 + 30, GAME_H - 65, 'DRAG UP FROM THE BALL  ·  ARC THE SWIPE TO BEND', {
+        this.hint = crispText(this.add.text(GAME_W / 2 + 30, GAME_H - 84, 'DRAG UP FROM THE BALL  ·  ARC THE SWIPE TO BEND', {
           fontFamily: FONT, fontSize: '7px', color: '#f3e7c3', stroke: '#071018', strokeThickness: 2
         }).setOrigin(0.5).setDepth(2000));
         this.tweens.add({ targets: this.hint, alpha: 0.35, duration: 600, yoyo: true, repeat: -1 });
@@ -518,15 +549,16 @@ export class GameScene extends Phaser.Scene {
       this.dailyShotsTxt = shots.valueText;
 
       const objectivePlate = this.add.graphics().setDepth(1975);
-      drawPanel(objectivePlate, 137, GAME_H - 39, 337, 34, {
+      drawPanel(objectivePlate, 137, GAME_H - 27, 337, 22, {
         fill: PAL.panel, border: PAL.goldDark, corner: PAL.gold, alpha: 0.93
       });
-      bodyText(this, 148, GAME_H - 29, 'DAILY BONUS', {
+      const dailyLabel = bodyText(this, 148, GAME_H - 16, 'DAILY BONUS', {
         fontFamily: FONT, fontSize: '6px', color: '#f3c449', letterSpacing: 0.45
       }).setDepth(2000);
-      bodyText(this, 148, GAME_H - 17, 'Hit the moving target for +650 points. Every goal counts.', {
+      const dailyCopy = bodyText(this, 216, GAME_H - 16, 'Hit the moving target for +650. Every goal counts.', {
         fontSize: '7px', color: '#d7dfda', letterSpacing: 0.12
       }).setDepth(2000);
+      this.objectiveUi = [objectivePlate, dailyLabel, dailyCopy];
     } else {
       this.scoreTxt = bodyText(this, GAME_W / 2, 12, `SCORE ${this.score}`, {
         originX: 0.5, fontFamily: FONT, fontSize: '10px', color: '#f3e7c3'
@@ -613,6 +645,9 @@ export class GameScene extends Phaser.Scene {
     if (this.hint) {
       this.hint.destroy();
       this.hint = null;
+    }
+    if (this.objectiveUi) {
+      this.tweens.add({ targets: this.objectiveUi, alpha: 0, duration: 240, ease: 'Sine.easeOut' });
     }
     this.lastShot = shot;
     this.wallClearanceY = null;
@@ -1094,6 +1129,9 @@ export class GameScene extends Phaser.Scene {
     this.simSpeed = 1;
     this.state = 'AIMING';
     this.swipe.enabled = true;
+    if (this.objectiveUi) {
+      this.tweens.add({ targets: this.objectiveUi, alpha: 1, duration: 240, ease: 'Sine.easeIn' });
+    }
     PlatformService.gameplayStart();
     Audio.whistle();
   }

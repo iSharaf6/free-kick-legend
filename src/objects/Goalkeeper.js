@@ -1,8 +1,8 @@
-import { GAME_W, project, GOAL_W, GOAL_H, BALL_R, PHYS } from '../config.js';
-import { PuppetRig, PUPPET_HEIGHT } from './PuppetRig.js';
+import { project, GOAL_W, GOAL_H, BALL_R, PHYS } from '../config.js';
 
 const KEEPER_H = 1.95;
 const DIVE_H = 1.35;
+const GROUND_Y = 0.36;      // body centre height when lying on the turf
 const HALF_GOAL = GOAL_W / 2;
 const STYLE_PROFILES = Object.freeze({
   training: Object.freeze({ reaction: 1.18, error: 1.22, read: -0.06, speed: 0.9, set: 1.08 }),
@@ -43,7 +43,9 @@ function defaultSeed(skill, zGoal) {
 }
 
 // Goalkeeper with deterministic perception and a physical pose-dependent save
-// envelope. The existing onShot/update/saves/catchBall API remains supported.
+// envelope. Rendered entirely with the authored HD sprites: ready crouch,
+// full-stretch dive along an arc, a hard landing that leaves him on the turf,
+// then getting up and jogging back to his line.
 export class Goalkeeper {
   constructor(scene, skill, zGoal, randomOptions = {}) {
     this.scene = scene;
@@ -71,31 +73,12 @@ export class Goalkeeper {
     this.targetY = 1;
     this.diveDir = 1;
     this.catchY = 1;
+    this.landY = GROUND_Y;
+    this.landVy = 0;
+    this.grounded = false;
     this.contactPulse = 0;
     this.idlePhase = this._random() * Math.PI * 2;
     this.spr = scene.add.sprite(0, 0, scene.textures?.exists?.('keeper-hd') ? 'keeper-hd' : 'keeper');
-    this.rig = null;
-    this.groundBody = null;
-    if (scene.matter?.add && scene.textures?.exists?.('puppet-keeper-torso') && options.puppets !== false) {
-      const foot = project(0, 0, this.z);
-      this.groundBody = scene.matter.add.rectangle(GAME_W / 2, foot.y + 8, GAME_W + 80, 12, {
-        isStatic: true,
-        label: 'puppet-ground:keeper',
-        friction: 0.94,
-        restitution: 0.02
-      });
-      this.rig = new PuppetRig(scene, {
-        kind: 'keeper',
-        x: foot.x,
-        y: foot.y,
-        scale: (foot.s * KEEPER_H) / PUPPET_HEIGHT,
-        depth: 1000 - this.z * 10,
-        pose: 'keeper-ready',
-        phase: this.idlePhase,
-        autoResetDelay: 0.78
-      });
-      this.spr.setVisible(false);
-    }
     this.draw();
   }
 
@@ -160,7 +143,6 @@ export class Goalkeeper {
       const stepDt = boundedDt / steps;
       for (let i = 0; i < steps; i++) this._step(stepDt);
     }
-    this.rig?.update(boundedDt);
     this.draw();
   }
 
@@ -207,24 +189,52 @@ export class Goalkeeper {
           this.x = nextX;
         }
 
-        if (this.stateT >= this.diveDuration + 0.18) {
-          this.state = 'recover';
+        if (this.stateT >= this.diveDuration) {
+          // Full stretch reached - now gravity takes over and he comes down.
+          this.state = 'land';
           this.stateT = 0;
+          this.landY = lerp(0.95, clamp(this.targetY, 0.5, 2.45), 1);
+          this.landVy = 0;
+          this.grounded = false;
         }
         break;
       }
 
-      case 'recover':
+      case 'land':
         this.stateT += dt;
         this.pose = 'dive';
-        this.diveP = Math.max(0, this.diveP - dt / 0.32);
-        this.x += (0 - this.x) * Math.min(dt * 4.5, 1);
-        if (this.diveP <= 0.01) {
+        if (!this.grounded) {
+          this.landVy += 9.2 * dt;
+          this.landY -= this.landVy * dt;
+          // A touch of slide keeps the momentum honest.
+          this.x = clamp(this.x + this.moveVx * dt * 0.5, -HALF_GOAL + 0.4, HALF_GOAL - 0.4);
+          this.moveVx *= Math.max(0, 1 - 3.2 * dt);
+          if (this.landY <= GROUND_Y) {
+            this.landY = GROUND_Y;
+            this.grounded = true;
+            this.contactPulse = Math.max(this.contactPulse, 0.55);
+          }
+        } else {
+          this.x = clamp(this.x + this.moveVx * dt * 0.35, -HALF_GOAL + 0.4, HALF_GOAL - 0.4);
+          this.moveVx *= Math.max(0, 1 - 5 * dt);
+          if (this.stateT >= 0.55) {
+            this.state = 'return';
+            this.pose = 'idle';
+            this.stateT = 0;
+          }
+        }
+        break;
+
+      case 'return':
+        this.stateT += dt;
+        this.pose = 'idle';
+        this.x += (0 - this.x) * Math.min(dt * 3, 1);
+        if (Math.abs(this.x) <= 0.06) {
           this.state = 'idle';
-          this.pose = 'idle';
           this.stateT = 0;
-          this.x = 0;
+          this.x = clamp(this.x, -0.06, 0.06);
           this.moveVx = 0;
+          this.diveP = 0;
         }
         break;
 
@@ -242,47 +252,25 @@ export class Goalkeeper {
 
   getContactPose() {
     const progress = smoothstep(this.diveP);
-    const y = this.state === 'catch'
-      ? this.catchY
-      : lerp(0.95, clamp(this.targetY, 0.5, 2.45), progress);
+    let y;
+    if (this.state === 'catch') {
+      y = this.catchY;
+    } else if (this.state === 'land') {
+      y = this.landY;
+    } else {
+      y = lerp(0.95, clamp(this.targetY, 0.5, 2.45), progress);
+    }
     return {
       state: this.state,
       x: this.x,
       y,
-      progress,
+      progress: this.state === 'land' ? 1 : progress,
       direction: this.diveDir
     };
   }
 
   draw() {
-    if (this.rig) {
-      this.spr.setVisible(false);
-      if (!this.rig.isControlled) return;
-      const contact = this.getContactPose();
-      if (this.pose === 'dive' || this.state === 'recover') {
-        const root = project(this.x, contact.y, this.z);
-        this.rig.setPose({
-          root: { x: root.x, y: root.y },
-          pose: 'keeper-dive',
-          direction: this.diveDir,
-          progress: contact.progress,
-          phase: this.idleClock * 2
-        });
-      } else {
-        const foot = project(this.x, 0, this.z);
-        this.rig.setPose({
-          x: foot.x,
-          y: foot.y,
-          root: null,
-          pose: this.pose === 'catch' ? 'keeper-catch' : 'keeper-ready',
-          direction: this.diveDir,
-          progress: 0,
-          phase: this.idleClock * 2 + this.idlePhase
-        });
-      }
-      return;
-    }
-    if (this.pose === 'dive' || this.state === 'recover') {
+    if (this.pose === 'dive') {
       const contact = this.getContactPose();
       const pos = project(this.x, contact.y, this.z);
       const authoredRight = this.diveDir > 0 && this.scene.textures?.exists?.('keeper-dive-right-hd');
@@ -295,10 +283,18 @@ export class Goalkeeper {
       this.spr.setPosition(pos.x, pos.y);
       const textureH = this.spr.texture?.source?.[0]?.height || 9;
       const baseScale = (pos.s * DIVE_H) / textureH;
-      const extension = this.reducedMotion ? 1 : 0.92 + contact.progress * 0.08;
       const pulse = this.reducedMotion ? 1 : 1 + this.contactPulse * 0.06;
-      this.spr.setScale(baseScale * extension * pulse, baseScale * (2 - extension) * pulse);
-      this.spr.setRotation?.(this.reducedMotion ? 0 : this.diveDir * (1 - contact.progress) * 0.06);
+      if (this.state === 'land') {
+        // Grounded: settle flat with a small impact squash on touchdown.
+        const squash = this.reducedMotion || !this.grounded ? 1 : 1 - Math.min(this.contactPulse, 0.5) * 0.12;
+        this.spr.setScale(baseScale * pulse, baseScale * squash * pulse);
+        this.spr.setRotation?.(0);
+      } else {
+        // Mid-air: reach for the ball, arcing the body into the dive.
+        const extension = this.reducedMotion ? 1 : 0.92 + contact.progress * 0.08;
+        this.spr.setScale(baseScale * extension * pulse, baseScale * (2 - extension) * pulse);
+        this.spr.setRotation?.(this.reducedMotion ? 0 : this.diveDir * (1 - contact.progress) * 0.06);
+      }
     } else {
       const pos = project(this.x, 0, this.z);
       const texture = this.pose === 'catch'
@@ -311,10 +307,11 @@ export class Goalkeeper {
       const baseScale = (pos.s * KEEPER_H) / textureH;
       const setting = !this.reducedMotion && this.state === 'set';
       const reading = !this.reducedMotion && this.state === 'read';
+      const rising = !this.reducedMotion && this.state === 'return' && this.stateT < 0.22;
       const pulse = this.reducedMotion ? 1 : 1 + this.contactPulse * 0.06;
       this.spr.setScale(
-        baseScale * (setting ? 1.055 : reading ? 1.018 : 1) * pulse,
-        baseScale * (setting ? 0.925 : reading ? 0.985 : 1) * pulse
+        baseScale * (setting ? 1.055 : reading ? 1.018 : rising ? 1.04 : 1) * pulse,
+        baseScale * (setting ? 0.925 : reading ? 0.985 : rising ? 0.94 : 1) * pulse
       );
       this.spr.setRotation?.(
         this.reducedMotion ? 0 : this.diveDir * (setting ? 0.018 : reading ? 0.008 : 0)
@@ -331,7 +328,7 @@ export class Goalkeeper {
     if (this.state === 'catch') return { result: 'catch', part: 'hands', distance: 0 };
 
     const pose = this.getContactPose();
-    const isDiving = this.state === 'dive' || this.state === 'recover';
+    const isDiving = this.state === 'dive' || this.state === 'land';
     const shapes = isDiving
       ? [
           {
@@ -386,29 +383,17 @@ export class Goalkeeper {
     this.catchY = clamp(pt?.y ?? 1, 0.35, 2.15);
     this.x = clamp(pt?.x ?? this.x, -HALF_GOAL + 0.5, HALF_GOAL - 0.5);
     this.moveVx = 0;
-    this.impact(pt, null, false);
+    this.impact(pt, null);
   }
 
-  impact(pt = null, ball = null, ragdoll = true) {
+  impact(pt = null, ball = null) {
     this.contactPulse = 1;
     this.spr.setTint?.(0xfff3c4);
     this.scene.time?.delayedCall?.(95, () => this.spr?.clearTint?.());
-    if (ragdoll && this.rig && pt) {
-      const screen = project(pt.x, pt.y, this.z);
-      const direction = Math.sign(ball?.vx || pt.x - this.x || this.diveDir) || 1;
-      this.rig.triggerRagdoll(screen, {
-        x: Math.max(-4.5, Math.min(4.5, (ball?.vx || 0) * 0.2 + direction * 0.9)),
-        y: Math.max(-4.2, Math.min(1, -(Math.abs(ball?.vy || 0) * 0.13 + Math.abs(ball?.vz || 0) * 0.03 + 0.45)))
-      });
-      const standing = project(0, 0, this.z);
-      this.rig.setPose({
-        x: standing.x,
-        y: standing.y,
-        root: null,
-        pose: 'keeper-ready',
-        direction: 1,
-        progress: 0
-      });
+    // A parry knocks some momentum out of the dive so the deflection reads.
+    if (ball && (this.state === 'dive' || this.state === 'land')) {
+      this.moveVx *= 0.4;
+      this.landVy = Math.max(this.landVy, 1.2);
     }
   }
 
@@ -423,26 +408,16 @@ export class Goalkeeper {
     this.targetX = 0;
     this.targetY = 1;
     this.catchY = 1;
+    this.landY = GROUND_Y;
+    this.landVy = 0;
+    this.grounded = false;
     this.contactPulse = 0;
     this.spr.clearTint?.();
     this.spr.setRotation?.(0);
-    const foot = project(0, 0, this.z);
-    this.rig?.reset({
-      x: foot.x,
-      y: foot.y,
-      root: null,
-      pose: 'keeper-ready',
-      direction: 1,
-      progress: 0
-    });
     this.draw();
   }
 
   destroy() {
-    this.rig?.destroy();
-    if (this.groundBody) this.scene.matter?.world?.remove(this.groundBody, true);
-    this.rig = null;
-    this.groundBody = null;
     this.spr.destroy();
   }
 }

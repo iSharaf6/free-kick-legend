@@ -59,6 +59,7 @@ export class BootScene extends Phaser.Scene {
     this.makeCrowd();
     this.makeStadiumBackdrop();
     this.makeGrassNoise();
+    this.makeVignette();
 
     PlatformService.loadingStart();
     PlatformService.init().finally(() => {
@@ -280,5 +281,19 @@ export class BootScene extends Phaser.Scene {
     }
     g.generateTexture('grass-noise', GAME_W, h);
     g.destroy();
+  }
+
+  // Soft radial darkening toward the corners. Reads as stadium lighting and
+  // pulls the eye to the goalmouth; drawn under the HUD, over the pitch.
+  makeVignette() {
+    const c = this.textures.createCanvas('vignette', GAME_W, GAME_H);
+    const ctx = c.context;
+    const grd = ctx.createRadialGradient(GAME_W / 2, 148, 88, GAME_W / 2, 148, 306);
+    grd.addColorStop(0, 'rgba(4,8,14,0)');
+    grd.addColorStop(0.72, 'rgba(4,8,14,0.10)');
+    grd.addColorStop(1, 'rgba(4,8,14,0.42)');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, GAME_W, GAME_H);
+    c.refresh();
   }
 }

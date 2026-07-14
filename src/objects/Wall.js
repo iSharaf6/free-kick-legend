@@ -1,5 +1,4 @@
-import { GAME_W, project, PLAYER_H, BALL_R, PHYS } from '../config.js';
-import { PuppetRig, PUPPET_HEIGHT } from './PuppetRig.js';
+import { project, PLAYER_H, BALL_R, PHYS } from '../config.js';
 
 const SPACING = 0.58;      // shoulder-to-shoulder without sealing the goal
 const JUMP_GRAVITY = 11;
@@ -21,7 +20,8 @@ function deterministicBuild(index, count) {
 }
 
 // The defensive wall: a row of defenders that jumps as the ball arrives.
-// A well-timed low shot can sneak under a jumping wall.
+// A well-timed low shot can sneak under a jumping wall. Rendered with the
+// authored HD defender sprite; a block knocks the hit man into a flinch.
 export class Wall {
   constructor(scene, count, zWall, centerX, options = {}) {
     this.scene = scene;
@@ -30,21 +30,6 @@ export class Wall {
     this.jumped = false;
     this.clock = 0;
     this.rng = typeof options === 'function' ? options : options?.rng;
-    this.puppetsEnabled = Boolean(
-      scene.matter?.add &&
-      scene.textures?.exists?.('puppet-wall-torso') &&
-      options?.puppets !== false
-    );
-    this.groundBody = null;
-    if (this.puppetsEnabled) {
-      const groundY = project(centerX, 0, zWall).y + 3;
-      this.groundBody = scene.matter.add.rectangle(GAME_W / 2, groundY + 5, GAME_W + 80, 10, {
-        isStatic: true,
-        label: 'puppet-ground:wall',
-        friction: 0.9,
-        restitution: 0.02
-      });
-    }
     this.players = [];
     for (let i = 0; i < count; i++) {
       const x = centerX + (i - (count - 1) / 2) * SPACING;
@@ -56,21 +41,11 @@ export class Wall {
         ? 3.55 + Math.max(0, Math.min(1, Number(this.rng()) || 0)) * 0.60
         : deterministicJumpSpeed(i, count);
       const build = deterministicBuild(i, count);
-      const screen = project(x, 0, zWall);
-      const rig = this.puppetsEnabled
-        ? new PuppetRig(scene, {
-            kind: 'wall',
-            x: screen.x,
-            y: screen.y,
-            scale: (screen.s * build.height) / PUPPET_HEIGHT,
-            depth: 1000 - zWall * 10,
-            pose: 'wall-idle',
-            phase: i * 0.72,
-            autoResetDelay: 0.72
-          })
-        : null;
-      if (rig) spr.setVisible(false);
-      this.players.push({ x, jumpY: 0, vy: 0, jumpSpeed, spr, rig, index: i, ...build });
+      this.players.push({
+        x, jumpY: 0, vy: 0, jumpSpeed, spr, index: i,
+        flinch: 0, flinchDir: 1,
+        ...build
+      });
     }
     this.draw();
   }
@@ -91,7 +66,6 @@ export class Wall {
     );
     const stepDt = boundedDt / steps;
     for (let i = 0; i < steps; i++) this.step(stepDt);
-    for (const p of this.players) p.rig?.update(boundedDt);
     this.draw();
   }
 
@@ -105,6 +79,7 @@ export class Wall {
           p.vy = 0;
         }
       }
+      if (p.flinch > 0) p.flinch = Math.max(0, p.flinch - dt * 2.4);
     }
   }
 
@@ -113,17 +88,14 @@ export class Wall {
       const pos = project(p.x, p.jumpY, this.z);
       p.spr.setPosition(pos.x, pos.y);
       const textureH = p.spr.texture?.source?.[0]?.height || 28;
-      p.spr.setScale((pos.s * p.height) / textureH);
+      const baseScale = (pos.s * p.height) / textureH;
+      // Impact flinch tips the hit defender from the boots; a faint idle sway
+      // keeps the line alive while they wait on the whistle.
+      const sway = p.jumpY > 0 ? 0 : Math.sin(this.clock * 1.5 + p.index * 0.9) * 0.012;
+      const lean = p.flinchDir * p.flinch * 0.32;
+      p.spr.setRotation?.(sway + lean);
+      p.spr.setScale(baseScale, baseScale * (1 - p.flinch * 0.07));
       p.spr.setDepth(1000 - this.z * 10);
-      if (p.rig?.isControlled) {
-        p.rig.setPose({
-          x: pos.x,
-          y: pos.y,
-          root: null,
-          pose: p.jumpY > 0 ? 'wall-jump' : 'wall-idle',
-          phase: this.clock * 2.1 + p.index * 0.72
-        });
-      }
     }
   }
 
@@ -146,32 +118,18 @@ export class Wall {
 
   impact(contact, pt, ball) {
     const p = contact?.player || this.players[contact?.index];
-    if (!p?.rig) return false;
-    const screen = project(pt.x, pt.y, this.z);
-    const side = Math.sign(pt.x - p.x) || Math.sign(ball?.vx) || 1;
-    const impulse = {
-      x: Math.max(-4.2, Math.min(4.2, (ball?.vx || 0) * 0.22 + side * 0.8)),
-      y: Math.max(-4.2, Math.min(1, -(Math.abs(ball?.vy || 0) * 0.15 + Math.abs(ball?.vz || 0) * 0.035 + 0.5)))
-    };
-    p.rig.triggerRagdoll(screen, impulse);
-    const standing = project(p.x, 0, this.z);
-    p.rig.setPose({
-      x: standing.x,
-      y: standing.y,
-      root: null,
-      pose: 'wall-idle',
-      phase: this.clock * 2.1 + p.index * 0.72
-    });
+    if (!p) return false;
+    p.flinch = 1;
+    p.flinchDir = Math.sign(ball?.vx || pt.x - p.x || 1) || 1;
+    // A mid-air hit chops the jump so the defender drops with the deflection.
+    if (p.jumpY > 0) p.vy = Math.min(p.vy, 0.4);
+    p.spr.setTint?.(0xfff3c4);
+    this.scene.time?.delayedCall?.(95, () => p.spr?.clearTint?.());
     return true;
   }
 
   destroy() {
-    for (const p of this.players) {
-      p.rig?.destroy();
-      p.spr.destroy();
-    }
-    if (this.groundBody) this.scene.matter?.world?.remove(this.groundBody, true);
-    this.groundBody = null;
+    for (const p of this.players) p.spr.destroy();
     this.players = [];
   }
 }
