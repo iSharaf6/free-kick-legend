@@ -711,7 +711,9 @@ export class GameScene extends Phaser.Scene {
     if (this.wall && ball.crossed(this.zWall)) {
       const pt = ball.pointAt(this.zWall);
       this.wallClearanceY = pt.y;
-      if (this.wall.blocks(pt)) {
+      const wallContact = this.wall.contact(pt);
+      if (wallContact) {
+        this.wall.impact(wallContact, pt, ball);
         ball.vz *= -0.25;
         ball.vx = -ball.vx * 0.32 + Math.sign(pt.x - (this.wall.centerX || 0) || 1) * 0.9;
         ball.vy = Math.min(ball.vy * 0.4 + 1.5, 5);
@@ -740,7 +742,7 @@ export class GameScene extends Phaser.Scene {
         return;
       }
       if (contact?.result === 'parry') {
-        this.keeper.impact();
+        this.keeper.impact(pt, ball);
         ball.vz = -(6.5 + this.keeper.skill * 2);
         ball.vx += Math.sign(pt.x - this.keeper.x || this.keeper.diveDir) * (3.2 + this.keeper.skill * 1.8);
         ball.vy = Math.max(ball.vy * 0.25, 2.8);

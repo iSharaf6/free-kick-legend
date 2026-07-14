@@ -6,6 +6,7 @@ import { LevelSelectScene } from './scenes/LevelSelectScene.js';
 import { LockerScene } from './scenes/LockerScene.js';
 import { ProgressScene } from './scenes/ProgressScene.js';
 import { GameScene } from './scenes/GameScene.js';
+import { PuppetLabScene } from './scenes/PuppetLabScene.js';
 
 new Phaser.Game({
   type: Phaser.AUTO,
@@ -26,5 +27,16 @@ new Phaser.Game({
   input: {
     activePointers: 2
   },
-  scene: [BootScene, MenuScene, LevelSelectScene, LockerScene, ProgressScene, GameScene]
+  physics: {
+    default: 'matter',
+    matter: {
+      gravity: { x: 0, y: 0.82 },
+      enableSleeping: true,
+      positionIterations: 8,
+      velocityIterations: 6,
+      constraintIterations: 4,
+      debug: false
+    }
+  },
+  scene: [BootScene, MenuScene, LevelSelectScene, LockerScene, ProgressScene, GameScene, PuppetLabScene]
 });

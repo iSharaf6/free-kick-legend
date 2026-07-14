@@ -1,4 +1,5 @@
-import { project, PLAYER_H, BALL_R, PHYS } from '../config.js';
+import { GAME_W, project, PLAYER_H, BALL_R, PHYS } from '../config.js';
+import { PuppetRig, PUPPET_HEIGHT } from './PuppetRig.js';
 
 const SPACING = 0.58;      // shoulder-to-shoulder without sealing the goal
 const JUMP_GRAVITY = 11;
@@ -23,10 +24,27 @@ function deterministicBuild(index, count) {
 // A well-timed low shot can sneak under a jumping wall.
 export class Wall {
   constructor(scene, count, zWall, centerX, options = {}) {
+    this.scene = scene;
     this.z = zWall;
     this.centerX = centerX;
     this.jumped = false;
+    this.clock = 0;
     this.rng = typeof options === 'function' ? options : options?.rng;
+    this.puppetsEnabled = Boolean(
+      scene.matter?.add &&
+      scene.textures?.exists?.('puppet-wall-torso') &&
+      options?.puppets !== false
+    );
+    this.groundBody = null;
+    if (this.puppetsEnabled) {
+      const groundY = project(centerX, 0, zWall).y + 3;
+      this.groundBody = scene.matter.add.rectangle(GAME_W / 2, groundY + 5, GAME_W + 80, 10, {
+        isStatic: true,
+        label: 'puppet-ground:wall',
+        friction: 0.9,
+        restitution: 0.02
+      });
+    }
     this.players = [];
     for (let i = 0; i < count; i++) {
       const x = centerX + (i - (count - 1) / 2) * SPACING;
@@ -38,7 +56,21 @@ export class Wall {
         ? 3.55 + Math.max(0, Math.min(1, Number(this.rng()) || 0)) * 0.60
         : deterministicJumpSpeed(i, count);
       const build = deterministicBuild(i, count);
-      this.players.push({ x, jumpY: 0, vy: 0, jumpSpeed, spr, ...build });
+      const screen = project(x, 0, zWall);
+      const rig = this.puppetsEnabled
+        ? new PuppetRig(scene, {
+            kind: 'wall',
+            x: screen.x,
+            y: screen.y,
+            scale: (screen.s * build.height) / PUPPET_HEIGHT,
+            depth: 1000 - zWall * 10,
+            pose: 'wall-idle',
+            phase: i * 0.72,
+            autoResetDelay: 0.72
+          })
+        : null;
+      if (rig) spr.setVisible(false);
+      this.players.push({ x, jumpY: 0, vy: 0, jumpSpeed, spr, rig, index: i, ...build });
     }
     this.draw();
   }
@@ -52,12 +84,14 @@ export class Wall {
   update(dt) {
     if (!Number.isFinite(dt) || dt <= 0) return;
     const boundedDt = Math.min(dt, PHYS.maxFrameDt);
+    this.clock += boundedDt;
     const steps = Math.min(
       PHYS.maxSubsteps,
       Math.max(1, Math.ceil(boundedDt / PHYS.fixedStep - 1e-8))
     );
     const stepDt = boundedDt / steps;
     for (let i = 0; i < steps; i++) this.step(stepDt);
+    for (const p of this.players) p.rig?.update(boundedDt);
     this.draw();
   }
 
@@ -81,23 +115,63 @@ export class Wall {
       const textureH = p.spr.texture?.source?.[0]?.height || 28;
       p.spr.setScale((pos.s * p.height) / textureH);
       p.spr.setDepth(1000 - this.z * 10);
+      if (p.rig?.isControlled) {
+        p.rig.setPose({
+          x: pos.x,
+          y: pos.y,
+          root: null,
+          pose: p.jumpY > 0 ? 'wall-jump' : 'wall-idle',
+          phase: this.clock * 2.1 + p.index * 0.72
+        });
+      }
     }
   }
 
   // pt = interpolated {x, y} where the ball pierced the wall plane.
-  blocks(pt) {
-    for (const p of this.players) {
+  contact(pt) {
+    for (let index = 0; index < this.players.length; index++) {
+      const p = this.players[index];
       const footY = p.jumpY;
       const headY = p.jumpY + p.height;
       const overlapsX = Math.abs(pt.x - p.x) < p.halfWidth + BALL_R;
       const overlapsY = pt.y + BALL_R > footY && pt.y - BALL_R < headY;
-      if (overlapsX && overlapsY) return true;
+      if (overlapsX && overlapsY) return { player: p, index };
     }
-    return false;
+    return null;
+  }
+
+  blocks(pt) {
+    return Boolean(this.contact(pt));
+  }
+
+  impact(contact, pt, ball) {
+    const p = contact?.player || this.players[contact?.index];
+    if (!p?.rig) return false;
+    const screen = project(pt.x, pt.y, this.z);
+    const side = Math.sign(pt.x - p.x) || Math.sign(ball?.vx) || 1;
+    const impulse = {
+      x: Math.max(-4.2, Math.min(4.2, (ball?.vx || 0) * 0.22 + side * 0.8)),
+      y: Math.max(-4.2, Math.min(1, -(Math.abs(ball?.vy || 0) * 0.15 + Math.abs(ball?.vz || 0) * 0.035 + 0.5)))
+    };
+    p.rig.triggerRagdoll(screen, impulse);
+    const standing = project(p.x, 0, this.z);
+    p.rig.setPose({
+      x: standing.x,
+      y: standing.y,
+      root: null,
+      pose: 'wall-idle',
+      phase: this.clock * 2.1 + p.index * 0.72
+    });
+    return true;
   }
 
   destroy() {
-    for (const p of this.players) p.spr.destroy();
+    for (const p of this.players) {
+      p.rig?.destroy();
+      p.spr.destroy();
+    }
+    if (this.groundBody) this.scene.matter?.world?.remove(this.groundBody, true);
+    this.groundBody = null;
     this.players = [];
   }
 }

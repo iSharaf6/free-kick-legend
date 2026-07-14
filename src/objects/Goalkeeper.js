@@ -1,4 +1,5 @@
-import { project, GOAL_W, GOAL_H, BALL_R, PHYS } from '../config.js';
+import { GAME_W, project, GOAL_W, GOAL_H, BALL_R, PHYS } from '../config.js';
+import { PuppetRig, PUPPET_HEIGHT } from './PuppetRig.js';
 
 const KEEPER_H = 1.95;
 const DIVE_H = 1.35;
@@ -73,6 +74,28 @@ export class Goalkeeper {
     this.contactPulse = 0;
     this.idlePhase = this._random() * Math.PI * 2;
     this.spr = scene.add.sprite(0, 0, scene.textures?.exists?.('keeper-hd') ? 'keeper-hd' : 'keeper');
+    this.rig = null;
+    this.groundBody = null;
+    if (scene.matter?.add && scene.textures?.exists?.('puppet-keeper-torso') && options.puppets !== false) {
+      const foot = project(0, 0, this.z);
+      this.groundBody = scene.matter.add.rectangle(GAME_W / 2, foot.y + 8, GAME_W + 80, 12, {
+        isStatic: true,
+        label: 'puppet-ground:keeper',
+        friction: 0.94,
+        restitution: 0.02
+      });
+      this.rig = new PuppetRig(scene, {
+        kind: 'keeper',
+        x: foot.x,
+        y: foot.y,
+        scale: (foot.s * KEEPER_H) / PUPPET_HEIGHT,
+        depth: 1000 - this.z * 10,
+        pose: 'keeper-ready',
+        phase: this.idlePhase,
+        autoResetDelay: 0.78
+      });
+      this.spr.setVisible(false);
+    }
     this.draw();
   }
 
@@ -127,8 +150,9 @@ export class Goalkeeper {
   }
 
   update(dt, _time = 0) {
+    let boundedDt = 0;
     if (Number.isFinite(dt) && dt > 0) {
-      const boundedDt = Math.min(dt, PHYS.maxFrameDt);
+      boundedDt = Math.min(dt, PHYS.maxFrameDt);
       const steps = Math.min(
         PHYS.maxSubsteps,
         Math.max(1, Math.ceil(boundedDt / PHYS.fixedStep - 1e-8))
@@ -136,6 +160,7 @@ export class Goalkeeper {
       const stepDt = boundedDt / steps;
       for (let i = 0; i < steps; i++) this._step(stepDt);
     }
+    this.rig?.update(boundedDt);
     this.draw();
   }
 
@@ -230,6 +255,33 @@ export class Goalkeeper {
   }
 
   draw() {
+    if (this.rig) {
+      this.spr.setVisible(false);
+      if (!this.rig.isControlled) return;
+      const contact = this.getContactPose();
+      if (this.pose === 'dive' || this.state === 'recover') {
+        const root = project(this.x, contact.y, this.z);
+        this.rig.setPose({
+          root: { x: root.x, y: root.y },
+          pose: 'keeper-dive',
+          direction: this.diveDir,
+          progress: contact.progress,
+          phase: this.idleClock * 2
+        });
+      } else {
+        const foot = project(this.x, 0, this.z);
+        this.rig.setPose({
+          x: foot.x,
+          y: foot.y,
+          root: null,
+          pose: this.pose === 'catch' ? 'keeper-catch' : 'keeper-ready',
+          direction: this.diveDir,
+          progress: 0,
+          phase: this.idleClock * 2 + this.idlePhase
+        });
+      }
+      return;
+    }
     if (this.pose === 'dive' || this.state === 'recover') {
       const contact = this.getContactPose();
       const pos = project(this.x, contact.y, this.z);
@@ -334,13 +386,30 @@ export class Goalkeeper {
     this.catchY = clamp(pt?.y ?? 1, 0.35, 2.15);
     this.x = clamp(pt?.x ?? this.x, -HALF_GOAL + 0.5, HALF_GOAL - 0.5);
     this.moveVx = 0;
-    this.impact();
+    this.impact(pt, null, false);
   }
 
-  impact() {
+  impact(pt = null, ball = null, ragdoll = true) {
     this.contactPulse = 1;
     this.spr.setTint?.(0xfff3c4);
     this.scene.time?.delayedCall?.(95, () => this.spr?.clearTint?.());
+    if (ragdoll && this.rig && pt) {
+      const screen = project(pt.x, pt.y, this.z);
+      const direction = Math.sign(ball?.vx || pt.x - this.x || this.diveDir) || 1;
+      this.rig.triggerRagdoll(screen, {
+        x: Math.max(-4.5, Math.min(4.5, (ball?.vx || 0) * 0.2 + direction * 0.9)),
+        y: Math.max(-4.2, Math.min(1, -(Math.abs(ball?.vy || 0) * 0.13 + Math.abs(ball?.vz || 0) * 0.03 + 0.45)))
+      });
+      const standing = project(0, 0, this.z);
+      this.rig.setPose({
+        x: standing.x,
+        y: standing.y,
+        root: null,
+        pose: 'keeper-ready',
+        direction: 1,
+        progress: 0
+      });
+    }
   }
 
   reset() {
@@ -357,10 +426,23 @@ export class Goalkeeper {
     this.contactPulse = 0;
     this.spr.clearTint?.();
     this.spr.setRotation?.(0);
+    const foot = project(0, 0, this.z);
+    this.rig?.reset({
+      x: foot.x,
+      y: foot.y,
+      root: null,
+      pose: 'keeper-ready',
+      direction: 1,
+      progress: 0
+    });
     this.draw();
   }
 
   destroy() {
+    this.rig?.destroy();
+    if (this.groundBody) this.scene.matter?.world?.remove(this.groundBody, true);
+    this.rig = null;
+    this.groundBody = null;
     this.spr.destroy();
   }
 }

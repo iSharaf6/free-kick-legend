@@ -5,6 +5,7 @@ import { getCosmeticsByCategory } from '../data/cosmetics.js';
 import { PlatformService } from '../systems/PlatformService.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
+import { makePuppetTextures } from '../art/PuppetTextures.js';
 
 const KICKER_POSES = {
   idle: MAPS.kickerIdle,
@@ -51,6 +52,7 @@ export class BootScene extends Phaser.Scene {
 
   create() {
     this.makeCoreSprites();
+    makePuppetTextures(this);
     this.makeCosmeticSprites();
     this.makeIcons();
     this.makeSpark();
