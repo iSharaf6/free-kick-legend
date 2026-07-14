@@ -2,6 +2,8 @@
 
 A polished, portal-ready pixel football game built with Phaser 3 and Vite. Draw a swipe to set direction, loft, power, and curl; beat an animated keeper; clear objective-driven cups; and spend earned coins on visual-only matchday customizations.
 
+**[Play Free Kick Legend in your browser](https://isharaf6.github.io/free-kick-legend/)**
+
 ## What is included
 
 - 50 career matches across five cups, with targets, crosswinds, curve challenges, multi-goal finals, and stable-ID progression.
