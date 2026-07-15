@@ -116,8 +116,35 @@ export class Kicker {
     });
 
     this._after(155, token, () => {
+      // Smear the strike: the wind-up pose lingers as a brief afterimage and
+      // the body stretches through contact. Neither frame reads alone - at
+      // full speed they sell one whipping, connected motion.
+      if (!reducedMotion && this.scene.add?.image) {
+        const ghost = this.scene.add.image(this.sprite.x, this.sprite.y, this.sprite.texture.key)
+          .setOrigin(0.5, 1)
+          .setScale(this.sprite.scaleX, this.sprite.scaleY)
+          .setFlipX(this.sprite.flipX)
+          .setAlpha(0.28)
+          .setDepth(this.sprite.depth - 1);
+        this.scene.tweens.add({
+          targets: ghost,
+          alpha: 0,
+          duration: 90,
+          onComplete: () => ghost.destroy()
+        });
+      }
       this.setPose('strike');
       this.sprite.setPosition(this.x + (reducedMotion ? 0 : 4), this.y - (reducedMotion ? 0 : 1));
+      if (!reducedMotion) {
+        this.sprite.setScale(this.visualScale * 1.14, this.visualScale * 0.93);
+        this.scene.tweens.add({
+          targets: this.sprite,
+          scaleX: this.visualScale,
+          scaleY: this.visualScale,
+          duration: 85,
+          ease: 'Quad.easeOut'
+        });
+      }
       onContact?.();
     });
 

@@ -15,7 +15,10 @@ const game = new Phaser.Game({
   pixelArt: true,
   render: {
     antialias: false,
-    roundPixels: true,
+    // Subpixel motion: sprites keep their chunky nearest-neighbour texels but
+    // their POSITIONS resolve on the 4x HD backing grid instead of snapping
+    // to whole logical pixels, so flight, dives and swipes move 4x finer.
+    roundPixels: false,
     powerPreference: 'high-performance'
   },
   scale: {

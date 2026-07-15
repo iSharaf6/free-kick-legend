@@ -147,6 +147,14 @@ export class GameScene extends Phaser.Scene {
       : (this.textures.exists(this.loadout.ball) ? this.loadout.ball : 'ball');
     this.ballSpr = this.add.image(0, 0, this.ballTexture);
     this.shadowSpr = this.add.image(0, 0, 'shadow');
+    // Smear ghosts: on fast frames the ball is drawn again along its screen
+    // path, filling the gaps between discrete positions. Each single frame
+    // looks wrong; at speed they read as one continuous streak.
+    this.ballGhosts = [0.66, 0.33].map((fraction) => ({
+      fraction,
+      spr: this.add.image(0, 0, this.ballTexture).setVisible(false)
+    }));
+    this.prevBallScreen = null;
 
     const ballStart = project(this.ball.x, this.ball.y, this.ball.z);
     this.kicker = new Kicker(this, ballStart.x - 23, ballStart.y + 15, {
@@ -1165,6 +1173,8 @@ export class GameScene extends Phaser.Scene {
     this.buildWall();
     this.trailPts = [];
     this.trailGfx.clear();
+    this.prevBallScreen = null;
+    this.ballGhosts?.forEach((ghost) => ghost.spr.setVisible(false));
     this.simSpeed = 1;
     this.slowmoT = 0;
     this.state = 'AIMING';
@@ -1391,17 +1401,42 @@ export class GameScene extends Phaser.Scene {
     if (this.ballCaught) {
       this.ballSpr.setVisible(false);
       this.shadowSpr.setVisible(false);
+      this.ballGhosts?.forEach((ghost) => ghost.spr.setVisible(false));
       this.trailGfx.clear();
       return;
     }
     const b = this.ball;
     const pos = project(b.x, b.y, b.z);
     const depth = 1000 - b.z * 10;
+    const ballScale = (pos.s * BALL_R * 2) / (this.ballSpr.texture.source[0]?.width || 12);
     this.ballSpr
       .setPosition(pos.x, pos.y)
-      .setScale((pos.s * BALL_R * 2) / (this.ballSpr.texture.source[0]?.width || 12))
+      .setScale(ballScale)
       .setRotation(b.rot)
       .setDepth(depth);
+
+    // Smear: bridge this frame's travel with interpolated ghost copies once
+    // the ball covers more than a few logical pixels per frame.
+    const prev = this.prevBallScreen;
+    const travel = prev ? Math.hypot(pos.x - prev.x, pos.y - prev.y) : 0;
+    const smearing = !this.settings.reducedMotion && b.flying && prev && travel > 5;
+    for (const ghost of this.ballGhosts) {
+      if (smearing) {
+        ghost.spr
+          .setVisible(true)
+          .setPosition(
+            prev.x + (pos.x - prev.x) * ghost.fraction,
+            prev.y + (pos.y - prev.y) * ghost.fraction
+          )
+          .setScale(ballScale * (0.82 + ghost.fraction * 0.14))
+          .setRotation(b.rot)
+          .setAlpha(0.14 + ghost.fraction * 0.16)
+          .setDepth(depth - 1);
+      } else {
+        ghost.spr.setVisible(false);
+      }
+    }
+    this.prevBallScreen = { x: pos.x, y: pos.y };
 
     const sh = project(b.x, 0, b.z);
     const k = Phaser.Math.Clamp(1 - b.y * 0.1, 0.3, 1);

@@ -43,7 +43,7 @@ export class Wall {
       const build = deterministicBuild(i, count);
       this.players.push({
         x, jumpY: 0, vy: 0, jumpSpeed, spr, index: i,
-        flinch: 0, flinchDir: 1,
+        flinch: 0, flinchDir: 1, landSquash: 0,
         ...build
       });
     }
@@ -77,9 +77,12 @@ export class Wall {
         if (p.jumpY <= 0) {
           p.jumpY = 0;
           p.vy = 0;
+          // Touchdown: a brief squash sells the weight of the landing.
+          p.landSquash = 1;
         }
       }
       if (p.flinch > 0) p.flinch = Math.max(0, p.flinch - dt * 2.4);
+      if (p.landSquash > 0) p.landSquash = Math.max(0, p.landSquash - dt * 6);
     }
   }
 
@@ -94,7 +97,14 @@ export class Wall {
       const sway = p.jumpY > 0 ? 0 : Math.sin(this.clock * 1.5 + p.index * 0.9) * 0.012;
       const lean = p.flinchDir * p.flinch * 0.32;
       p.spr.setRotation?.(sway + lean);
-      p.spr.setScale(baseScale, baseScale * (1 - p.flinch * 0.07));
+      // Smear the jump: elongate with upward velocity, squash on touchdown.
+      // Frozen frames look stretched; in motion they read as explosive hops.
+      const rise = p.jumpY > 0 ? Math.min(Math.max(p.vy, 0) * 0.05, 0.16) : 0;
+      const squash = (p.landSquash || 0) * 0.16;
+      p.spr.setScale(
+        baseScale * (1 - rise * 0.55 + squash * 0.7),
+        baseScale * (1 + rise - squash) * (1 - p.flinch * 0.07)
+      );
       p.spr.setDepth(1000 - this.z * 10);
     }
   }

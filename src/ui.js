@@ -23,7 +23,9 @@ export function configureHdCamera(scene) {
   camera.setViewport(0, 0, RENDER_W, RENDER_H);
   camera.setZoom(RENDER_SCALE);
   camera.centerOn(GAME_W / 2, GAME_H / 2);
-  camera.roundPixels = true;
+  // Subpixel motion: static art sits on integer logical pixels and stays
+  // crisp; moving sprites are allowed quarter-pixel positions on the HD grid.
+  camera.roundPixels = false;
   return camera;
 }
 

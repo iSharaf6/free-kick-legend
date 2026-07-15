@@ -79,6 +79,10 @@ export class Goalkeeper {
     this.contactPulse = 0;
     this.idlePhase = this._random() * Math.PI * 2;
     this.spr = scene.add.sprite(0, 0, scene.textures?.exists?.('keeper-hd') ? 'keeper-hd' : 'keeper');
+    // One-frame afterimage used to smear the explosive first half of a dive.
+    this.ghost = scene.add.sprite(0, 0, scene.textures?.exists?.('keeper-hd') ? 'keeper-hd' : 'keeper');
+    this.ghost.setVisible?.(false);
+    this.prevDraw = null;
     this.draw();
   }
 
@@ -289,13 +293,45 @@ export class Goalkeeper {
         const squash = this.reducedMotion || !this.grounded ? 1 : 1 - Math.min(this.contactPulse, 0.5) * 0.12;
         this.spr.setScale(baseScale * pulse, baseScale * squash * pulse);
         this.spr.setRotation?.(0);
+        this.ghost?.setVisible?.(false);
+        this.prevDraw = null;
       } else {
-        // Mid-air: reach for the ball, arcing the body into the dive.
-        const extension = this.reducedMotion ? 1 : 0.92 + contact.progress * 0.08;
-        this.spr.setScale(baseScale * extension * pulse, baseScale * (2 - extension) * pulse);
-        this.spr.setRotation?.(this.reducedMotion ? 0 : this.diveDir * (1 - contact.progress) * 0.06);
+        // Mid-air smear: the body elongates hard along the dive axis during
+        // the explosive launch and settles to true proportions at full
+        // stretch. The stretched frames look wrong frozen - at speed they
+        // read as one fast, fluid dive.
+        const launch = 1 - contact.progress;
+        const stretch = this.reducedMotion ? 1 : 1 + launch * launch * 0.5;
+        const squash = this.reducedMotion ? 1 : 1 / (1 + launch * launch * 0.3);
+        this.spr.setScale(baseScale * stretch * pulse, baseScale * squash * pulse);
+        this.spr.setRotation?.(this.reducedMotion ? 0 : this.diveDir * launch * 0.06);
+
+        // Afterimage: last frame's pose lingers for one frame at low alpha.
+        const showGhost = !this.reducedMotion && contact.progress < 0.6 && this.prevDraw;
+        if (showGhost) {
+          this.ghost.setVisible?.(true);
+          this.ghost.setTexture?.(this.prevDraw.texture);
+          this.ghost.setOrigin?.(0.5, 0.5);
+          this.ghost.setFlipX?.(this.prevDraw.flipX);
+          this.ghost.setPosition?.(this.prevDraw.x, this.prevDraw.y);
+          this.ghost.setScale?.(this.prevDraw.scaleX, this.prevDraw.scaleY);
+          this.ghost.setAlpha?.(0.24);
+          this.ghost.setDepth?.(1000 - this.z * 10 - 1);
+        } else {
+          this.ghost.setVisible?.(false);
+        }
+        this.prevDraw = {
+          texture: this.spr.texture?.key ?? 'keeper-dive',
+          flipX: Boolean(this.spr.flipX),
+          x: pos.x,
+          y: pos.y,
+          scaleX: baseScale * stretch * pulse,
+          scaleY: baseScale * squash * pulse
+        };
       }
     } else {
+      this.ghost?.setVisible?.(false);
+      this.prevDraw = null;
       const pos = project(this.x, 0, this.z);
       const texture = this.pose === 'catch'
         ? (this.scene.textures?.exists?.('keeper-catch-hd') ? 'keeper-catch-hd' : 'keeper-catch')
@@ -418,6 +454,7 @@ export class Goalkeeper {
   }
 
   destroy() {
+    this.ghost?.destroy?.();
     this.spr.destroy();
   }
 }
