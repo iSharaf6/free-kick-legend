@@ -74,6 +74,78 @@ function smooth(points) {
   });
 }
 
+// The single canonical gesture-to-shot mapping. Everything that describes a
+// shot to the player (live meters, trajectory previews, tutorials) and
+// everything that executes one (release physics, scoring) must go through
+// this function so what you see is exactly what you get.
+// Returns { shot } on success or { invalid: reason }. With { preview: true }
+// the length/direction minimums are skipped so a partial in-progress gesture
+// still reports the exact shot it would produce if released right now.
+export function computeShotFromPath(rawPoints, { preview = false } = {}) {
+  const points = (rawPoints || []).filter((point) => (
+    Number.isFinite(point?.x) && Number.isFinite(point?.y) && Number.isFinite(point?.t)
+  ));
+  if (points.length < 2) return { invalid: 'not-enough-points' };
+
+  const a = points[0];
+  const b = points[points.length - 1];
+  const dx = b.x - a.x;
+  const dy = b.y - a.y; // negative = upward swipe
+  const chord = Math.hypot(dx, dy);
+  if (!preview) {
+    if (chord < SHOT.minSwipePx) return { invalid: 'too-short' };
+    if (-dy < SHOT.minSwipePx * 0.55) return { invalid: 'swipe-up' };
+  }
+  if (chord <= 0) return { invalid: 'too-short' };
+
+  const sampled = smooth(resample(points, SHOT.resampleCount));
+  const duration = Math.max(b.t - a.t, 40);
+  const distance = Math.max(pathLength(sampled), chord);
+  const pxPerMs = distance / duration;
+  const power = clamp(
+    (pxPerMs - SHOT.minSpeedPxMs) / (SHOT.maxSpeedPxMs - SHOT.minSpeedPxMs),
+    0,
+    1
+  );
+
+  // Aggregate signed deviation across the whole gesture. Smoothing plus a
+  // weighted mean rejects single noisy/coalesced pointer samples.
+  let weightedDeviation = 0;
+  let totalWeight = 0;
+  for (let i = 1; i < sampled.length - 1; i++) {
+    const point = sampled[i];
+    const px = point.x - a.x;
+    const py = point.y - a.y;
+    const deviation = (dx * py - dy * px) / chord;
+    const weight = Math.sin(Math.PI * i / (sampled.length - 1));
+    weightedDeviation += deviation * weight;
+    totalWeight += weight;
+  }
+  const curve = totalWeight > 0 ? weightedDeviation / totalWeight : 0;
+  // Follow the visible gesture: a path bowed to screen-right curls right.
+  const rawSpin = clamp(curve / SHOT.spinPx, -1, 1) * SHOT.maxSpin;
+  const spin = Math.abs(rawSpin) < 1e-8 ? 0 : rawSpin;
+
+  const directionScale = 0.78 + power * 0.22;
+  const vx = clamp(dx * SHOT.vxPerPx * directionScale, -SHOT.maxVx, SHOT.maxVx);
+  const vy = clamp(
+    -dy * SHOT.vyPerPx * (0.9 + power * 0.1),
+    SHOT.minVy,
+    SHOT.maxVy
+  );
+
+  return {
+    shot: {
+      vx,
+      vy,
+      vz: SHOT.minVz + power * (SHOT.maxVz - SHOT.minVz),
+      spin,
+      power,
+      gesture: { duration, distance, curve }
+    }
+  };
+}
+
 // Captures one pointer gesture in Phaser's logical game coordinates and maps
 // it to a bounded, device-independent shot. The third argument may be an
 // invalid-shot callback or { onInvalidShot }.
@@ -206,62 +278,8 @@ export class SwipeInput {
 
   _computeShot() {
     this.lastInvalidReason = null;
-    const points = this.samples.filter((point) => (
-      Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.t)
-    ));
-    if (points.length < 2) return this._invalid('not-enough-points');
-
-    const a = points[0];
-    const b = points[points.length - 1];
-    const dx = b.x - a.x;
-    const dy = b.y - a.y; // negative = upward swipe
-    const chord = Math.hypot(dx, dy);
-    if (chord < SHOT.minSwipePx) return this._invalid('too-short');
-    if (-dy < SHOT.minSwipePx * 0.55) return this._invalid('swipe-up');
-
-    const sampled = smooth(resample(points, SHOT.resampleCount));
-    const duration = Math.max(b.t - a.t, 40);
-    const distance = Math.max(pathLength(sampled), chord);
-    const pxPerMs = distance / duration;
-    const power = clamp(
-      (pxPerMs - SHOT.minSpeedPxMs) / (SHOT.maxSpeedPxMs - SHOT.minSpeedPxMs),
-      0,
-      1
-    );
-
-    // Aggregate signed deviation across the whole gesture. Smoothing plus a
-    // weighted mean rejects single noisy/coalesced pointer samples.
-    let weightedDeviation = 0;
-    let totalWeight = 0;
-    for (let i = 1; i < sampled.length - 1; i++) {
-      const point = sampled[i];
-      const px = point.x - a.x;
-      const py = point.y - a.y;
-      const deviation = (dx * py - dy * px) / chord;
-      const weight = Math.sin(Math.PI * i / (sampled.length - 1));
-      weightedDeviation += deviation * weight;
-      totalWeight += weight;
-    }
-    const curve = totalWeight > 0 ? weightedDeviation / totalWeight : 0;
-    // Follow the visible gesture: a path bowed to screen-right curls right.
-    const rawSpin = clamp(curve / SHOT.spinPx, -1, 1) * SHOT.maxSpin;
-    const spin = Math.abs(rawSpin) < 1e-8 ? 0 : rawSpin;
-
-    const directionScale = 0.78 + power * 0.22;
-    const vx = clamp(dx * SHOT.vxPerPx * directionScale, -SHOT.maxVx, SHOT.maxVx);
-    const vy = clamp(
-      -dy * SHOT.vyPerPx * (0.9 + power * 0.1),
-      SHOT.minVy,
-      SHOT.maxVy
-    );
-
-    return {
-      vx,
-      vy,
-      vz: SHOT.minVz + power * (SHOT.maxVz - SHOT.minVz),
-      spin,
-      power,
-      gesture: { duration, distance, curve }
-    };
+    const result = computeShotFromPath(this.samples);
+    if (result.invalid) return this._invalid(result.invalid);
+    return result.shot;
   }
 }

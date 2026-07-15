@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import {
-  GAME_W, GAME_H, RENDER_SCALE, CAM, GOAL_W, GOAL_H, POST_R, BALL_R, WALL_DIST, PHYS, project
+  GAME_W, GAME_H, RENDER_SCALE, CAM, GOAL_W, GOAL_H, POST_R, BALL_R, WALL_DIST, PHYS, SHOT, project
 } from '../config.js';
 import { LEVELS, dailyScenario, randomScenario } from '../data/levels.js';
 import { utcDateKey } from '../data/progression.js';
@@ -9,11 +9,11 @@ import { Ball } from '../objects/Ball.js';
 import { Wall } from '../objects/Wall.js';
 import { Goalkeeper } from '../objects/Goalkeeper.js';
 import { Kicker } from '../objects/Kicker.js';
-import { SwipeInput } from '../systems/SwipeInput.js';
+import { SwipeInput, computeShotFromPath } from '../systems/SwipeInput.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { PlatformService } from '../systems/PlatformService.js';
 import { Audio } from '../systems/AudioSynth.js';
-import { careerStars, scoreShot, targetGeometry } from '../systems/ShotScoring.js';
+import { careerStars, isTopCorner, scoreShot, targetGeometry } from '../systems/ShotScoring.js';
 import { classifyGoalPlane, reboundFromGoalFrame, sweepGoalFrame } from '../systems/GoalFramePhysics.js';
 import {
   makeButton, makeIconButton, makeStatChip, titleText, bodyText,
@@ -91,6 +91,7 @@ export class GameScene extends Phaser.Scene {
     this.wallClearanceY = null;
     this.lastReward = 0;
     this.simSpeed = 1;
+    this.slowmoT = 0;
     this.flightT = 0;
     this.accumulator = 0;
     this.simTime = 0;
@@ -198,16 +199,17 @@ export class GameScene extends Phaser.Scene {
 
     Audio.whistle();
 
-    // Debug hook for automated testing (window.__fkl.shootDebug(vx, vy, vz, spin))
-    window.__fkl = this;
+    // Debug hook for automated testing (window.__fkl.shootDebug(vx, vy, vz, spin));
+    // dev-server only, stripped from production builds.
+    if (import.meta.env.DEV) window.__fkl = this;
     this.onVisibilityChange = () => {
       if (document.hidden) PlatformService.gameplayStop();
       else if (this.state === 'AIMING' || this.state === 'WINDUP' || this.state === 'FLIGHT') PlatformService.gameplayStart();
     };
     document.addEventListener('visibilitychange', this.onVisibilityChange);
 
-    this.events.on('shutdown', () => {
-      if (window.__fkl === this) window.__fkl = null;
+    this.events.once('shutdown', () => {
+      if (import.meta.env.DEV && window.__fkl === this) window.__fkl = null;
       document.removeEventListener('visibilitychange', this.onVisibilityChange);
       PlatformService.gameplayStop();
     });
@@ -582,6 +584,22 @@ export class GameScene extends Phaser.Scene {
       fontFamily: FONT, fontSize: '9px', color: '#f3e7c3',
       stroke: '#071018', strokeThickness: 3
     }).setOrigin(0.5).setDepth(2100).setAlpha(0));
+
+    // Labels for the live gesture meter; drawAim toggles their visibility.
+    const meterX = GAME_W / 2 - 48;
+    const meterY = GAME_H - 48;
+    this.meterUi = [
+      bodyText(this, meterX - 33, meterY + 1, 'LOFT', {
+        fontSize: '5px', color: '#74bde8', letterSpacing: 0.3, originX: 1, originY: 0.5
+      }),
+      bodyText(this, meterX + 1, meterY - 7, 'POWER', {
+        fontSize: '5px', color: '#f3e7c3', letterSpacing: 0.3
+      }),
+      bodyText(this, meterX + 96, meterY + 8, 'CURL', {
+        fontSize: '5px', color: '#d75a3a', letterSpacing: 0.3, originY: 0.5
+      })
+    ];
+    this.meterUi.forEach((label) => label.setDepth(1501).setVisible(false));
     addScanlines(this, 1850, 0.022);
   }
 
@@ -641,6 +659,7 @@ export class GameScene extends Phaser.Scene {
     this.state = 'WINDUP';
     this.flightT = 0;
     this.slowmoUsed = false;
+    this.slowmoT = 0;
     this.swipe.enabled = false;
     if (this.hint) {
       this.hint.destroy();
@@ -685,9 +704,20 @@ export class GameScene extends Phaser.Scene {
     // real-time based and intentionally pauses during result cards.
     const rawDt = Math.min(Math.max(delta, 0), 250) / 1000;
 
+    // Timed bullet time: hold briefly, then ramp smoothly back to full speed.
+    if (this.slowmoT > 0) {
+      this.slowmoT = Math.max(0, this.slowmoT - rawDt);
+      const ramp = 0.14;
+      this.simSpeed = this.slowmoT > ramp
+        ? 0.45
+        : 0.45 + 0.55 * (1 - this.slowmoT / ramp);
+      if (this.slowmoT === 0) this.simSpeed = 1;
+    }
+
     if (this.mode === 'arcade' && !this.over &&
         this.state !== 'OVERLAY' && this.state !== 'RESULT') {
-      this.timeLeft -= rawDt * this.simSpeed;
+      // Wall-clock seconds: cinematic slow motion never stretches the round.
+      this.timeLeft -= rawDt;
       const secs = Math.max(Math.ceil(this.timeLeft), 0);
       this.timerTxt.setText(`${secs}`);
       if (secs <= 10 && secs !== this.lastTickSecond) {
@@ -791,12 +821,19 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // cinematic slow-mo once a shot past the wall looks on target
+    // Bullet time is a spice, not a sauce: a short, timed dip reserved for
+    // shots arrowing at the corners or skimming the bar. Ordinary on-target
+    // shots resolve at full speed so the retry loop stays fast.
     if (!this.settings.reducedMotion && !this.slowmoUsed && ball.z > this.zWall && ball.z < this.zGoal - 2) {
       const p = ball.predictAt(this.zGoal);
       if (p.reached && Math.abs(p.x) < GOAL_W / 2 && p.y < GOAL_H) {
         this.slowmoUsed = true;
-        this.simSpeed = 0.45;
+        const nearPost = Math.abs(p.x) > GOAL_W / 2 - 0.9;
+        const underBar = p.y > GOAL_H - 0.55;
+        if (isTopCorner(p, GOAL_W, GOAL_H) || nearPost || underBar) {
+          this.slowmoT = 0.4;
+          this.simSpeed = 0.45;
+        }
       }
     }
 
@@ -860,6 +897,7 @@ export class GameScene extends Phaser.Scene {
     this.state = 'RESULT';
     PlatformService.gameplayStop();
     this.simSpeed = 1;
+    this.slowmoT = 0;
     this.swipe.enabled = false;
 
     const shotRating = scoreShot({
@@ -994,7 +1032,7 @@ export class GameScene extends Phaser.Scene {
         ? `${rating.label.toUpperCase()}  ·  ${remaining} SHOTS LEFT`
         : `${remaining} SHOTS LEFT  ·  BUILD THE SCORE`
     ));
-    this.time.delayedCall(1350, () => this.resetAttempt());
+    this.time.delayedCall(750, () => this.resetAttempt());
   }
 
   objectiveCheck(outcome, point, rating) {
@@ -1084,7 +1122,8 @@ export class GameScene extends Phaser.Scene {
         attempt: this.attempt,
         attempts: this.maxAttempts,
         objectiveMet: true,
-        shotScore: this.bestShotScore
+        shotScore: this.bestShotScore,
+        goalsRequired: needed
       });
       const coinsBefore = SaveManager.getCoins();
       SaveManager.setStars(this.level.id || this.levelIndex, stars);
@@ -1105,7 +1144,7 @@ export class GameScene extends Phaser.Scene {
         ? check.reason
         : scored ? `${this.goalsThisLevel}/${needed} DONE — ${remaining} SHOTS LEFT` : `${check.reason}  ·  ${remaining} LEFT`;
       this.time.delayedCall(550, () => this.showSwipeHintMessage(message));
-      this.time.delayedCall(1350, () => this.resetAttempt());
+      this.time.delayedCall(750, () => this.resetAttempt());
     }
   }
 
@@ -1127,6 +1166,7 @@ export class GameScene extends Phaser.Scene {
     this.trailPts = [];
     this.trailGfx.clear();
     this.simSpeed = 1;
+    this.slowmoT = 0;
     this.state = 'AIMING';
     this.swipe.enabled = true;
     if (this.objectiveUi) {
@@ -1392,24 +1432,20 @@ export class GameScene extends Phaser.Scene {
 
   drawAim() {
     this.aimGfx.clear();
-    if (this.state !== 'AIMING') return;
-    const pts = this.swipe.activePath;
-    if (pts.length < 2) return;
+    const pts = this.state === 'AIMING' ? this.swipe.activePath : [];
+    const preview = pts.length >= 2 ? computeShotFromPath(pts, { preview: true }).shot : null;
+    this.meterUi?.forEach((label) => label.setVisible(Boolean(preview)));
+    if (!preview) return;
 
-    const a = pts[0];
+    // The meter reads from the exact shot the release would produce - never
+    // from gesture length. A slow long drag truthfully shows low power.
     const b = pts[pts.length - 1];
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const dist = Math.max(Math.hypot(dx, dy), 1);
-    let curve = 0;
-    for (let i = 1; i < pts.length - 1; i++) {
-      const px = pts[i].x - a.x;
-      const py = pts[i].y - a.y;
-      curve += (dx * py - dy * px) / dist;
-    }
-    curve /= Math.max(pts.length - 2, 1);
-    const curlAmount = Phaser.Math.Clamp(Math.abs(curve) / 24, 0, 1);
-    const power = Phaser.Math.Clamp(dist / 135, 0, 1);
+    const power = preview.power;
+    const spin = preview.spin;
+    const curlAmount = Math.abs(spin);
+    const loft = Phaser.Math.Clamp(
+      (preview.vy - SHOT.minVy) / (SHOT.maxVy - SHOT.minVy), 0, 1
+    );
     const mixedColor = Phaser.Display.Color.Interpolate.ColorWithColor(
       Phaser.Display.Color.ValueToColor(0xf3e7c3),
       Phaser.Display.Color.ValueToColor(curlAmount > 0.15 ? 0xf3c449 : 0xffffff),
@@ -1446,13 +1482,23 @@ export class GameScene extends Phaser.Scene {
     const meterX = GAME_W / 2 - 48;
     const meterY = GAME_H - 48;
     this.aimGfx.fillStyle(0x071018, 0.78);
-    this.aimGfx.fillRect(meterX - 3, meterY - 4, 102, 14);
+    this.aimGfx.fillRect(meterX - 36, meterY - 10, 136, 26);
+    // POWER: swipe speed, exactly as the release physics reads it
     this.aimGfx.fillStyle(0x213a52, 1);
     this.aimGfx.fillRect(meterX, meterY, 94, 5);
     this.aimGfx.fillStyle(power > 0.88 ? 0xf3c449 : 0xf3e7c3, 1);
     this.aimGfx.fillRect(meterX, meterY, Math.round(94 * power), 5);
-    const curlX = meterX + 47 + Phaser.Math.Clamp(curve / 24, -1, 1) * 40;
+    // LOFT: vertical bar fed by the released vertical velocity
+    this.aimGfx.fillStyle(0x213a52, 1);
+    this.aimGfx.fillRect(meterX - 10, meterY - 6, 5, 18);
+    const loftH = Math.round(18 * loft);
+    this.aimGfx.fillStyle(0x74bde8, 1);
+    this.aimGfx.fillRect(meterX - 10, meterY + 12 - loftH, 5, loftH);
+    // CURL: marker driven by the released spin value
+    this.aimGfx.fillStyle(0x1b2f42, 1);
+    this.aimGfx.fillRect(meterX + 7, meterY + 8, 80, 2);
+    const curlX = meterX + 47 + Phaser.Math.Clamp(spin, -1, 1) * 40;
     this.aimGfx.fillStyle(0xd75a3a, 1);
-    this.aimGfx.fillRect(curlX - 2, meterY + 7, 5, 2);
+    this.aimGfx.fillRect(curlX - 2, meterY + 7, 5, 4);
   }
 }

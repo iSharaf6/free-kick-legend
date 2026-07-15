@@ -56,12 +56,23 @@ export function scoreShot({
   return { points, grade, label, topCorner, targetHit, comboMultiplier };
 }
 
-export function careerStars({ attempt = 1, attempts = 3, objectiveMet = false, shotScore = 0 }) {
+export function careerStars({
+  attempt = 1,
+  attempts = 3,
+  objectiveMet = false,
+  shotScore = 0,
+  goalsRequired = 1
+}) {
+  // The fewest shots that can possibly complete the objective: one per
+  // required goal. Multi-goal levels are therefore three-starrable by
+  // finishing with every attempt a qualifying goal, not by the impossible
+  // "complete a two-goal objective on attempt one".
+  const minimumShots = Math.max(1, goalsRequired);
   let stars = 1;
   if (attempt < attempts || shotScore >= 1600) stars++;
-  // Three stars are mastery, not merely completion: nail the objective with a
-  // genuinely high-quality first attempt. Late clears can still earn two via
-  // placement/technique, keeping replay value in every match.
-  if (objectiveMet && attempt === 1 && shotScore >= 2050) stars++;
+  // Three stars are mastery, not merely completion: finish in the minimum
+  // possible number of shots and land at least one genuinely high-quality
+  // strike. Late clears can still earn two via placement/technique.
+  if (objectiveMet && attempt <= minimumShots && shotScore >= 2050) stars++;
   return Math.min(stars, 3);
 }

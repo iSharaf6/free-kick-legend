@@ -43,7 +43,9 @@ function objective(type, label, options = {}) {
     goals: options.goals ?? 1,
     attempts: options.attempts ?? Math.max(3, (options.goals ?? 1) + 2),
     curveDirection: options.curveDirection ?? null,
-    minimumCurve: Math.min(options.minimumCurve ?? 0, 0.3),
+    // Honor authored curve requirements; the guard only rejects impossible
+    // values (spin is capped at 1.0 by SHOT.maxSpin).
+    minimumCurve: Math.min(options.minimumCurve ?? 0, 0.6),
     maximumHeight: options.maximumHeight ?? null,
     minimumHeight: options.minimumHeight ?? null,
     consecutive: options.consecutive ?? false

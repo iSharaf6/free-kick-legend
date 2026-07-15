@@ -38,8 +38,13 @@ const game = new Phaser.Game({
       debug: false
     }
   },
-  scene: [BootScene, MenuScene, LevelSelectScene, LockerScene, ProgressScene, GameScene, PuppetLabScene]
+  scene: [
+    BootScene, MenuScene, LevelSelectScene, LockerScene, ProgressScene, GameScene,
+    // Internal physics playground: registered in dev builds only so the whole
+    // scene module is tree-shaken out of production bundles.
+    ...(import.meta.env.DEV ? [PuppetLabScene] : [])
+  ]
 });
 
-// Debug handle used by automated playtests; harmless in production.
-window.__game = game;
+// Debug handle used by automated playtests; stripped from production builds.
+if (import.meta.env.DEV) window.__game = game;

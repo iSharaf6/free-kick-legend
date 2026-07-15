@@ -3,6 +3,7 @@
 class Synth {
   constructor() {
     this.ctx = null;
+    this.master = null;
     this.muted = false;
     this.volume = 0.85;
     this.noiseBuffer = null;
@@ -15,9 +16,22 @@ class Synth {
       if (!AC) return null;
       this.ctx = new AC();
       this.noiseBuffer = this._makeNoiseBuffer(this.ctx, 2);
+      // Master bus: every voice routes through this gain so mute and volume
+      // changes silence or rescale sounds that are already playing.
+      this.master = this.ctx.createGain();
+      this.master.gain.value = this.muted ? 0 : 1;
+      this.master.connect(this.ctx.destination);
     }
     if (this.ctx.state === 'suspended') this.ctx.resume();
     return this.ctx;
+  }
+
+  _applyMasterGain() {
+    if (!this.ctx || !this.master) return;
+    const target = this.muted ? 0 : 1;
+    this.master.gain.cancelScheduledValues(this.ctx.currentTime);
+    // 10ms exponential approach: instant to the ear, no click on the way out.
+    this.master.gain.setTargetAtTime(target, this.ctx.currentTime, 0.01);
   }
 
   _makeNoiseBuffer(ctx, seconds) {
@@ -37,6 +51,7 @@ class Synth {
   setMuted(muted) {
     this.muted = Boolean(muted);
     if (!this.muted) this._ensure();
+    this._applyMasterGain();
   }
 
   toggleMuted() {
@@ -63,7 +78,7 @@ class Synth {
     osc.frequency.exponentialRampToValueAtTime(Math.max(end, 1), t0 + time);
     gain.gain.setValueAtTime(vol * this.volume, t0);
     gain.gain.exponentialRampToValueAtTime(0.0001, t0 + time);
-    osc.connect(gain).connect(ctx.destination);
+    osc.connect(gain).connect(this.master ?? ctx.destination);
     osc.start(t0);
     osc.stop(t0 + time + 0.02);
   }
@@ -83,7 +98,7 @@ class Synth {
     gain.gain.setValueAtTime(0.0001, t0);
     gain.gain.linearRampToValueAtTime(vol * this.volume, t0 + rampUp);
     gain.gain.exponentialRampToValueAtTime(0.0001, t0 + time);
-    src.connect(filter).connect(gain).connect(ctx.destination);
+    src.connect(filter).connect(gain).connect(this.master ?? ctx.destination);
     src.start(t0);
     src.stop(t0 + time + 0.02);
   }

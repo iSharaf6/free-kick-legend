@@ -57,16 +57,19 @@ export class MenuScene extends Phaser.Scene {
         letterSpacing: 0.65
       }).setDepth(310);
 
-    makeButton(this, 439, GAME_H - 9, 68, 16, 'PUPPET LAB', () => {
-      this.scene.start('PuppetLab');
-    }, {
-      color: PAL.panelHi,
-      hover: PAL.blue,
-      border: PAL.goldDark,
-      fontSize: '5px',
-      hitWidth: 76,
-      hitHeight: 22
-    }).setDepth(320);
+    // Internal physics playground - dev builds only, never shipped to players.
+    if (import.meta.env.DEV) {
+      makeButton(this, 439, GAME_H - 9, 68, 16, 'PUPPET LAB', () => {
+        this.scene.start('PuppetLab');
+      }, {
+        color: PAL.panelHi,
+        hover: PAL.blue,
+        border: PAL.goldDark,
+        fontSize: '5px',
+        hitWidth: 76,
+        hitHeight: 22
+      }).setDepth(320);
+    }
 
     addScanlines(this, 900, 0.035);
     sceneIntro(this);
