@@ -42,10 +42,10 @@ export class BootScene extends Phaser.Scene {
         this.load.image(`kicker-hd-${kit.id}-${pose}`, `${base}assets/hd/kicker-hd-${kit.id}-${pose}.png`);
       });
     });
-    this.load.image('keeper-hd', `${base}assets/hd/keeper-idle-hd.png`);
-    this.load.image('keeper-dive-hd', `${base}assets/hd/keeper-dive-hd.png`);
-    this.load.image('keeper-dive-right-hd', `${base}assets/hd/keeper-dive-right-hd.png`);
-    this.load.image('keeper-catch-hd', `${base}assets/hd/keeper-catch-hd.png`);
+    this.load.spritesheet('keeper-anim-hd', `${base}assets/hd/keeper-animation-sheet-hd.png`, {
+      frameWidth: 320,
+      frameHeight: 280
+    });
     this.load.image('defender-hd', `${base}assets/hd/defender-hd.png`);
     this.load.image('ball-classic-hd', `${base}assets/hd/ball-classic-hd.png`);
   }

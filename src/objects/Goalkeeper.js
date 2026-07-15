@@ -4,6 +4,21 @@ const KEEPER_H = 1.95;
 const DIVE_H = 1.35;
 const GROUND_Y = 0.36;      // body centre height when lying on the turf
 const HALF_GOAL = GOAL_W / 2;
+const KEEPER_ANIMATION_TEXTURE = 'keeper-anim-hd';
+const KEEPER_STANDING_REFERENCE_H = 210;
+const KEEPER_DIVE_REFERENCE_H = 180;
+const KEEPER_FRAMES = Object.freeze({
+  idle: Object.freeze([0, 1, 0, 3]),
+  anticipate: 2,
+  set: 4,
+  diveLeft: 5,
+  diveRight: 10,
+  lowScoop: 15,
+  lowKneel: 16,
+  chestCatch: 17,
+  highCatch: 18,
+  recovery: 19
+});
 const STYLE_PROFILES = Object.freeze({
   training: Object.freeze({ reaction: 1.18, error: 1.22, read: -0.06, speed: 0.9, set: 1.08 }),
   calm: Object.freeze({ reaction: 1.06, error: 1.02, read: 0, speed: 0.96, set: 1 }),
@@ -27,6 +42,13 @@ function lerp(a, b, t) {
 function smoothstep(value) {
   const t = clamp(value, 0, 1);
   return t * t * (3 - 2 * t);
+}
+
+function spriteFrameHeight(sprite) {
+  return sprite?.frame?.realHeight ||
+    sprite?.frame?.height ||
+    sprite?.texture?.source?.[0]?.height ||
+    1;
 }
 
 function ellipseDistance(point, shape) {
@@ -78,9 +100,14 @@ export class Goalkeeper {
     this.grounded = false;
     this.contactPulse = 0;
     this.idlePhase = this._random() * Math.PI * 2;
-    this.spr = scene.add.sprite(0, 0, scene.textures?.exists?.('keeper-hd') ? 'keeper-hd' : 'keeper');
+    this.hasAnimationAtlas = Boolean(scene.textures?.exists?.(KEEPER_ANIMATION_TEXTURE));
+    const initialTexture = this.hasAnimationAtlas
+      ? KEEPER_ANIMATION_TEXTURE
+      : (scene.textures?.exists?.('keeper-hd') ? 'keeper-hd' : 'keeper');
+    const initialFrame = this.hasAnimationAtlas ? KEEPER_FRAMES.idle[0] : undefined;
+    this.spr = scene.add.sprite(0, 0, initialTexture, initialFrame);
     // One-frame afterimage used to smear the explosive first half of a dive.
-    this.ghost = scene.add.sprite(0, 0, scene.textures?.exists?.('keeper-hd') ? 'keeper-hd' : 'keeper');
+    this.ghost = scene.add.sprite(0, 0, initialTexture, initialFrame);
     this.ghost.setVisible?.(false);
     this.prevDraw = null;
     this.draw();
@@ -273,19 +300,57 @@ export class Goalkeeper {
     };
   }
 
+  getAnimationFrame() {
+    if (this.pose === 'dive') {
+      const base = this.diveDir > 0 ? KEEPER_FRAMES.diveRight : KEEPER_FRAMES.diveLeft;
+      if (this.state === 'land') return base + 4;
+      const progress = clamp(this.diveP, 0, 1);
+      if (progress < 0.16) return base;
+      if (progress < 0.38) return base + 1;
+      if (progress < 0.68) return base + 2;
+      return base + 3;
+    }
+
+    if (this.state === 'catch') {
+      if (this.catchY < 0.62) return KEEPER_FRAMES.lowScoop;
+      if (this.catchY < 1.02) return KEEPER_FRAMES.lowKneel;
+      if (this.catchY < 1.72) return KEEPER_FRAMES.chestCatch;
+      return KEEPER_FRAMES.highCatch;
+    }
+    if (this.state === 'return' && this.stateT < 0.24) return KEEPER_FRAMES.recovery;
+    if (this.state === 'read') return this.diveDir > 0 ? 3 : 1;
+    if (this.state === 'set') {
+      const progress = this.setT > 0 ? this.stateT / this.setT : 1;
+      return progress < 0.52 ? KEEPER_FRAMES.anticipate : KEEPER_FRAMES.set;
+    }
+
+    const phaseOffset = this.idlePhase / (Math.PI * 2) * 0.88;
+    const index = Math.floor((this.idleClock + phaseOffset) / 0.22) % KEEPER_FRAMES.idle.length;
+    return KEEPER_FRAMES.idle[index];
+  }
+
   draw() {
+    const usingAtlas = this.hasAnimationAtlas;
+    const animationFrame = usingAtlas ? this.getAnimationFrame() : undefined;
     if (this.pose === 'dive') {
       const contact = this.getContactPose();
       const pos = project(this.x, contact.y, this.z);
-      const authoredRight = this.diveDir > 0 && this.scene.textures?.exists?.('keeper-dive-right-hd');
-      const diveTexture = authoredRight
-        ? 'keeper-dive-right-hd'
-        : (this.scene.textures?.exists?.('keeper-dive-hd') ? 'keeper-dive-hd' : 'keeper-dive');
-      this.spr.setTexture(diveTexture).setOrigin(0.5, 0.5);
-      const hasAuthoredLeft = this.scene.textures?.exists?.('keeper-dive-hd');
-      this.spr.setFlipX(hasAuthoredLeft ? (!authoredRight && this.diveDir > 0) : this.diveDir < 0);
+      let diveTexture;
+      if (usingAtlas) {
+        diveTexture = KEEPER_ANIMATION_TEXTURE;
+        this.spr.setTexture(diveTexture, animationFrame).setFlipX(false);
+      } else {
+        const authoredRight = this.diveDir > 0 && this.scene.textures?.exists?.('keeper-dive-right-hd');
+        diveTexture = authoredRight
+          ? 'keeper-dive-right-hd'
+          : (this.scene.textures?.exists?.('keeper-dive-hd') ? 'keeper-dive-hd' : 'keeper-dive');
+        this.spr.setTexture(diveTexture);
+        const hasAuthoredLeft = this.scene.textures?.exists?.('keeper-dive-hd');
+        this.spr.setFlipX(hasAuthoredLeft ? (!authoredRight && this.diveDir > 0) : this.diveDir < 0);
+      }
+      this.spr.setOrigin(0.5, 0.5);
       this.spr.setPosition(pos.x, pos.y);
-      const textureH = this.spr.texture?.source?.[0]?.height || 9;
+      const textureH = usingAtlas ? KEEPER_DIVE_REFERENCE_H : spriteFrameHeight(this.spr);
       const baseScale = (pos.s * DIVE_H) / textureH;
       const pulse = this.reducedMotion ? 1 : 1 + this.contactPulse * 0.06;
       if (this.state === 'land') {
@@ -297,20 +362,23 @@ export class Goalkeeper {
         this.prevDraw = null;
       } else {
         // Mid-air smear: the body elongates hard along the dive axis during
-        // the explosive launch and settles to true proportions at full
-        // stretch. The stretched frames look wrong frozen - at speed they
-        // read as one fast, fluid dive.
+        // the explosive launch. Authored phase frames need only a restrained
+        // accent; the legacy one-pose fallback keeps the stronger smear.
         const launch = 1 - contact.progress;
-        const stretch = this.reducedMotion ? 1 : 1 + launch * launch * 0.5;
-        const squash = this.reducedMotion ? 1 : 1 / (1 + launch * launch * 0.3);
+        const stretchAmount = usingAtlas ? 0.08 : 0.5;
+        const squashAmount = usingAtlas ? 0.05 : 0.3;
+        const stretch = this.reducedMotion ? 1 : 1 + launch * launch * stretchAmount;
+        const squash = this.reducedMotion ? 1 : 1 / (1 + launch * launch * squashAmount);
         this.spr.setScale(baseScale * stretch * pulse, baseScale * squash * pulse);
-        this.spr.setRotation?.(this.reducedMotion ? 0 : this.diveDir * launch * 0.06);
+        this.spr.setRotation?.(
+          this.reducedMotion ? 0 : this.diveDir * launch * (usingAtlas ? 0.015 : 0.06)
+        );
 
         // Afterimage: last frame's pose lingers for one frame at low alpha.
         const showGhost = !this.reducedMotion && contact.progress < 0.6 && this.prevDraw;
         if (showGhost) {
           this.ghost.setVisible?.(true);
-          this.ghost.setTexture?.(this.prevDraw.texture);
+          this.ghost.setTexture?.(this.prevDraw.texture, this.prevDraw.frame);
           this.ghost.setOrigin?.(0.5, 0.5);
           this.ghost.setFlipX?.(this.prevDraw.flipX);
           this.ghost.setPosition?.(this.prevDraw.x, this.prevDraw.y);
@@ -321,7 +389,8 @@ export class Goalkeeper {
           this.ghost.setVisible?.(false);
         }
         this.prevDraw = {
-          texture: this.spr.texture?.key ?? 'keeper-dive',
+          texture: diveTexture,
+          frame: animationFrame,
           flipX: Boolean(this.spr.flipX),
           x: pos.x,
           y: pos.y,
@@ -333,24 +402,34 @@ export class Goalkeeper {
       this.ghost?.setVisible?.(false);
       this.prevDraw = null;
       const pos = project(this.x, 0, this.z);
-      const texture = this.pose === 'catch'
-        ? (this.scene.textures?.exists?.('keeper-catch-hd') ? 'keeper-catch-hd' : 'keeper-catch')
-        : (this.scene.textures?.exists?.('keeper-hd') ? 'keeper-hd' : 'keeper');
-      this.spr.setTexture(texture).setOrigin(0.5, 1);
+      const texture = usingAtlas
+        ? KEEPER_ANIMATION_TEXTURE
+        : this.pose === 'catch'
+          ? (this.scene.textures?.exists?.('keeper-catch-hd') ? 'keeper-catch-hd' : 'keeper-catch')
+          : (this.scene.textures?.exists?.('keeper-hd') ? 'keeper-hd' : 'keeper');
+      this.spr.setTexture(texture, animationFrame).setOrigin(0.5, 1);
       this.spr.setFlipX(false);
       this.spr.setPosition(pos.x, pos.y);
-      const textureH = this.spr.texture?.source?.[0]?.height || 28;
+      const textureH = usingAtlas ? KEEPER_STANDING_REFERENCE_H : spriteFrameHeight(this.spr);
       const baseScale = (pos.s * KEEPER_H) / textureH;
       const setting = !this.reducedMotion && this.state === 'set';
       const reading = !this.reducedMotion && this.state === 'read';
       const rising = !this.reducedMotion && this.state === 'return' && this.stateT < 0.22;
       const pulse = this.reducedMotion ? 1 : 1 + this.contactPulse * 0.06;
+      const settingX = usingAtlas ? 1.018 : 1.055;
+      const settingY = usingAtlas ? 0.965 : 0.925;
+      const readingX = usingAtlas ? 1.006 : 1.018;
+      const readingY = usingAtlas ? 0.995 : 0.985;
+      const risingX = usingAtlas ? 1 : 1.04;
+      const risingY = usingAtlas ? 1 : 0.94;
       this.spr.setScale(
-        baseScale * (setting ? 1.055 : reading ? 1.018 : rising ? 1.04 : 1) * pulse,
-        baseScale * (setting ? 0.925 : reading ? 0.985 : rising ? 0.94 : 1) * pulse
+        baseScale * (setting ? settingX : reading ? readingX : rising ? risingX : 1) * pulse,
+        baseScale * (setting ? settingY : reading ? readingY : rising ? risingY : 1) * pulse
       );
       this.spr.setRotation?.(
-        this.reducedMotion ? 0 : this.diveDir * (setting ? 0.018 : reading ? 0.008 : 0)
+        this.reducedMotion
+          ? 0
+          : this.diveDir * (setting ? (usingAtlas ? 0.006 : 0.018) : reading ? (usingAtlas ? 0.003 : 0.008) : 0)
       );
     }
     this.spr.setDepth(1000 - this.z * 10);

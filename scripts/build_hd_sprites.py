@@ -11,7 +11,11 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "tmp/imagegen/football-sprite-sheet-alpha.png"
+KEEPER_ANIMATION_SOURCE = ROOT / "assets/source/keeper-animation-sheet-v1-alpha.png"
 OUT = ROOT / "public/assets/hd"
+
+KEEPER_ANIMATION_SIZE = (1600, 1120)
+KEEPER_FRAME_SIZE = (320, 280)
 
 
 POSES = {
@@ -131,9 +135,90 @@ def recolor_kit(image: Image.Image, primary: int, trim: int) -> Image.Image:
     return out
 
 
+def connected_component_boxes(image: Image.Image, minimum: int = 1000) -> list[tuple[int, int, int, int]]:
+    """Return the twenty authored figures without relying on fragile crop coordinates."""
+    alpha = image.getchannel("A")
+    width, height = image.size
+    pixels = alpha.load()
+    seen = bytearray(width * height)
+    boxes: list[tuple[int, int, int, int]] = []
+
+    for y in range(height):
+        for x in range(width):
+            index = y * width + x
+            if seen[index] or pixels[x, y] < 8:
+                continue
+            seen[index] = 1
+            stack = [(x, y)]
+            count = 0
+            left = right = x
+            top = bottom = y
+            while stack:
+                px, py = stack.pop()
+                count += 1
+                left = min(left, px)
+                right = max(right, px)
+                top = min(top, py)
+                bottom = max(bottom, py)
+                for oy in (-1, 0, 1):
+                    for ox in (-1, 0, 1):
+                        if ox == 0 and oy == 0:
+                            continue
+                        nx, ny = px + ox, py + oy
+                        if not (0 <= nx < width and 0 <= ny < height):
+                            continue
+                        neighbor = ny * width + nx
+                        if seen[neighbor] or pixels[nx, ny] < 8:
+                            continue
+                        seen[neighbor] = 1
+                        stack.append((nx, ny))
+            if count >= minimum:
+                boxes.append((left, top, right + 1, bottom + 1))
+    return boxes
+
+
+def build_keeper_animation_atlas() -> None:
+    """Pack the generated 4x5 keeper board into a Phaser-ready atlas."""
+    source = Image.open(KEEPER_ANIMATION_SOURCE).convert("RGBA")
+    boxes = connected_component_boxes(source)
+    if len(boxes) != 20:
+        raise ValueError(f"keeper animation source must contain 20 figures, found {len(boxes)}")
+
+    # The authored sheet has four visually separated rows. Group by vertical
+    # centre, then order each row from screen-left to screen-right.
+    boxes.sort(key=lambda box: (box[1] + box[3]) / 2)
+    rows = []
+    for row_index in range(4):
+        row = boxes[row_index * 5:(row_index + 1) * 5]
+        row.sort(key=lambda box: (box[0] + box[2]) / 2)
+        rows.append(row)
+
+    frame_width, frame_height = KEEPER_FRAME_SIZE
+    atlas = Image.new("RGBA", KEEPER_ANIMATION_SIZE, (0, 0, 0, 0))
+    for row_index, row in enumerate(rows):
+        for col_index, box in enumerate(row):
+            sprite = source.crop(box)
+            if sprite.width > frame_width - 8 or sprite.height > frame_height - 8:
+                raise ValueError(
+                    f"keeper frame {row_index * 5 + col_index} does not fit "
+                    f"inside {KEEPER_FRAME_SIZE}: {sprite.size}"
+                )
+            x = col_index * frame_width + (frame_width - sprite.width) // 2
+            if row_index in (0, 3):
+                # Standing, handling and recovery poses share one foot line.
+                y = row_index * frame_height + frame_height - sprite.height - 8
+            else:
+                # Airborne frames stay centred so their authored reach remains stable.
+                y = row_index * frame_height + (frame_height - sprite.height) // 2
+            atlas.alpha_composite(sprite, (x, y))
+
+    atlas.save(OUT / "keeper-animation-sheet-hd.png", optimize=True)
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     source = Image.open(SOURCE).convert("RGBA")
+    build_keeper_animation_atlas()
 
     # Remove the footballs baked into action/dive reference poses; gameplay owns
     # a separate simulated ball, so these pixels must never double-render.

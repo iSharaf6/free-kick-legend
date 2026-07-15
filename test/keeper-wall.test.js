@@ -67,6 +67,37 @@ test('keeper advances through read, set and dive states', () => {
   assert.ok(keeper.diveP > 0);
 });
 
+test('keeper maps simulation phases to authored animation frames', () => {
+  const keeper = new Goalkeeper(sceneStub(), 0.6, CAM.ballDist + 17, { seed: 4 });
+
+  keeper.pose = 'dive';
+  keeper.state = 'dive';
+  keeper.diveDir = -1;
+  keeper.diveP = 0.1;
+  assert.equal(keeper.getAnimationFrame(), 5);
+  keeper.diveP = 0.25;
+  assert.equal(keeper.getAnimationFrame(), 6);
+  keeper.diveP = 0.5;
+  assert.equal(keeper.getAnimationFrame(), 7);
+  keeper.diveP = 0.9;
+  assert.equal(keeper.getAnimationFrame(), 8);
+
+  keeper.diveDir = 1;
+  keeper.state = 'land';
+  assert.equal(keeper.getAnimationFrame(), 14);
+
+  keeper.pose = 'catch';
+  keeper.state = 'catch';
+  keeper.catchY = 0.4;
+  assert.equal(keeper.getAnimationFrame(), 15);
+  keeper.catchY = 0.8;
+  assert.equal(keeper.getAnimationFrame(), 16);
+  keeper.catchY = 1.3;
+  assert.equal(keeper.getAnimationFrame(), 17);
+  keeper.catchY = 2;
+  assert.equal(keeper.getAnimationFrame(), 18);
+});
+
 test('wall jump variation is deterministic and frame-rate invariant', () => {
   const first = new Wall(sceneStub(), 4, 12, 0);
   const second = new Wall(sceneStub(), 4, 12, 0);
