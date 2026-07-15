@@ -7,8 +7,8 @@ board is stored in `keeper-animation-sheet-v1-alpha.png`; run
 ## Runtime frame map
 
 - `0–4`: idle, weight shifts, anticipation and set
-- `5–9`: screen-left dive from load through landing
-- `10–14`: screen-right dive from load through landing
+- `5–9`: screen-right dive from load through landing
+- `10–14`: screen-left dive from load through landing
 - `15–19`: low scoop, kneeling save, chest catch, high claim and recovery
 
 ## Generation prompt
@@ -21,9 +21,9 @@ camera, a consistent character scale and generous separation between figures.
 Do not draw a football; gameplay renders it separately.
 
 Row 1: neutral ready stance, weight shift left, deep anticipation crouch, weight
-shift right, explosive set stance. Row 2: five phases of a screen-left dive—load,
+shift right, explosive set stance. Row 2: five phases of a screen-right dive—load,
 push, early flight, full-stretch contact and landing. Row 3: the equivalent five
-screen-right phases, authored naturally rather than merely mirrored. Row 4: low
+screen-left phases, authored naturally rather than merely mirrored. Row 4: low
 scoop, kneeling low save, chest catch, high two-hand claim and recovery stance.
 
 Match the existing premium HD pixel art: crisp deliberate pixel clusters, dark

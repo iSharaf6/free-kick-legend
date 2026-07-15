@@ -11,8 +11,10 @@ const KEEPER_FRAMES = Object.freeze({
   idle: Object.freeze([0, 1, 0, 3]),
   anticipate: 2,
   set: 4,
-  diveLeft: 5,
-  diveRight: 10,
+  // The atlas is authored from the fixed camera view: row two reaches
+  // screen-right and row three reaches screen-left.
+  diveLeft: 10,
+  diveRight: 5,
   lowScoop: 15,
   lowKneel: 16,
   chestCatch: 17,

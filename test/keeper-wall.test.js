@@ -67,24 +67,27 @@ test('keeper advances through read, set and dive states', () => {
   assert.ok(keeper.diveP > 0);
 });
 
-test('keeper maps simulation phases to authored animation frames', () => {
+test('keeper maps simulation phases and screen direction to authored animation frames', () => {
   const keeper = new Goalkeeper(sceneStub(), 0.6, CAM.ballDist + 17, { seed: 4 });
 
   keeper.pose = 'dive';
   keeper.state = 'dive';
   keeper.diveDir = -1;
   keeper.diveP = 0.1;
-  assert.equal(keeper.getAnimationFrame(), 5);
+  assert.equal(keeper.getAnimationFrame(), 10);
   keeper.diveP = 0.25;
-  assert.equal(keeper.getAnimationFrame(), 6);
+  assert.equal(keeper.getAnimationFrame(), 11);
   keeper.diveP = 0.5;
-  assert.equal(keeper.getAnimationFrame(), 7);
+  assert.equal(keeper.getAnimationFrame(), 12);
   keeper.diveP = 0.9;
-  assert.equal(keeper.getAnimationFrame(), 8);
+  assert.equal(keeper.getAnimationFrame(), 13);
 
   keeper.diveDir = 1;
+  keeper.state = 'dive';
+  keeper.diveP = 0.1;
+  assert.equal(keeper.getAnimationFrame(), 5);
   keeper.state = 'land';
-  assert.equal(keeper.getAnimationFrame(), 14);
+  assert.equal(keeper.getAnimationFrame(), 9);
 
   keeper.pose = 'catch';
   keeper.state = 'catch';
