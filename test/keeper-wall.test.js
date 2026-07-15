@@ -40,6 +40,29 @@ test('keeper perception is repeatable with a seed', () => {
   assert.equal(first.setT, second.setT);
 });
 
+test('clear left and right shots cannot produce opposite-facing dive reads', () => {
+  const goalZ = CAM.ballDist + 17;
+  const keeper = new Goalkeeper(sceneStub(), 0.1, goalZ, { rng: () => 1 });
+  const leftShot = {
+    z: 0,
+    vz: 24,
+    spin: 0,
+    predictAt: () => ({ x: -1.2, y: 1.1, T: 0.7 })
+  };
+  keeper.onShot(leftShot, goalZ);
+  assert.equal(keeper.diveDir, -1);
+  assert.ok(keeper.targetX < 0);
+
+  keeper.reset();
+  const rightShot = {
+    ...leftShot,
+    predictAt: () => ({ x: 1.2, y: 1.1, T: 0.7 })
+  };
+  keeper.onShot(rightShot, goalZ);
+  assert.equal(keeper.diveDir, 1);
+  assert.ok(keeper.targetX > 0);
+});
+
 test('keeper contact follows actual dive height and progress', () => {
   const keeper = new Goalkeeper(sceneStub(), 0.7, CAM.ballDist + 17, { seed: 9 });
   assert.equal(keeper.contact({ x: keeper.x, y: 2.8 }), false, 'standing keeper cannot touch top bins');
@@ -50,9 +73,11 @@ test('keeper contact follows actual dive height and progress', () => {
   keeper.diveDir = 1;
   keeper.targetY = 2.3;
   keeper.diveP = 0;
+  keeper.diveHandY = 0.95;
   assert.equal(keeper.contact({ x: 0.8, y: 2.3 }), false, 'future hand position is not active early');
 
   keeper.diveP = 1;
+  keeper.diveHandY = 2.3;
   const contact = keeper.contact({ x: 0.8, y: 2.3 });
   assert.ok(contact);
   assert.equal(contact.part, 'hands');
@@ -62,7 +87,7 @@ test('keeper contact follows actual dive height and progress', () => {
 test('keeper advances through read, set and dive states', () => {
   const goalZ = CAM.ballDist + 17;
   const ball = new Ball();
-  ball.kick(0, 6, 27, 0);
+  ball.kick(1.6, 6, 27, 0);
   const keeper = new Goalkeeper(sceneStub(), 0.6, goalZ, { seed: 2 });
   keeper.onShot(ball, goalZ);
   assert.equal(keeper.state, 'read');
@@ -116,7 +141,7 @@ test('keeper recovery adds six grounded phases per screen direction', () => {
   keeper.grounded = true;
   keeper.diveDir = 1;
 
-  for (const [time, frame] of [[0, 0], [0.1, 1], [0.25, 2], [0.42, 3], [0.58, 4], [0.72, 5]]) {
+  for (const [time, frame] of [[0, 0], [0.2, 1], [0.36, 2], [0.5, 3], [0.66, 4], [0.84, 5]]) {
     keeper.stateT = time;
     assert.equal(keeper.getRecoveryFrame(), frame);
   }
@@ -124,8 +149,137 @@ test('keeper recovery adds six grounded phases per screen direction', () => {
   keeper.diveDir = -1;
   keeper.stateT = 0;
   assert.equal(keeper.getRecoveryFrame(), 6);
-  keeper.stateT = 0.72;
+  keeper.stateT = 0.84;
   assert.equal(keeper.getRecoveryFrame(), 11);
+});
+
+test('expanded dive atlas maps twelve phases to each screen direction without flipping', () => {
+  const keeper = new Goalkeeper(
+    sceneStub(['keeper-anim-hd', 'keeper-dive-motion-hd']),
+    0.7,
+    CAM.ballDist + 17,
+    { seed: 14 }
+  );
+  keeper.pose = 'dive';
+  keeper.state = 'dive';
+
+  keeper.diveDir = 1;
+  keeper.diveP = 0.05;
+  assert.equal(keeper.getDiveMotionFrame(), 5);
+  keeper.diveP = 0.52;
+  assert.equal(keeper.getDiveMotionFrame(), 8);
+  keeper.diveP = 0.9;
+  assert.equal(keeper.getDiveMotionFrame(), 10);
+
+  keeper.diveDir = -1;
+  keeper.diveP = 0.05;
+  assert.equal(keeper.getDiveMotionFrame(), 17);
+  keeper.diveP = 0.52;
+  assert.equal(keeper.getDiveMotionFrame(), 20);
+  keeper.diveP = 0.9;
+  assert.equal(keeper.getDiveMotionFrame(), 22);
+  keeper.draw();
+  assert.deepEqual(keeper.spr.calls.setTexture, ['keeper-dive-motion-hd', 22]);
+  assert.deepEqual(keeper.spr.calls.setFlipX, [false]);
+});
+
+test('keeper times the authored contact phase to the ball crossing', () => {
+  const goalZ = CAM.ballDist + 17;
+  const ball = new Ball();
+  ball.kick(0.8, 6.2, 25, 0.2);
+  const crossing = ball.predictAt(goalZ - 0.4).T;
+  const keeper = new Goalkeeper(sceneStub(), 0.72, goalZ, { seed: 21 });
+  keeper.onShot(ball, goalZ);
+
+  const scheduledContact = keeper.reactT + keeper.setT + keeper.diveDuration * 0.68;
+  assert.ok(Math.abs(scheduledContact - crossing) < 0.025);
+});
+
+test('central shots stay planted and flow into height-specific handling', () => {
+  const goalZ = CAM.ballDist + 17;
+  const centralShot = {
+    z: 0,
+    vz: 20,
+    spin: 0,
+    predictAt: () => ({ x: 0.08, y: 1.9, T: 0.72 })
+  };
+  const keeper = new Goalkeeper(
+    sceneStub(['keeper-dive-motion-hd', 'keeper-high-claim-hd']),
+    0.75,
+    goalZ,
+    { seed: 25 }
+  );
+  keeper.onShot(centralShot, goalZ);
+  assert.equal(keeper.standingSave, true);
+
+  for (let elapsed = 0; elapsed < 0.76; elapsed += PHYS.fixedStep) keeper.update(PHYS.fixedStep);
+  assert.equal(keeper.state, 'set', 'central keeper remains loaded instead of diving past the ball');
+  const contact = keeper.contact({ x: 0.08, y: 1.9 }, { vx: 0, vy: 2, vz: 18 });
+  assert.ok(contact);
+  assert.equal(contact.result, 'catch');
+  keeper.catchBall({ x: 0.08, y: 1.9 });
+  assert.equal(keeper.catchType, 'high');
+  keeper.stateT = keeper.catchDuration * 0.9;
+  keeper.draw();
+  assert.deepEqual(keeper.spr.calls.setTexture, ['keeper-high-claim-hd', 4]);
+});
+
+test('dive root remains continuous through contact, descent and grounded impact', () => {
+  const goalZ = CAM.ballDist + 17;
+  const ball = new Ball();
+  ball.kick(1.4, 6.8, 26, 0.15);
+  const keeper = new Goalkeeper(sceneStub(['keeper-dive-motion-hd']), 0.76, goalZ, { seed: 8 });
+  keeper.onShot(ball, goalZ);
+
+  let lastX = keeper.x;
+  let maxStep = 0;
+  let sawAirborneLand = false;
+  let sawGrounded = false;
+  for (let elapsed = 0; elapsed < 2.2; elapsed += 1 / 120) {
+    keeper.update(1 / 120);
+    maxStep = Math.max(maxStep, Math.abs(keeper.x - lastX));
+    lastX = keeper.x;
+    if (keeper.state === 'land' && !keeper.grounded) sawAirborneLand = true;
+    if (keeper.state === 'land' && keeper.grounded) {
+      sawGrounded = true;
+      assert.equal(keeper.landY, 0);
+      break;
+    }
+  }
+  assert.equal(sawAirborneLand, true);
+  assert.equal(sawGrounded, true);
+  assert.ok(maxStep < 0.08, `root step ${maxStep} should remain visually continuous`);
+});
+
+test('footwork and handling atlases animate both travel and catch follow-through', () => {
+  const keeper = new Goalkeeper(
+    sceneStub(['keeper-footwork-hd', 'keeper-handling-hd', 'keeper-high-claim-hd']),
+    0.7,
+    CAM.ballDist + 17,
+    { seed: 19 }
+  );
+  keeper.state = 'return';
+  keeper.x = 1.2;
+  keeper.moveVx = -1;
+  keeper.footworkDistance = 0.23;
+  assert.equal(keeper.getFootworkFrame(), 2);
+  keeper.moveVx = 1;
+  assert.equal(keeper.getFootworkFrame(), 7);
+
+  keeper.state = 'idle';
+  keeper.catchBall({ x: 0.05, y: 0.55 });
+  assert.equal(keeper.catchType, 'low');
+  assert.equal(keeper.getHandlingFrame(), 0);
+  keeper.stateT = keeper.catchDuration * 0.9;
+  assert.equal(keeper.getHandlingFrame(), 3);
+
+  keeper.reset();
+  keeper.catchBall({ x: 0, y: 1.9 });
+  assert.equal(keeper.catchType, 'high');
+  keeper.stateT = keeper.catchDuration * 0.9;
+  assert.equal(keeper.getHandlingFrame(), 4);
+  keeper.draw();
+  assert.deepEqual(keeper.spr.calls.setTexture, ['keeper-high-claim-hd', 4]);
 });
 
 test('grounded keeper recovery is bottom-anchored to the pitch', () => {

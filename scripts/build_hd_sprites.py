@@ -6,17 +6,25 @@ from __future__ import annotations
 import colorsys
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "tmp/imagegen/football-sprite-sheet-alpha.png"
 KEEPER_ANIMATION_SOURCE = ROOT / "assets/source/keeper-animation-sheet-v1-alpha.png"
 KEEPER_RECOVERY_SOURCE = ROOT / "assets/source/keeper-recovery-sheet-v1-alpha.png"
+KEEPER_DIVE_MOTION_SOURCE = ROOT / "assets/source/keeper-dive-motion-sheet-v2-alpha.png"
+KEEPER_FOOTWORK_SOURCE = ROOT / "assets/source/keeper-footwork-return-sheet-v1-alpha.png"
+KEEPER_HANDLING_SOURCE = ROOT / "assets/source/keeper-handling-claims-sheet-v1-alpha.png"
+KEEPER_HIGH_CLAIM_SOURCE = ROOT / "assets/source/keeper-high-claim-sheet-v1-alpha.png"
 OUT = ROOT / "public/assets/hd"
 
 KEEPER_ANIMATION_SIZE = (1600, 1120)
 KEEPER_RECOVERY_SIZE = (1920, 560)
+KEEPER_DIVE_MOTION_SIZE = (1920, 1120)
+KEEPER_FOOTWORK_SIZE = (1600, 560)
+KEEPER_HANDLING_SIZE = (1600, 560)
+KEEPER_HIGH_CLAIM_SIZE = (1600, 360)
 KEEPER_FRAME_SIZE = (320, 280)
 
 
@@ -250,11 +258,201 @@ def build_keeper_recovery_atlas() -> None:
     atlas.save(OUT / "keeper-recovery-sheet-hd.png", optimize=True)
 
 
+def build_keeper_dive_motion_atlas() -> None:
+    """Pack 24 direction-authored motion phases on one visual baseline.
+
+    Unlike the legacy dive rows, every phase uses the same bottom registration.
+    Runtime can keep one origin and one world scale from planted stance through
+    flight and turf impact; the projected lift supplies the airborne height.
+    """
+    source = Image.open(KEEPER_DIVE_MOTION_SOURCE).convert("RGBA")
+    boxes = connected_component_boxes(source)
+    if len(boxes) != 24:
+        raise ValueError(f"keeper dive motion source must contain 24 figures, found {len(boxes)}")
+
+    boxes.sort(key=lambda box: (box[1] + box[3]) / 2)
+    rows = []
+    for row_index in range(4):
+        row = boxes[row_index * 6:(row_index + 1) * 6]
+        row.sort(key=lambda box: (box[0] + box[2]) / 2)
+        rows.append(row)
+
+    frame_width, frame_height = KEEPER_FRAME_SIZE
+    atlas = Image.new("RGBA", KEEPER_DIVE_MOTION_SIZE, (0, 0, 0, 0))
+    for row_index, row in enumerate(rows):
+        for col_index, box in enumerate(row):
+            if row_index < 2:
+                sprite = source.crop(box)
+            else:
+                # Image generation produced good individual silhouettes, but
+                # several authored left-dive frames silently reversed their
+                # body direction mid-sequence. Build the second direction as
+                # a strict mirror of the clean twelve-frame master so every
+                # phase is guaranteed to face the way the root is travelling.
+                sprite = ImageOps.mirror(source.crop(rows[row_index - 2][col_index]))
+            frame_index = row_index * 6 + col_index
+            phase = frame_index % 12
+            if phase <= 4:
+                # Direction-authored standing poses vary slightly in source
+                # size. Normalize their body height so left/right never pop.
+                scale = 200 / sprite.height
+            elif phase <= 9:
+                # Airborne silhouettes are compared by overall reach rather
+                # than height because their torso rotation changes the bounds.
+                scale = 245 / max(sprite.width, sprite.height)
+            else:
+                # Descent and impact register by body length before recovery.
+                scale = 195 / sprite.width
+            if abs(scale - 1) > 0.001:
+                sprite = sprite.resize(
+                    (max(1, round(sprite.width * scale)), max(1, round(sprite.height * scale))),
+                    Image.Resampling.NEAREST,
+                )
+            if sprite.width > frame_width - 8 or sprite.height > frame_height - 8:
+                raise ValueError(
+                    f"keeper dive motion frame {frame_index} does not fit "
+                    f"inside {KEEPER_FRAME_SIZE}: {sprite.size}"
+                )
+            x = col_index * frame_width + (frame_width - sprite.width) // 2
+            y = row_index * frame_height + frame_height - sprite.height - 8
+            atlas.alpha_composite(sprite, (x, y))
+
+    atlas.save(OUT / "keeper-dive-motion-sheet-hd.png", optimize=True)
+
+
+def grid_cell_box(source: Image.Image, row: int, rows: int, col: int, cols: int):
+    """Return a combined alpha box for one logical contact-sheet cell."""
+    left = round(col * source.width / cols)
+    right = round((col + 1) * source.width / cols)
+    top = round(row * source.height / rows)
+    bottom = round((row + 1) * source.height / rows)
+    cell = source.crop((left, top, right, bottom))
+    alpha_box = cell.getchannel("A").getbbox()
+    if alpha_box is None:
+        raise ValueError(f"empty sprite cell row={row} col={col}")
+    return cell, alpha_box
+
+
+def grouped_actor_boxes(source: Image.Image, row_counts: tuple[int, ...]):
+    """Group detached football props with the nearest large keeper figure."""
+    components = connected_component_boxes(source)
+    actors = [box for box in components if (box[2] - box[0]) * (box[3] - box[1]) > 20_000]
+    props = [box for box in components if box not in actors]
+    if len(actors) != sum(row_counts):
+        raise ValueError(f"expected {sum(row_counts)} keeper figures, found {len(actors)}")
+
+    actors.sort(key=lambda box: (box[1] + box[3]) / 2)
+    ordered = []
+    cursor = 0
+    for count in row_counts:
+        row = actors[cursor:cursor + count]
+        row.sort(key=lambda box: (box[0] + box[2]) / 2)
+        ordered.extend(row)
+        cursor += count
+
+    grouped = []
+    for actor in ordered:
+        grouped.append({"actor": actor, "combined": actor})
+    for prop in props:
+        prop_x = (prop[0] + prop[2]) / 2
+        prop_y = (prop[1] + prop[3]) / 2
+        nearest = min(
+            range(len(ordered)),
+            key=lambda index: (
+                ((ordered[index][0] + ordered[index][2]) / 2 - prop_x) ** 2 +
+                ((ordered[index][1] + ordered[index][3]) / 2 - prop_y) ** 2
+            ),
+        )
+        actor = grouped[nearest]["combined"]
+        grouped[nearest]["combined"] = (
+            min(actor[0], prop[0]), min(actor[1], prop[1]),
+            max(actor[2], prop[2]), max(actor[3], prop[3]),
+        )
+    return grouped
+
+
+def build_keeper_footwork_atlas() -> None:
+    """Pack five planted shuffle frames per screen direction."""
+    source = Image.open(KEEPER_FOOTWORK_SOURCE).convert("RGBA")
+    frame_width, frame_height = KEEPER_FRAME_SIZE
+    atlas = Image.new("RGBA", KEEPER_FOOTWORK_SIZE, (0, 0, 0, 0))
+    for row in range(2):
+        for col in range(5):
+            cell, box = grid_cell_box(source, row, 2, col, 5)
+            sprite = cell.crop(box)
+            scale = 205 / sprite.height
+            sprite = sprite.resize(
+                (max(1, round(sprite.width * scale)), 205),
+                Image.Resampling.NEAREST,
+            )
+            if sprite.width > frame_width - 8:
+                raise ValueError(f"keeper footwork frame {row * 5 + col} is too wide: {sprite.size}")
+            x = col * frame_width + (frame_width - sprite.width) // 2
+            y = row * frame_height + frame_height - sprite.height - 8
+            atlas.alpha_composite(sprite, (x, y))
+    atlas.save(OUT / "keeper-footwork-sheet-hd.png", optimize=True)
+
+
+def build_keeper_handling_atlas() -> None:
+    """Pack low and chest handling into two regular four-frame rows."""
+    source = Image.open(KEEPER_HANDLING_SOURCE).convert("RGBA")
+    frame_width, frame_height = KEEPER_FRAME_SIZE
+    atlas = Image.new("RGBA", KEEPER_HANDLING_SIZE, (0, 0, 0, 0))
+    grouped = grouped_actor_boxes(source, (4, 4, 5))
+    for row in range(2):
+        cells = grouped[row * 4:(row + 1) * 4]
+        # One row-wide scale preserves real pose compression between frames.
+        reference_height = max(cell["actor"][3] - cell["actor"][1] for cell in cells)
+        scale = 205 / reference_height
+        for col, cell in enumerate(cells):
+            sprite = source.crop(cell["combined"])
+            sprite = sprite.resize(
+                (max(1, round(sprite.width * scale)), max(1, round(sprite.height * scale))),
+                Image.Resampling.NEAREST,
+            )
+            if sprite.width > frame_width - 8 or sprite.height > frame_height - 8:
+                raise ValueError(f"keeper handling frame {row * 5 + col} does not fit: {sprite.size}")
+            x = col * frame_width + (frame_width - sprite.width) // 2
+            y = row * frame_height + frame_height - sprite.height - 8
+            atlas.alpha_composite(sprite, (x, y))
+    atlas.save(OUT / "keeper-handling-sheet-hd.png", optimize=True)
+
+
+def build_keeper_high_claim_atlas() -> None:
+    """Pack the five-frame jump while retaining authored baseline clearance."""
+    source = Image.open(KEEPER_HIGH_CLAIM_SOURCE).convert("RGBA")
+    cells = grouped_actor_boxes(source, (5,))
+    grounded_reference = max(
+        cells[index]["actor"][3] - cells[index]["actor"][1] for index in (0, 4)
+    )
+    scale = 205 / grounded_reference
+    baseline = max(cells[index]["actor"][3] for index in (0, 4))
+    frame_width, frame_height = (320, 360)
+    atlas = Image.new("RGBA", KEEPER_HIGH_CLAIM_SIZE, (0, 0, 0, 0))
+    for col, cell in enumerate(cells):
+        sprite = source.crop(cell["combined"])
+        sprite = sprite.resize(
+            (max(1, round(sprite.width * scale)), max(1, round(sprite.height * scale))),
+            Image.Resampling.NEAREST,
+        )
+        clearance = max(0, round((baseline - cell["actor"][3]) * scale))
+        if sprite.width > frame_width - 8 or sprite.height + clearance > frame_height - 8:
+            raise ValueError(f"keeper high-claim frame {col} does not fit: {sprite.size}, lift={clearance}")
+        x = col * frame_width + (frame_width - sprite.width) // 2
+        y = frame_height - sprite.height - clearance - 8
+        atlas.alpha_composite(sprite, (x, y))
+    atlas.save(OUT / "keeper-high-claim-sheet-hd.png", optimize=True)
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     source = Image.open(SOURCE).convert("RGBA")
     build_keeper_animation_atlas()
     build_keeper_recovery_atlas()
+    build_keeper_dive_motion_atlas()
+    build_keeper_footwork_atlas()
+    build_keeper_handling_atlas()
+    build_keeper_high_claim_atlas()
 
     # Remove the footballs baked into action/dive reference poses; gameplay owns
     # a separate simulated ball, so these pixels must never double-render.

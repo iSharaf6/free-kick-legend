@@ -1028,7 +1028,7 @@ export class GameScene extends Phaser.Scene {
     this.dailyShotsTxt?.setText(`${this.attempt}/${this.maxAttempts}`);
 
     if (this.attempt >= this.maxAttempts) {
-      this.time.delayedCall(1400, () => this.showDailyComplete());
+      this.time.delayedCall(this.resultResetDelay(outcome, 1400), () => this.showDailyComplete());
       return;
     }
 
@@ -1138,7 +1138,7 @@ export class GameScene extends Phaser.Scene {
       this.lastReward = Math.max(SaveManager.getCoins() - coinsBefore, 0);
       PlatformService.reportProgress(((this.levelIndex + 1) / LEVELS.length) * 100);
       if (this.levelIndex === LEVELS.length - 1) PlatformService.happyTime();
-      this.time.delayedCall(1450, () => this.showLevelClear(stars));
+      this.time.delayedCall(this.resultResetDelay(outcome, 1450), () => this.showLevelClear(stars));
       return;
     }
 
@@ -1157,7 +1157,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   resultResetDelay(outcome, minimum = 750) {
-    if (outcome !== 'SAVE' && outcome !== 'CAUGHT') return minimum;
+    // Keep every result on screen until an active keeper motion reaches a
+    // stable end pose. Goals, misses and posts can still happen mid-dive.
+    if (outcome === 'WALL') return minimum;
     return Math.max(minimum, this.keeper?.getResultHoldMs?.() || minimum);
   }
 
