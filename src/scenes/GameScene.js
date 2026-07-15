@@ -976,7 +976,7 @@ export class GameScene extends Phaser.Scene {
       }
       this.scoreTxt.setText(`SCORE ${this.score}`);
       this.comboTxt?.setText(this.combo > 1 ? `x${this.combo} COMBO` : `${this.goals} GOALS`);
-      this.time.delayedCall(1150, () => {
+      this.time.delayedCall(this.resultResetDelay(outcome, 1150), () => {
         if (!this.over) {
           this.scene.restart({
             mode: 'arcade', score: this.score, goals: this.goals,
@@ -1040,7 +1040,7 @@ export class GameScene extends Phaser.Scene {
         ? `${rating.label.toUpperCase()}  ·  ${remaining} SHOTS LEFT`
         : `${remaining} SHOTS LEFT  ·  BUILD THE SCORE`
     ));
-    this.time.delayedCall(750, () => this.resetAttempt());
+    this.time.delayedCall(this.resultResetDelay(outcome), () => this.resetAttempt());
   }
 
   objectiveCheck(outcome, point, rating) {
@@ -1146,14 +1146,19 @@ export class GameScene extends Phaser.Scene {
     this.attempt++;
     const remaining = Math.max(this.maxAttempts - this.attempt + 1, 0);
     if (this.attempt > this.maxAttempts) {
-      this.time.delayedCall(1350, () => this.showLevelFailed());
+      this.time.delayedCall(this.resultResetDelay(outcome, 1350), () => this.showLevelFailed());
     } else {
       const message = scored && !check.qualifies
         ? check.reason
         : scored ? `${this.goalsThisLevel}/${needed} DONE — ${remaining} SHOTS LEFT` : `${check.reason}  ·  ${remaining} LEFT`;
       this.time.delayedCall(550, () => this.showSwipeHintMessage(message));
-      this.time.delayedCall(750, () => this.resetAttempt());
+      this.time.delayedCall(this.resultResetDelay(outcome), () => this.resetAttempt());
     }
+  }
+
+  resultResetDelay(outcome, minimum = 750) {
+    if (outcome !== 'SAVE' && outcome !== 'CAUGHT') return minimum;
+    return Math.max(minimum, this.keeper?.getResultHoldMs?.() || minimum);
   }
 
   resetAttempt() {

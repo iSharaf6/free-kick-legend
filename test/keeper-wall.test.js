@@ -4,18 +4,24 @@ import assert from 'node:assert/strict';
 import { Ball } from '../src/objects/Ball.js';
 import { Goalkeeper } from '../src/objects/Goalkeeper.js';
 import { Wall } from '../src/objects/Wall.js';
-import { BALL_R, CAM, PHYS } from '../src/config.js';
+import { BALL_R, CAM, PHYS, project } from '../src/config.js';
 
 function spriteStub() {
-  const sprite = { destroy() {} };
+  const sprite = { calls: {}, destroy() {} };
   for (const method of ['setTexture', 'setOrigin', 'setFlipX', 'setPosition', 'setScale', 'setDepth']) {
-    sprite[method] = () => sprite;
+    sprite[method] = (...args) => {
+      sprite.calls[method] = args;
+      return sprite;
+    };
   }
   return sprite;
 }
 
-function sceneStub() {
-  return { add: { sprite: () => spriteStub() } };
+function sceneStub(textures = []) {
+  return {
+    textures: { exists: (key) => textures.includes(key) },
+    add: { sprite: () => spriteStub() }
+  };
 }
 
 test('keeper perception is repeatable with a seed', () => {
@@ -87,6 +93,9 @@ test('keeper maps simulation phases and screen direction to authored animation f
   keeper.diveP = 0.1;
   assert.equal(keeper.getAnimationFrame(), 5);
   keeper.state = 'land';
+  keeper.grounded = false;
+  assert.equal(keeper.getAnimationFrame(), 8, 'full stretch remains active during descent');
+  keeper.grounded = true;
   assert.equal(keeper.getAnimationFrame(), 9);
 
   keeper.pose = 'catch';
@@ -99,6 +108,91 @@ test('keeper maps simulation phases and screen direction to authored animation f
   assert.equal(keeper.getAnimationFrame(), 17);
   keeper.catchY = 2;
   assert.equal(keeper.getAnimationFrame(), 18);
+});
+
+test('keeper recovery adds six grounded phases per screen direction', () => {
+  const keeper = new Goalkeeper(sceneStub(), 0.6, CAM.ballDist + 17, { seed: 4 });
+  keeper.state = 'land';
+  keeper.grounded = true;
+  keeper.diveDir = 1;
+
+  for (const [time, frame] of [[0, 0], [0.1, 1], [0.25, 2], [0.42, 3], [0.58, 4], [0.72, 5]]) {
+    keeper.stateT = time;
+    assert.equal(keeper.getRecoveryFrame(), frame);
+  }
+
+  keeper.diveDir = -1;
+  keeper.stateT = 0;
+  assert.equal(keeper.getRecoveryFrame(), 6);
+  keeper.stateT = 0.72;
+  assert.equal(keeper.getRecoveryFrame(), 11);
+});
+
+test('grounded keeper recovery is bottom-anchored to the pitch', () => {
+  const keeper = new Goalkeeper(
+    sceneStub(['keeper-anim-hd', 'keeper-recovery-hd']),
+    0.6,
+    CAM.ballDist + 17,
+    { seed: 4 }
+  );
+
+  keeper.pose = 'dive';
+  keeper.state = 'land';
+  keeper.grounded = false;
+  keeper.landY = 1.1;
+  keeper.draw();
+  assert.deepEqual(keeper.spr.calls.setOrigin, [0.5, 0.5]);
+  assert.deepEqual(keeper.spr.calls.setTexture, ['keeper-anim-hd', 8]);
+
+  keeper.grounded = true;
+  keeper.stateT = 0;
+  keeper.draw();
+  const pitch = project(keeper.x, 0, keeper.z);
+  assert.deepEqual(keeper.spr.calls.setOrigin, [0.5, 1]);
+  assert.deepEqual(keeper.spr.calls.setTexture, ['keeper-recovery-hd', 0]);
+  assert.deepEqual(keeper.spr.calls.setPosition, [pitch.x, pitch.y]);
+});
+
+test('save result hold covers landing, six recovery phases and return to position', () => {
+  const keeper = new Goalkeeper(
+    sceneStub(['keeper-anim-hd', 'keeper-recovery-hd']),
+    0.7,
+    CAM.ballDist + 17,
+    { seed: 4 }
+  );
+  keeper.pose = 'dive';
+  keeper.state = 'land';
+  keeper.grounded = false;
+  keeper.landY = 2.1;
+  keeper.landVy = 0;
+  keeper.x = 1.8;
+  keeper.moveTargetX = 1.8;
+  keeper.moveVx = 0;
+
+  const holdMs = keeper.getResultHoldMs();
+  assert.ok(holdMs > 1500, 'a high save is held longer than the old fixed reset');
+
+  for (let elapsed = 0; elapsed < holdMs / 1000; elapsed += PHYS.fixedStep) {
+    keeper.update(PHYS.fixedStep);
+  }
+  assert.equal(keeper.state, 'idle');
+  assert.ok(Math.abs(keeper.x) <= 0.06);
+});
+
+test('standing parry follows the real contact direction and begins a full recovery', () => {
+  const keeper = new Goalkeeper(sceneStub(), 0.7, CAM.ballDist + 17, { seed: 4 });
+  keeper.state = 'read';
+  keeper.pose = 'ready';
+  keeper.x = 0;
+  keeper.diveDir = 1;
+
+  keeper.impact({ x: -0.55, y: 1.1 }, { vx: -2, vy: 3, vz: 20 });
+
+  assert.equal(keeper.state, 'dive');
+  assert.equal(keeper.pose, 'dive');
+  assert.equal(keeper.diveDir, -1);
+  assert.ok(keeper.moveVx < 0);
+  assert.ok(keeper.getResultHoldMs() > 1000);
 });
 
 test('wall jump variation is deterministic and frame-rate invariant', () => {

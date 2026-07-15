@@ -5,8 +5,12 @@ const DIVE_H = 1.35;
 const GROUND_Y = 0.36;      // body centre height when lying on the turf
 const HALF_GOAL = GOAL_W / 2;
 const KEEPER_ANIMATION_TEXTURE = 'keeper-anim-hd';
+const KEEPER_RECOVERY_TEXTURE = 'keeper-recovery-hd';
 const KEEPER_STANDING_REFERENCE_H = 210;
 const KEEPER_DIVE_REFERENCE_H = 180;
+const KEEPER_RECOVERY_REFERENCE_H = 242;
+const GROUND_RECOVERY_DURATION = 0.78;
+const RETURN_RATE = 6;
 const KEEPER_FRAMES = Object.freeze({
   idle: Object.freeze([0, 1, 0, 3]),
   anticipate: 2,
@@ -103,6 +107,7 @@ export class Goalkeeper {
     this.contactPulse = 0;
     this.idlePhase = this._random() * Math.PI * 2;
     this.hasAnimationAtlas = Boolean(scene.textures?.exists?.(KEEPER_ANIMATION_TEXTURE));
+    this.hasRecoveryAtlas = Boolean(scene.textures?.exists?.(KEEPER_RECOVERY_TEXTURE));
     const initialTexture = this.hasAnimationAtlas
       ? KEEPER_ANIMATION_TEXTURE
       : (scene.textures?.exists?.('keeper-hd') ? 'keeper-hd' : 'keeper');
@@ -234,9 +239,9 @@ export class Goalkeeper {
       }
 
       case 'land':
-        this.stateT += dt;
         this.pose = 'dive';
         if (!this.grounded) {
+          this.stateT += dt;
           this.landVy += 9.2 * dt;
           this.landY -= this.landVy * dt;
           // A touch of slide keeps the momentum honest.
@@ -245,12 +250,14 @@ export class Goalkeeper {
           if (this.landY <= GROUND_Y) {
             this.landY = GROUND_Y;
             this.grounded = true;
+            this.stateT = 0;
             this.contactPulse = Math.max(this.contactPulse, 0.55);
           }
         } else {
+          this.stateT += dt;
           this.x = clamp(this.x + this.moveVx * dt * 0.35, -HALF_GOAL + 0.4, HALF_GOAL - 0.4);
           this.moveVx *= Math.max(0, 1 - 5 * dt);
-          if (this.stateT >= 0.55) {
+          if (this.stateT >= GROUND_RECOVERY_DURATION) {
             this.state = 'return';
             this.pose = 'idle';
             this.stateT = 0;
@@ -261,7 +268,7 @@ export class Goalkeeper {
       case 'return':
         this.stateT += dt;
         this.pose = 'idle';
-        this.x += (0 - this.x) * Math.min(dt * 3, 1);
+        this.x += (0 - this.x) * Math.min(dt * RETURN_RATE, 1);
         if (Math.abs(this.x) <= 0.06) {
           this.state = 'idle';
           this.stateT = 0;
@@ -305,7 +312,9 @@ export class Goalkeeper {
   getAnimationFrame() {
     if (this.pose === 'dive') {
       const base = this.diveDir > 0 ? KEEPER_FRAMES.diveRight : KEEPER_FRAMES.diveLeft;
-      if (this.state === 'land') return base + 4;
+      // Keep the full-stretch flight pose while gravity brings the body down.
+      // The side-lying pose is legal only after actual turf contact.
+      if (this.state === 'land') return base + (this.grounded ? 4 : 3);
       const progress = clamp(this.diveP, 0, 1);
       if (progress < 0.16) return base;
       if (progress < 0.38) return base + 1;
@@ -319,7 +328,9 @@ export class Goalkeeper {
       if (this.catchY < 1.72) return KEEPER_FRAMES.chestCatch;
       return KEEPER_FRAMES.highCatch;
     }
-    if (this.state === 'return' && this.stateT < 0.24) return KEEPER_FRAMES.recovery;
+    if (this.state === 'return' && this.stateT < 0.24 && !this.hasRecoveryAtlas) {
+      return KEEPER_FRAMES.recovery;
+    }
     if (this.state === 'read') return this.diveDir > 0 ? 3 : 1;
     if (this.state === 'set') {
       const progress = this.setT > 0 ? this.stateT / this.setT : 1;
@@ -331,14 +342,66 @@ export class Goalkeeper {
     return KEEPER_FRAMES.idle[index];
   }
 
+  getRecoveryFrame() {
+    const base = this.diveDir > 0 ? 0 : 6;
+    const progress = clamp(this.stateT / GROUND_RECOVERY_DURATION, 0, 1);
+    if (progress < 0.12) return base;
+    if (progress < 0.28) return base + 1;
+    if (progress < 0.47) return base + 2;
+    if (progress < 0.66) return base + 3;
+    if (progress < 0.84) return base + 4;
+    return base + 5;
+  }
+
+  getResultHoldMs() {
+    // Let a save finish its physical sequence before the scene resets. This
+    // follows the same gravity/recovery/return phases as _step(), so a high
+    // save receives more screen time than a low one without slowing all shots.
+    const fallTime = (height, velocity = 0) => {
+      const distance = Math.max(0, height - GROUND_Y);
+      return distance <= 0
+        ? 0
+        : (-velocity + Math.sqrt(velocity * velocity + 2 * 9.2 * distance)) / 9.2;
+    };
+    const returnDistance = Math.max(Math.abs(this.x), Math.abs(this.moveTargetX || 0));
+    const returnTime = returnDistance > 0.06
+      ? Math.log(returnDistance / 0.06) / RETURN_RATE
+      : 0;
+
+    let remaining = 0;
+    if (this.state === 'dive') {
+      remaining += Math.max(0, this.diveDuration - this.stateT);
+      remaining += fallTime(clamp(this.targetY, 0.5, 2.45));
+      remaining += GROUND_RECOVERY_DURATION;
+    } else if (this.state === 'land') {
+      remaining += this.grounded
+        ? Math.max(0, GROUND_RECOVERY_DURATION - this.stateT)
+        : fallTime(this.landY, this.landVy) + GROUND_RECOVERY_DURATION;
+    } else if (this.state === 'return') {
+      remaining = 0;
+    } else if (this.state === 'catch') {
+      return 1050;
+    } else {
+      return 750;
+    }
+
+    return Math.ceil((remaining + returnTime + 0.1) * 1000);
+  }
+
   draw() {
     const usingAtlas = this.hasAnimationAtlas;
-    const animationFrame = usingAtlas ? this.getAnimationFrame() : undefined;
+    const usingRecoveryAtlas = this.hasRecoveryAtlas && this.state === 'land' && this.grounded;
+    const animationFrame = usingRecoveryAtlas
+      ? this.getRecoveryFrame()
+      : (usingAtlas ? this.getAnimationFrame() : undefined);
     if (this.pose === 'dive') {
       const contact = this.getContactPose();
-      const pos = project(this.x, contact.y, this.z);
+      const pos = project(this.x, usingRecoveryAtlas ? 0 : contact.y, this.z);
       let diveTexture;
-      if (usingAtlas) {
+      if (usingRecoveryAtlas) {
+        diveTexture = KEEPER_RECOVERY_TEXTURE;
+        this.spr.setTexture(diveTexture, animationFrame).setFlipX(false);
+      } else if (usingAtlas) {
         diveTexture = KEEPER_ANIMATION_TEXTURE;
         this.spr.setTexture(diveTexture, animationFrame).setFlipX(false);
       } else {
@@ -350,10 +413,15 @@ export class Goalkeeper {
         const hasAuthoredLeft = this.scene.textures?.exists?.('keeper-dive-hd');
         this.spr.setFlipX(hasAuthoredLeft ? (!authoredRight && this.diveDir > 0) : this.diveDir < 0);
       }
-      this.spr.setOrigin(0.5, 0.5);
+      // Recovery frames are packed on one shared baseline, so originY=1 pins
+      // the lowest glove/hip/knee/boot pixel to the projected pitch surface.
+      this.spr.setOrigin(0.5, usingRecoveryAtlas ? 1 : 0.5);
       this.spr.setPosition(pos.x, pos.y);
-      const textureH = usingAtlas ? KEEPER_DIVE_REFERENCE_H : spriteFrameHeight(this.spr);
-      const baseScale = (pos.s * DIVE_H) / textureH;
+      const textureH = usingRecoveryAtlas
+        ? KEEPER_RECOVERY_REFERENCE_H
+        : (usingAtlas ? KEEPER_DIVE_REFERENCE_H : spriteFrameHeight(this.spr));
+      const renderedHeight = usingRecoveryAtlas ? KEEPER_H : DIVE_H;
+      const baseScale = (pos.s * renderedHeight) / textureH;
       const pulse = this.reducedMotion ? 1 : 1 + this.contactPulse * 0.06;
       if (this.state === 'land') {
         // Grounded: settle flat with a small impact squash on touchdown.
@@ -507,11 +575,34 @@ export class Goalkeeper {
     this.contactPulse = 1;
     this.spr.setTint?.(0xfff3c4);
     this.scene.time?.delayedCall?.(95, () => this.spr?.clearTint?.());
-    // A parry knocks some momentum out of the dive so the deflection reads.
-    if (ball && (this.state === 'dive' || this.state === 'land')) {
+    if (!ball) return;
+
+    if (this.state === 'dive' || this.state === 'land') {
+      // A parry knocks some momentum out of an existing dive so the
+      // deflection reads before the body continues to the turf.
       this.moveVx *= 0.4;
       this.landVy = Math.max(this.landVy, 1.2);
+      return;
     }
+
+    // Close shots can reach the keeper while he is still reading or setting.
+    // Start the save follow-through from the real contact point, rather than
+    // letting an earlier prediction send the sprite the opposite direction.
+    const contactX = Number.isFinite(pt?.x) ? pt.x : this.x;
+    const contactY = Number.isFinite(pt?.y) ? pt.y : 1;
+    this.diveDir = contactX >= this.x ? 1 : -1;
+    this.targetX = clamp(contactX, -HALF_GOAL + 0.35, HALF_GOAL - 0.35);
+    this.targetY = clamp(contactY, 0.5, 2.45);
+    this.moveTargetX = clamp(
+      contactX - this.diveDir * 0.58,
+      -HALF_GOAL + 0.55,
+      HALF_GOAL - 0.55
+    );
+    this.state = 'dive';
+    this.pose = 'dive';
+    this.stateT = this.diveDuration * 0.2;
+    this.diveP = 0.2;
+    this.moveVx = this.diveDir * (2.4 + this.skill * 1.5);
   }
 
   reset() {

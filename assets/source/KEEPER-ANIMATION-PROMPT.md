@@ -30,3 +30,22 @@ Match the existing premium HD pixel art: crisp deliberate pixel clusters, dark
 outlines, detailed fabric folds and anatomy, limited retro palette and consistent
 highlight direction. No text, grid lines, logos, watermark, extra people,
 detached debris, shadows or background variation.
+
+## Ground recovery extension
+
+The source board `keeper-recovery-sheet-v1-alpha.png` is repacked into
+`public/assets/hd/keeper-recovery-sheet-hd.png` as twelve `320×280` frames:
+
+- `0–5`: recovery after a screen-right dive
+- `6–11`: recovery after a screen-left dive
+
+Each direction uses six phases: turf impact, side-lying settle, glove/elbow
+brace, both knees, one-foot half-rise and balanced ready crouch. Every frame is
+packed against one shared bottom edge so Phaser can anchor it directly to the
+projected pitch with `originY = 1`.
+
+The generated strip used the original twenty-frame goalkeeper board as the
+strict identity and pixel-style reference. It requested exactly two rows of six
+figures on flat `#ff00ff`, naturally authored per direction, with no ball,
+shadow, text, detached parts or extra figures. The runtime alpha source was
+produced with the built-in image generator followed by local chroma-key removal.

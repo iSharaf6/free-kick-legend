@@ -12,9 +12,11 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "tmp/imagegen/football-sprite-sheet-alpha.png"
 KEEPER_ANIMATION_SOURCE = ROOT / "assets/source/keeper-animation-sheet-v1-alpha.png"
+KEEPER_RECOVERY_SOURCE = ROOT / "assets/source/keeper-recovery-sheet-v1-alpha.png"
 OUT = ROOT / "public/assets/hd"
 
 KEEPER_ANIMATION_SIZE = (1600, 1120)
+KEEPER_RECOVERY_SIZE = (1920, 560)
 KEEPER_FRAME_SIZE = (320, 280)
 
 
@@ -215,10 +217,44 @@ def build_keeper_animation_atlas() -> None:
     atlas.save(OUT / "keeper-animation-sheet-hd.png", optimize=True)
 
 
+def build_keeper_recovery_atlas() -> None:
+    """Pack twelve direction-specific turf recovery frames on one foot line."""
+    source = Image.open(KEEPER_RECOVERY_SOURCE).convert("RGBA")
+    boxes = connected_component_boxes(source)
+    if len(boxes) != 12:
+        raise ValueError(f"keeper recovery source must contain 12 figures, found {len(boxes)}")
+
+    boxes.sort(key=lambda box: (box[1] + box[3]) / 2)
+    rows = []
+    for row_index in range(2):
+        row = boxes[row_index * 6:(row_index + 1) * 6]
+        row.sort(key=lambda box: (box[0] + box[2]) / 2)
+        rows.append(row)
+
+    frame_width, frame_height = KEEPER_FRAME_SIZE
+    atlas = Image.new("RGBA", KEEPER_RECOVERY_SIZE, (0, 0, 0, 0))
+    for row_index, row in enumerate(rows):
+        for col_index, box in enumerate(row):
+            sprite = source.crop(box)
+            if sprite.width > frame_width - 8 or sprite.height > frame_height - 8:
+                raise ValueError(
+                    f"keeper recovery frame {row_index * 6 + col_index} does not fit "
+                    f"inside {KEEPER_FRAME_SIZE}: {sprite.size}"
+                )
+            x = col_index * frame_width + (frame_width - sprite.width) // 2
+            # Every impact, roll, kneel and rise pose shares the exact same
+            # bottom edge. Runtime can therefore pin originY=1 to the turf.
+            y = row_index * frame_height + frame_height - sprite.height - 8
+            atlas.alpha_composite(sprite, (x, y))
+
+    atlas.save(OUT / "keeper-recovery-sheet-hd.png", optimize=True)
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     source = Image.open(SOURCE).convert("RGBA")
     build_keeper_animation_atlas()
+    build_keeper_recovery_atlas()
 
     # Remove the footballs baked into action/dive reference poses; gameplay owns
     # a separate simulated ball, so these pixels must never double-render.
