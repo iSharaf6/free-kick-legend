@@ -1,7 +1,7 @@
 import { project, GOAL_W, GOAL_H, BALL_R, PHYS } from '../config.js';
 
-const KEEPER_H = 1.95;
-const DIVE_H = 1.35;
+const KEEPER_H = 1.86;
+const DIVE_H = 1.30;
 const GROUND_Y = 0;         // visual root height above the pitch
 const HALF_GOAL = GOAL_W / 2;
 const KEEPER_ANIMATION_TEXTURE = 'keeper-anim-hd';
@@ -12,22 +12,28 @@ const KEEPER_RETURN_TEXTURE = 'keeper-return-hd';
 const KEEPER_LOW_SAVE_TEXTURE = 'keeper-low-save-hd';
 const KEEPER_HANDLING_TEXTURE = 'keeper-handling-hd';
 const KEEPER_HIGH_CLAIM_TEXTURE = 'keeper-high-claim-hd';
+const SAVE_FAMILY_TEXTURES = Object.freeze({
+  'low-smother': 'keeper-low-smother-hd',
+  'mid-catch': 'keeper-mid-catch-hd',
+  'upper-parry': 'keeper-upper-parry-hd',
+  'top-tip': 'keeper-top-tip-hd',
+  'reflex-foot': 'keeper-reflex-foot-hd'
+});
 const KEEPER_STANDING_REFERENCE_H = 210;
 const KEEPER_DIVE_REFERENCE_H = 180;
-const KEEPER_RECOVERY_REFERENCE_H = 242;
-const KEEPER_RECOVERY_IMPACT_REFERENCE_H = 286;
+const KEEPER_RECOVERY_REFERENCE_H = 205;
 const KEEPER_MOTION_REFERENCE_H = 200;
 const KEEPER_RETURN_REFERENCE_H = 205;
 const KEEPER_LOW_SAVE_REFERENCE_H = 205;
 const KEEPER_HANDLING_REFERENCE_H = 205;
-const GROUND_RECOVERY_DURATION = 0.78;
-const GROUND_IMPACT_HOLD = 0.10;
+const GROUND_RECOVERY_DURATION = 0.52;
+const GROUND_IMPACT_HOLD = 0.06;
 const CONTACT_PROGRESS = 0.68;
 const CONTACT_HOLD_DURATION = 0.058;
-const RETURN_SPEED = 2.8;
+const RETURN_SPEED = 3.4;
 const RETURN_ACCELERATION = 18;
 const TRACK_ACCELERATION = 14;
-const STANDING_SAVE_REACH = 0.34;
+const STANDING_SAVE_REACH = 0.42;
 const LOW_SAVE_MAX_Y = 1.02;
 const KEEPER_FRAMES = Object.freeze({
   idle: Object.freeze([0, 1, 0, 3]),
@@ -89,6 +95,15 @@ function ellipseDistance(point, shape) {
   );
 }
 
+export function classifySaveFamily({ y = 1, speed = 20, lateral = 1 } = {}) {
+  if (y < 0.58 && speed >= 23.5 && lateral <= 1.55) return 'reflex-foot';
+  if (y < 0.66 && speed < 23.5) return 'low-smother';
+  if (y < 1.02) return 'low-extension';
+  if (y < 1.36) return 'mid-catch';
+  if (y < 2.02) return 'upper-parry';
+  return 'top-tip';
+}
+
 function defaultSeed(skill, zGoal) {
   let seed = (Math.round(skill * 1_000_000) ^ Math.round(zGoal * 10_000) ^ 0x9e3779b9) >>> 0;
   if (seed === 0) seed = 0x6d2b79f5;
@@ -133,7 +148,14 @@ export class Goalkeeper {
     this.pendingLandImpulse = 0;
     this.targetX = 0;
     this.moveTargetX = 0;
+    this.trackTargetX = 0;
     this.targetY = 1;
+    this.shotX = 0;
+    this.shotY = 1;
+    this.shotSpeed = 20;
+    this.maxHandY = 2;
+    this.maxDiveRootTravel = 0;
+    this.saveFamily = 'mid-catch';
     this.diveDir = 1;
     this.catchY = 1;
     this.landY = GROUND_Y;
@@ -141,6 +163,7 @@ export class Goalkeeper {
     this.grounded = false;
     this.contactPulse = 0;
     this.footworkDistance = 0;
+    this.returnDirection = 0;
     this.catchType = 'chest';
     this.catchDuration = 0.82;
     this.standingSave = false;
@@ -153,6 +176,12 @@ export class Goalkeeper {
     this.hasLowSaveAtlas = Boolean(scene.textures?.exists?.(KEEPER_LOW_SAVE_TEXTURE));
     this.hasHandlingAtlas = Boolean(scene.textures?.exists?.(KEEPER_HANDLING_TEXTURE));
     this.hasHighClaimAtlas = Boolean(scene.textures?.exists?.(KEEPER_HIGH_CLAIM_TEXTURE));
+    this.hasSaveFamilyAtlas = Object.fromEntries(
+      Object.entries(SAVE_FAMILY_TEXTURES).map(([family, texture]) => [
+        family,
+        Boolean(scene.textures?.exists?.(texture))
+      ])
+    );
     const initialTexture = this.hasAnimationAtlas
       ? KEEPER_ANIMATION_TEXTURE
       : (scene.textures?.exists?.('keeper-hd') ? 'keeper-hd' : 'keeper');
@@ -185,55 +214,62 @@ export class Goalkeeper {
     const prediction = ball.predictAt(interceptZ);
     const flightT = Number.isFinite(prediction.T) ? prediction.T : 0.6;
 
-    // Weak keepers under-read curl and have more perception error, but the
-    // error sequence is seeded/replayable instead of depending on Math.random.
+    // Keeper reads are deterministic. Skill changes what the keeper can read,
+    // track and physically reach; identical shots never roll a different save.
     const curl = 0.5 * ball.spin * PHYS.magnus * Math.max(ball.vz, 0) * flightT * flightT;
-    const curlRead = clamp(0.48 + this.skill * 0.38 + this.profile.read, 0.38, 0.94);
-    // Perception dominates difficulty now that the contact ellipses match the
-    // visible sprite. Even elite styles retain human placement error instead
-    // of silently shrinking it toward zero and covering almost every shot.
-    const styleError = 0.9 + this.profile.error * 0.1;
-    const errorX = (this._random() * 2 - 1) *
-      (1.0 + (1 - this.skill) * 1.65) * styleError;
-    const errorY = (this._random() * 2 - 1) *
-      (0.18 + (1 - this.skill) * 0.42) * styleError;
-
+    const curlRead = clamp(0.56 + this.skill * 0.34 + this.profile.read, 0.44, 0.96);
+    this.shotX = clamp(prediction.x, -HALF_GOAL + 0.2, HALF_GOAL - 0.2);
+    this.shotY = clamp(prediction.y, 0.2, GOAL_H - 0.18);
+    this.shotSpeed = Math.hypot(
+      Number(ball.vx) || 0,
+      Number(ball.vy) || 0,
+      Number(ball.vz) || 0
+    );
+    this.maxHandY = clamp(
+      1.55 + this.skill * 0.66 + clamp((flightT - 0.55) * 0.16, 0, 0.18),
+      1.55,
+      2.42
+    );
     this.targetX = clamp(
-      prediction.x - curl * (1 - curlRead) + errorX,
+      prediction.x - curl * (1 - curlRead),
       -HALF_GOAL + 0.35,
       HALF_GOAL - 0.35
     );
-    this.targetY = clamp(prediction.y + errorY, 0.28, GOAL_H - 0.28);
+    this.targetY = clamp(Math.min(prediction.y, this.maxHandY), 0.28, GOAL_H - 0.28);
     const shotDeltaX = prediction.x - this.x;
     this.diveDir = Math.abs(shotDeltaX) > 0.18
       ? (shotDeltaX >= 0 ? 1 : -1)
       : (this.targetX >= this.x ? 1 : -1);
-    // Perception error can make a weak keeper under- or over-shoot the ball,
-    // but a clearly left/right shot must never produce an opposite-facing
-    // dive. That looked exactly like an inverted animation in motion.
-    if (Math.abs(shotDeltaX) > 0.18 && (this.targetX - this.x) * this.diveDir < 0.08) {
-      this.targetX = clamp(
-        this.x + this.diveDir * Math.max(0.08, Math.min(Math.abs(shotDeltaX) * 0.35, 0.32)),
-        -HALF_GOAL + 0.35,
-        HALF_GOAL - 0.35
-      );
-    }
     this.standingSave = Math.abs(shotDeltaX) <= STANDING_SAVE_REACH;
-    this.moveTargetX = clamp(
-      this.targetX - this.diveDir * (0.42 + this.skill * 0.10),
-      -HALF_GOAL + 0.55,
-      HALF_GOAL - 0.55
-    );
+    this.saveFamily = classifySaveFamily({
+      y: prediction.y,
+      speed: this.shotSpeed,
+      lateral: Math.abs(shotDeltaX)
+    });
 
     // Time the contact pose to the ball's actual keeper-plane crossing. Slow
     // shots create more visible tracking footwork; fast shots compress the
     // read without making the keeper complete his dive before the ball arrives.
     this.setT = (0.055 + (1 - this.skill) * 0.045) * this.profile.set;
     this.diveDuration = (0.40 + (1 - this.skill) * 0.08) / Math.sqrt(this.profile.speed);
-    const minimumRead = (0.045 + (1 - this.skill) * 0.07) * this.profile.reaction;
+    const minimumRead = (0.11 + (1 - this.skill) * 0.13) * this.profile.reaction;
     const scheduledRead = flightT - this.setT -
       (this.standingSave ? 0 : this.diveDuration * CONTACT_PROGRESS);
-    this.reactT = clamp(scheduledRead, minimumRead, 0.72);
+    this.reactT = Math.max(scheduledRead, minimumRead);
+    const desiredRootX = this.standingSave
+      ? this.targetX
+      : this.targetX - this.diveDir * 0.59;
+    const trackSpeed = (1.30 + this.skill * 1.15) * this.profile.speed;
+    const availableTrackT = Math.max(0, this.reactT - minimumRead * 0.55);
+    const maxTrackTravel = trackSpeed * availableTrackT;
+    this.trackTargetX = clamp(
+      desiredRootX,
+      Math.max(-HALF_GOAL + 0.55, this.x - maxTrackTravel),
+      Math.min(HALF_GOAL - 0.55, this.x + maxTrackTravel)
+    );
+    this.moveTargetX = this.trackTargetX;
+    const diveRootSpeed = (2.15 + this.skill * 1.55) * this.profile.speed;
+    this.maxDiveRootTravel = diveRootSpeed * this.diveDuration * CONTACT_PROGRESS;
     this.state = 'read';
     this.pose = 'ready';
     this.stateT = 0;
@@ -241,7 +277,7 @@ export class Goalkeeper {
     this.moveVx = 0;
     this.visualLift = 0;
     this.diveHandY = 0.95;
-    this.contactLift = clamp(this.targetY - 0.86, 0.03, 1.58);
+    this.contactLift = clamp(this.targetY - 0.86, 0.03, 1.46);
     this.contactHoldT = 0;
     this.contactRegistered = false;
     this.pendingLandImpulse = 0;
@@ -268,7 +304,7 @@ export class Goalkeeper {
       case 'read': {
         this.stateT += dt;
         this.pose = 'ready';
-        const trackTarget = this.moveTargetX * 0.34;
+        const trackTarget = this.trackTargetX;
         const maxSpeed = (1.35 + this.skill * 1.25) * this.profile.speed;
         const desiredVx = clamp((trackTarget - this.x) * 8, -maxSpeed, maxSpeed);
         this.moveVx += clamp(
@@ -289,7 +325,7 @@ export class Goalkeeper {
       case 'set': {
         this.stateT += dt;
         this.pose = 'ready';
-        const plantTarget = this.moveTargetX * 0.52;
+        const plantTarget = this.trackTargetX;
         const desiredVx = clamp((plantTarget - this.x) * 10, -2.4, 2.4);
         this.moveVx += clamp(
           desiredVx - this.moveVx,
@@ -313,7 +349,12 @@ export class Goalkeeper {
           this.stateT = 0;
           this.diveP = 0;
           this.diveStartX = this.x;
-          this.contactRootX = this.moveTargetX;
+          const desiredContactRootX = this.targetX - this.diveDir * 0.59;
+          this.contactRootX = clamp(
+            desiredContactRootX,
+            Math.max(-HALF_GOAL + 0.45, this.x - this.maxDiveRootTravel),
+            Math.min(HALF_GOAL - 0.45, this.x + this.maxDiveRootTravel)
+          );
           this.landingRootX = clamp(
             this.contactRootX + this.diveDir * (0.20 + this.skill * 0.10),
             -HALF_GOAL + 0.4,
@@ -390,6 +431,7 @@ export class Goalkeeper {
             this.pose = 'idle';
             this.stateT = 0;
             this.footworkDistance = 0;
+            this.returnDirection = -Math.sign(this.x);
             // Recovery art finishes planted. Discard the tiny residual slide so
             // the first return step starts from a stable boot contact.
             this.moveVx = 0;
@@ -447,6 +489,7 @@ export class Goalkeeper {
           this.pose = 'idle';
           this.stateT = 0;
           this.footworkDistance = 0;
+          this.returnDirection = -Math.sign(this.x);
         }
         break;
 
@@ -564,8 +607,24 @@ export class Goalkeeper {
     return base + 7;
   }
 
+  getSaveFamilyFrame() {
+    const base = this.diveDir > 0 ? 0 : 8;
+    if (this.state === 'set') {
+      const progress = this.setT > 0 ? clamp(this.stateT / this.setT, 0, 1) : 1;
+      return base + (progress < 0.5 ? 2 : 3);
+    }
+    if (this.state === 'land') return base + 7;
+
+    const progress = clamp(this.diveP, 0, 1);
+    if (progress < 0.12) return base + 3;
+    if (progress < 0.32) return base + 4;
+    if (progress < 0.55) return base + 5;
+    if (progress < 0.78 || this.contactHoldT > 0) return base + 6;
+    return base + 7;
+  }
+
   getReturnFrame() {
-    let direction = this.moveVx;
+    let direction = this.returnDirection || this.moveVx;
     if (Math.abs(direction) < 0.04) direction = -this.x;
     // Generated atlas row one moves screen-left and row two screen-right.
     const base = direction >= 0 ? 9 : 0;
@@ -602,18 +661,14 @@ export class Goalkeeper {
   }
 
   getResultHoldMs() {
-    // Let a save finish its physical sequence before the scene resets. This
-    // follows the same gravity/recovery/return phases as _step(), so a high
-    // save receives more screen time than a low one without slowing all shots.
+    // Hold only through impact and the readable part of recovery. The next shot
+    // never waits for a full jog back to centre.
     const fallTime = (height, downwardVelocity = 0) => {
       const distance = Math.max(0, height);
       return distance <= 0
         ? 0
         : (-downwardVelocity + Math.sqrt(downwardVelocity * downwardVelocity + 2 * 9.2 * distance)) / 9.2;
     };
-    const returnDistance = Math.max(Math.abs(this.x), Math.abs(this.landingRootX || 0));
-    const returnTime = returnDistance > 0.06 ? returnDistance / RETURN_SPEED + 0.22 : 0;
-
     let remaining = 0;
     if (this.state === 'dive') {
       remaining += Math.max(0, this.diveDuration - this.stateT);
@@ -624,14 +679,13 @@ export class Goalkeeper {
         ? Math.max(0, GROUND_IMPACT_HOLD + GROUND_RECOVERY_DURATION - this.stateT)
         : fallTime(this.landY, this.landVy) + GROUND_IMPACT_HOLD + GROUND_RECOVERY_DURATION;
     } else if (this.state === 'return') {
-      return Math.ceil((Math.abs(this.x) / RETURN_SPEED + 0.28) * 1000);
+      return 250;
     } else if (this.state === 'catch') {
       remaining = Math.max(0, this.catchDuration - this.stateT);
     } else {
-      return 750;
+      return 650;
     }
-
-    return Math.ceil((remaining + returnTime + 0.1) * 1000);
+    return Math.ceil(clamp(remaining + 0.06, 0.55, 1.05) * 1000);
   }
 
   draw() {
@@ -642,12 +696,17 @@ export class Goalkeeper {
       this.state === 'land' &&
       this.grounded &&
       (!(this.hasDiveMotionAtlas || this.hasLowSaveAtlas) || this.stateT >= GROUND_IMPACT_HOLD);
-    const lowSavePhase = this.hasLowSaveAtlas &&
+    const familyTexture = SAVE_FAMILY_TEXTURES[this.saveFamily];
+    const saveFamilyPhase = Boolean(familyTexture && this.hasSaveFamilyAtlas[this.saveFamily]) &&
+      !this.standingSave &&
+      (this.state === 'set' || this.state === 'dive' || this.state === 'land') &&
+      !groundedRecovery;
+    const lowSavePhase = !saveFamilyPhase && this.hasLowSaveAtlas &&
       !this.standingSave &&
       this.targetY <= LOW_SAVE_MAX_Y &&
       (this.state === 'set' || this.state === 'dive' || this.state === 'land') &&
       !groundedRecovery;
-    const motionPhase = this.hasDiveMotionAtlas &&
+    const motionPhase = !saveFamilyPhase && this.hasDiveMotionAtlas &&
       (this.state === 'set' || this.state === 'dive' || this.state === 'land') &&
       !lowSavePhase &&
       !groundedRecovery;
@@ -658,7 +717,7 @@ export class Goalkeeper {
     const highClaim = this.state === 'catch' && this.catchType === 'high' && this.hasHighClaimAtlas;
     const handling = this.state === 'catch' && this.catchType !== 'high' && this.hasHandlingAtlas;
 
-    if (!lowSavePhase && !motionPhase && !groundedRecovery && !returnPhase &&
+    if (!saveFamilyPhase && !lowSavePhase && !motionPhase && !groundedRecovery && !returnPhase &&
         !footworkPhase && !highClaim && !handling) {
       this.drawLegacy();
       return;
@@ -669,7 +728,12 @@ export class Goalkeeper {
     let referenceHeight;
     let rootLift = 0;
 
-    if (lowSavePhase) {
+    if (saveFamilyPhase) {
+      texture = familyTexture;
+      frame = this.getSaveFamilyFrame();
+      referenceHeight = KEEPER_HANDLING_REFERENCE_H;
+      rootLift = this.state === 'dive' ? this.visualLift : this.state === 'land' ? this.landY : 0;
+    } else if (lowSavePhase) {
       texture = KEEPER_LOW_SAVE_TEXTURE;
       frame = this.getLowSaveFrame();
       referenceHeight = KEEPER_LOW_SAVE_REFERENCE_H;
@@ -682,16 +746,7 @@ export class Goalkeeper {
     } else if (groundedRecovery) {
       texture = KEEPER_RECOVERY_TEXTURE;
       frame = this.getRecoveryFrame();
-      const recoveryProgress = clamp(
-        (this.stateT - GROUND_IMPACT_HOLD) / GROUND_RECOVERY_DURATION,
-        0,
-        1
-      );
-      referenceHeight = lerp(
-        KEEPER_RECOVERY_IMPACT_REFERENCE_H,
-        KEEPER_RECOVERY_REFERENCE_H,
-        recoveryProgress
-      );
+      referenceHeight = KEEPER_RECOVERY_REFERENCE_H;
     } else if (returnPhase) {
       texture = KEEPER_RETURN_TEXTURE;
       frame = this.getReturnFrame();
@@ -849,8 +904,25 @@ export class Goalkeeper {
 
     const pose = this.getContactPose();
     const isDiving = this.state === 'dive' || this.state === 'land';
-    const shapes = isDiving
+    const shapes = isDiving && this.saveFamily === 'reflex-foot'
       ? [
+          {
+            part: 'foot',
+            x: pose.x + pose.direction * (0.34 + pose.progress * 0.22),
+            y: 0.42,
+            rx: 0.34 + BALL_R,
+            ry: 0.16 + BALL_R
+          },
+          {
+            part: 'body',
+            x: pose.x - pose.direction * 0.08,
+            y: 0.88,
+            rx: 0.36 + BALL_R,
+            ry: 0.34 + BALL_R
+          }
+        ]
+      : isDiving
+        ? [
           {
             part: 'hands',
             x: pose.x + pose.direction * (0.34 + pose.progress * 0.25),
@@ -865,8 +937,9 @@ export class Goalkeeper {
             rx: 0.43 + BALL_R,
             ry: 0.23 + BALL_R
           }
-        ]
-      : [
+          ]
+        : [
+          { part: 'hands', kind: 'low-scoop', x: pose.x, y: 0.48, rx: 0.34 + BALL_R, ry: 0.18 + BALL_R },
           { part: 'hands', x: pose.x, y: 1.72, rx: 0.27 + BALL_R, ry: 0.28 + BALL_R },
           { part: 'hands', x: pose.x - 0.28, y: 1.15, rx: 0.18 + BALL_R, ry: 0.20 + BALL_R },
           { part: 'hands', x: pose.x + 0.28, y: 1.15, rx: 0.18 + BALL_R, ry: 0.20 + BALL_R },
@@ -883,10 +956,14 @@ export class Goalkeeper {
     const speed = ball ? Math.hypot(ball.vx, ball.vy, ball.vz) : 20;
     const catchSpeed = 23 + this.skill * 6;
     const secure = hit.part === 'hands'
-      ? hit.distance < 0.60
+      ? hit.distance < (hit.kind === 'low-scoop' ? 0.82 : 0.60)
       : hit.distance < 0.40;
+    const divingFamilyCanCatch = !isDiving ||
+      this.saveFamily === 'low-smother' ||
+      this.saveFamily === 'low-extension' ||
+      this.saveFamily === 'mid-catch';
     return {
-      result: secure && speed <= catchSpeed ? 'catch' : 'parry',
+      result: divingFamilyCanCatch && secure && speed <= catchSpeed ? 'catch' : 'parry',
       part: hit.part,
       distance: hit.distance,
       x: hit.x,
@@ -947,6 +1024,14 @@ export class Goalkeeper {
     this.diveDir = contactX >= this.x ? 1 : -1;
     this.targetX = clamp(contactX, -HALF_GOAL + 0.35, HALF_GOAL - 0.35);
     this.targetY = clamp(contactY, 0.5, 2.45);
+    this.shotX = contactX;
+    this.shotY = contactY;
+    this.shotSpeed = Math.hypot(ball.vx || 0, ball.vy || 0, ball.vz || 0);
+    this.saveFamily = classifySaveFamily({
+      y: contactY,
+      speed: this.shotSpeed,
+      lateral: Math.abs(contactX - this.x)
+    });
     this.moveTargetX = clamp(
       contactX - this.diveDir * 0.58,
       -HALF_GOAL + 0.55,
@@ -996,13 +1081,21 @@ export class Goalkeeper {
     this.pendingLandImpulse = 0;
     this.targetX = 0;
     this.moveTargetX = 0;
+    this.trackTargetX = 0;
     this.targetY = 1;
+    this.shotX = 0;
+    this.shotY = 1;
+    this.shotSpeed = 20;
+    this.maxHandY = 2;
+    this.maxDiveRootTravel = 0;
+    this.saveFamily = 'mid-catch';
     this.catchY = 1;
     this.landY = GROUND_Y;
     this.landVy = 0;
     this.grounded = false;
     this.contactPulse = 0;
     this.footworkDistance = 0;
+    this.returnDirection = 0;
     this.catchType = 'chest';
     this.catchDuration = 0.82;
     this.standingSave = false;

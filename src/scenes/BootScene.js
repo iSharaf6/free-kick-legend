@@ -74,6 +74,12 @@ export class BootScene extends Phaser.Scene {
       frameWidth: 320,
       frameHeight: 360
     });
+    for (const family of ['low-smother', 'mid-catch', 'upper-parry', 'top-tip', 'reflex-foot']) {
+      this.load.spritesheet(`keeper-${family}-hd`, `${base}assets/hd/keeper-${family}-sheet-hd.png`, {
+        frameWidth: 320,
+        frameHeight: 280
+      });
+    }
     this.load.image('defender-hd', `${base}assets/hd/defender-hd.png`);
     this.load.image('ball-classic-hd', `${base}assets/hd/ball-classic-hd.png`);
   }

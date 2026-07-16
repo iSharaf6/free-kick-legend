@@ -130,12 +130,12 @@ const RAW_LEVELS = [
   }),
   makeLevel({
     id: 'curve-05', cup: 'curve', name: 'Over and Down', distance: 18, offsetX: 0, wall: 4, keeper: 0.36,
-    objective: objective('dip', 'Clear the wall and dip under the bar', { minimumHeight: 2.05 }), target: TARGETS.topCenter,
+    objective: objective('dip', 'Clear the wall, then finish away from the keeper', { minimumHeight: 1.95 }),
     reward: reward(85), style: 'line-reader'
   }),
   makeLevel({
     id: 'curve-06', cup: 'curve', name: 'Under the Jump', distance: 16, offsetX: 1, wall: 4, keeper: 0.38,
-    objective: objective('low-shot', 'Sneak a low shot beneath the wall', { maximumHeight: 1.05 }), target: TARGETS.lowCenter,
+    objective: objective('low-shot', 'Sneak a low finish beneath the jumping wall', { maximumHeight: 0.75 }),
     reward: reward(90), style: 'aggressive'
   }),
   makeLevel({
@@ -272,7 +272,7 @@ const RAW_LEVELS = [
   }),
   makeLevel({
     id: 'legend-05', cup: 'legend', name: 'The Great Wall', distance: 17, offsetX: -1, wall: 6, keeper: 0.7,
-    objective: objective('low-shot', 'Find a route beneath the great wall', { maximumHeight: 1.0 }), target: TARGETS.lowRight,
+    objective: objective('low-shot', 'Find any low route beneath the great wall', { maximumHeight: 0.72 }),
     reward: reward(180), style: 'legend'
   }),
   makeLevel({

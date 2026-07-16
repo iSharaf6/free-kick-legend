@@ -159,3 +159,31 @@ test('invalid gestures report a reason and cancellation clears state', () => {
   scene.input.emit('gameout');
   assert.equal(swipe.activePointerId, null);
 });
+
+test('a start-zone guard rejects the objective strip but allows a ball-started swipe across UI', () => {
+  const scene = sceneStub();
+  const invalid = [];
+  const shots = [];
+  const starts = [];
+  const ends = [];
+  const swipe = new SwipeInput(scene, (shot) => shots.push(shot), {
+    onInvalidShot: (reason) => invalid.push(reason),
+    canStart: (point) => point.y < 240 && Math.hypot(point.x - 240, point.y - 215) < 60,
+    onStart: (point) => starts.push(point),
+    onEnd: (valid) => ends.push(valid)
+  });
+  swipe.enabled = true;
+
+  scene.input.emit('pointerdown', pointer(10, 240, 252, 0));
+  assert.deepEqual(invalid, ['start-zone']);
+  assert.equal(swipe.activePointerId, null);
+
+  scene.input.emit('pointerdown', pointer(11, 240, 215, 100));
+  scene.input.emit('pointermove', pointer(11, 250, 250, 140));
+  scene.input.emit('pointermove', pointer(11, 270, 150, 190));
+  scene.input.emit('pointerup', pointer(11, 285, 90, 250));
+
+  assert.equal(starts.length, 1);
+  assert.equal(shots.length, 1);
+  assert.deepEqual(ends, [true]);
+});

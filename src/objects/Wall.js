@@ -12,7 +12,9 @@ function deterministicJumpSpeed(index, count) {
 
 function deterministicBuild(index, count) {
   const bucket = (index * 29 + count * 13 + 5) % 7;
-  const heightFactor = 0.86 + bucket * 0.028;
+  // Keep natural build variation without turning the shortest defenders into
+  // children beside a farther-away goalkeeper.
+  const heightFactor = 0.92 + bucket * 0.018;
   return {
     height: PLAYER_H * heightFactor,
     halfWidth: 0.255 + (bucket % 3) * 0.018

@@ -15,6 +15,7 @@ import { PlatformService } from '../systems/PlatformService.js';
 import { Audio } from '../systems/AudioSynth.js';
 import { careerStars, isTopCorner, scoreShot, targetGeometry } from '../systems/ShotScoring.js';
 import { classifyGoalPlane, reboundFromGoalFrame, sweepGoalFrame } from '../systems/GoalFramePhysics.js';
+import { GoalNetPhysics } from '../systems/GoalNetPhysics.js';
 import {
   makeButton, makeIconButton, makeStatChip, titleText, bodyText,
   drawPanel, addScanlines, configureHdCamera, crispText, FONT
@@ -201,7 +202,12 @@ export class GameScene extends Phaser.Scene {
     this.swipe = new SwipeInput(
       this,
       (shot) => this.takeShot(shot),
-      (reason) => this.showSwipeHint(reason)
+      {
+        onInvalidShot: (reason) => this.showSwipeHint(reason),
+        canStart: (point) => this.canStartSwipe(point),
+        onStart: () => this.onSwipeStart(),
+        onEnd: (valid) => this.onSwipeEnd(valid)
+      }
     );
     this.swipe.enabled = true;
 
@@ -327,33 +333,16 @@ export class GameScene extends Phaser.Scene {
     const zb = z + 2.2;
     const HW = GOAL_W / 2;
 
-    // net (renders behind keeper and ball)
-    const net = this.add.graphics().setDepth(2);
-    net.lineStyle(1, 0xe8eef4, 0.28);
-    for (let x = -HW; x <= HW + 0.01; x += 0.6) {
-      const t = project(x, GOAL_H * 0.92, zb);
-      const b = project(x, 0, zb);
-      net.lineBetween(t.x, t.y, b.x, b.y);
-    }
-    for (let y = 0; y <= GOAL_H * 0.92 + 0.01; y += 0.45) {
-      const l = project(-HW, y, zb);
-      const r = project(HW, y, zb);
-      net.lineBetween(l.x, l.y, r.x, r.y);
-    }
-    // side nets
-    for (let y = 0.4; y <= GOAL_H; y += 0.55) {
-      for (const side of [-HW, HW]) {
-        const f = project(side, y, z);
-        const b = project(side, y * 0.92, zb);
-        net.lineBetween(f.x, f.y, b.x, b.y);
-      }
-    }
-    // roof net
-    for (let x = -HW; x <= HW + 0.01; x += 0.9) {
-      const f = project(x, GOAL_H, z);
-      const b = project(x, GOAL_H * 0.92, zb);
-      net.lineBetween(f.x, f.y, b.x, b.y);
-    }
+    // Spring membrane renders behind the keeper and deforms at the exact goal
+    // crossing point instead of behaving like a painted background.
+    this.netBack = this.add.graphics().setDepth(2);
+    this.netPhysics = new GoalNetPhysics({
+      goalWidth: GOAL_W,
+      goalHeight: GOAL_H,
+      goalZ: z,
+      depth: zb - z
+    });
+    this.netPhysics.draw(this.netBack, project, { alpha: 0.28 });
 
     // goal frame (renders in front of the ball once it is inside the net)
     const frame = this.add.graphics().setDepth(1000 - z * 10 + 2);
@@ -537,8 +526,15 @@ export class GameScene extends Phaser.Scene {
           originX: 0.5, fontSize: '6px', color: '#f3c449'
         }).setDepth(2000);
       }
-      if (this.levelIndex === 0) {
-        this.hint = crispText(this.add.text(GAME_W / 2 + 30, GAME_H - 84, 'DRAG UP FROM THE BALL  ·  ARC THE SWIPE TO BEND', {
+      const techniqueHint = this.level.objective?.type === 'dip' || this.level.objective?.type === 'loft'
+        ? 'START AT THE BALL  ·  STEEPER SWIPE = MORE LOFT'
+        : this.level.objective?.type === 'low-shot'
+          ? 'START AT THE BALL  ·  SHORT FLAT SWIPE UNDER THE JUMP'
+          : this.levelIndex === 0
+            ? 'DRAG UP FROM THE BALL  ·  ARC THE SWIPE TO BEND'
+            : null;
+      if (techniqueHint) {
+        this.hint = crispText(this.add.text(GAME_W / 2 + 30, GAME_H - 84, techniqueHint, {
           fontFamily: FONT, fontSize: '7px', color: '#f3e7c3', stroke: '#071018', strokeThickness: 2
         }).setOrigin(0.5).setDepth(2000));
         this.tweens.add({ targets: this.hint, alpha: 0.35, duration: 600, yoyo: true, repeat: -1 });
@@ -641,9 +637,30 @@ export class GameScene extends Phaser.Scene {
     const copy = {
       'too-short': 'LONGER SWIPE = MORE CONTROL',
       'swipe-up': 'SWIPE UP TOWARD THE GOAL',
-      'not-enough-points': 'DRAG, THEN RELEASE TO SHOOT'
+      'not-enough-points': 'DRAG, THEN RELEASE TO SHOOT',
+      'start-zone': 'START YOUR SWIPE ON THE BALL'
     };
     this.showSwipeHintMessage(copy[reason] || 'TRY A CLEAN UPWARD SWIPE');
+  }
+
+  canStartSwipe(point) {
+    if (!point || point.y >= GAME_H - 30) return false;
+    const ball = project(this.ball.x, this.ball.y, this.ball.z);
+    const dx = (point.x - ball.x) / 68;
+    const dy = (point.y - ball.y) / 46;
+    return dx * dx + dy * dy <= 1;
+  }
+
+  onSwipeStart() {
+    if (!this.objectiveUi) return;
+    this.tweens.killTweensOf(this.objectiveUi);
+    this.tweens.add({ targets: this.objectiveUi, alpha: 0.14, duration: 140, ease: 'Cubic.easeOut' });
+  }
+
+  onSwipeEnd(valid) {
+    if (valid || !this.objectiveUi || this.state !== 'AIMING') return;
+    this.tweens.killTweensOf(this.objectiveUi);
+    this.tweens.add({ targets: this.objectiveUi, alpha: 1, duration: 160, ease: 'Cubic.easeOut' });
   }
 
   showSwipeHintMessage(message) {
@@ -765,6 +782,10 @@ export class GameScene extends Phaser.Scene {
     this.frameCollisionCooldown = Math.max(0, this.frameCollisionCooldown - dt);
     if (this.wall) this.wall.update(dt);
     this.keeper.update(dt, renderTime);
+    if (this.netPhysics?.active) {
+      this.netPhysics.update(dt);
+      if (this.netPhysics.needsRedraw) this.netPhysics.draw(this.netBack, project, { alpha: 0.28 });
+    }
 
     if (this.state === 'FLIGHT' || this.state === 'RESULT') this.ball.update(dt);
     if (this.state === 'FLIGHT') {
@@ -902,6 +923,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   resolve(outcome, pt) {
+    // A scene transition or duplicate collision must never finish an old shot.
+    // Phaser text textures are already released during shutdown, so letting a
+    // late result write into the retired HUD can freeze the next match.
+    if (this.state === 'RESULT' || this.state === 'OVERLAY' || !this.sys?.isActive?.()) return;
     this.state = 'RESULT';
     PlatformService.gameplayStop();
     this.simSpeed = 1;
@@ -921,6 +946,12 @@ export class GameScene extends Phaser.Scene {
     let isTopCorner = shotRating.topCorner;
     switch (outcome) {
       case 'GOAL': {
+        this.netPhysics?.impact({
+          x: pt.x,
+          y: pt.y,
+          speed: Math.hypot(this.ball.vx, this.ball.vy, this.ball.vz),
+          radius: 0.82
+        });
         this.ball.enterNet(this.zGoal + 2.15);
         this.netFront?.setVisible(true);
         this.time.delayedCall(180, () => this.kicker?.celebrate(720));
@@ -1075,8 +1106,8 @@ export class GameScene extends Phaser.Scene {
       case 'curve-streak': qualifies = curveOk; break;
       case 'curve-target': qualifies = curveOk && targetOk; break;
       case 'loft': qualifies = highEnough; break;
-      case 'dip': qualifies = highEnough && targetOk; break;
-      case 'low-shot': qualifies = lowEnough && targetOk; break;
+      case 'dip': qualifies = highEnough; break;
+      case 'low-shot': qualifies = lowEnough; break;
       case 'power': qualifies = (shot.power ?? 0) >= 0.72; break;
       case 'goals':
       case 'streak': qualifies = objective.minimumCurve > 0 ? curveOk : true; break;
@@ -1157,10 +1188,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   resultResetDelay(outcome, minimum = 750) {
-    // Keep every result on screen until an active keeper motion reaches a
-    // stable end pose. Goals, misses and posts can still happen mid-dive.
-    if (outcome === 'WALL') return minimum;
-    return Math.max(minimum, this.keeper?.getResultHoldMs?.() || minimum);
+    if (outcome !== 'SAVE' && outcome !== 'CAUGHT') return minimum;
+    const keeperHold = this.keeper?.getResultHoldMs?.() || minimum;
+    return Math.max(minimum, Math.min(keeperHold, 1050));
   }
 
   resetAttempt() {
@@ -1173,6 +1203,8 @@ export class GameScene extends Phaser.Scene {
     this.frameImpactT = null;
     this.frameCollisionCooldown = 0;
     this.netFront?.setVisible(false);
+    this.netPhysics?.reset();
+    if (this.netPhysics?.needsRedraw) this.netPhysics.draw(this.netBack, project, { alpha: 0.28 });
     this.ballSpr.setVisible(true);
     this.shadowSpr.setVisible(true);
     this.keeper.reset();

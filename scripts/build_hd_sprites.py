@@ -19,6 +19,11 @@ KEEPER_RETURN_SOURCE = ROOT / "assets/source/keeper-return-transition-sheet-v2-a
 KEEPER_LOW_SAVE_SOURCE = ROOT / "assets/source/keeper-low-save-sheet-v1-alpha.png"
 KEEPER_HANDLING_SOURCE = ROOT / "assets/source/keeper-handling-claims-sheet-v1-alpha.png"
 KEEPER_HIGH_CLAIM_SOURCE = ROOT / "assets/source/keeper-high-claim-sheet-v1-alpha.png"
+KEEPER_LOW_SMOTHER_SOURCE = ROOT / "assets/source/keeper-low-smother-sheet-v1-alpha.png"
+KEEPER_MID_CATCH_SOURCE = ROOT / "assets/source/keeper-mid-catch-sheet-v1-alpha.png"
+KEEPER_UPPER_PARRY_SOURCE = ROOT / "assets/source/keeper-upper-parry-sheet-v1-alpha.png"
+KEEPER_TOP_TIP_SOURCE = ROOT / "assets/source/keeper-top-tip-sheet-v1-alpha.png"
+KEEPER_REFLEX_FOOT_SOURCE = ROOT / "assets/source/keeper-reflex-foot-sheet-v1-alpha.png"
 OUT = ROOT / "public/assets/hd"
 
 KEEPER_ANIMATION_SIZE = (1600, 1120)
@@ -29,6 +34,7 @@ KEEPER_RETURN_SIZE = (2880, 560)
 KEEPER_LOW_SAVE_SIZE = (2560, 560)
 KEEPER_HANDLING_SIZE = (1600, 560)
 KEEPER_HIGH_CLAIM_SIZE = (1600, 360)
+KEEPER_SAVE_FAMILY_SIZE = (2560, 560)
 KEEPER_FRAME_SIZE = (320, 280)
 
 
@@ -248,6 +254,14 @@ def build_keeper_recovery_atlas() -> None:
     for row_index, row in enumerate(rows):
         for col_index, box in enumerate(row):
             sprite = source.crop(box)
+            # Recovery rotates the same body from horizontal to upright. Use
+            # body length instead of raw image height so no frame grows while
+            # the keeper rolls, kneels and stands.
+            scale = 205 / max(sprite.width, sprite.height)
+            sprite = sprite.resize(
+                (max(1, round(sprite.width * scale)), max(1, round(sprite.height * scale))),
+                Image.Resampling.NEAREST,
+            )
             if sprite.width > frame_width - 8 or sprite.height > frame_height - 8:
                 raise ValueError(
                     f"keeper recovery frame {row_index * 6 + col_index} does not fit "
@@ -260,6 +274,57 @@ def build_keeper_recovery_atlas() -> None:
             atlas.alpha_composite(sprite, (x, y))
 
     atlas.save(OUT / "keeper-recovery-sheet-hd.png", optimize=True)
+
+
+def build_keeper_save_family_atlas(
+    source_path: Path,
+    output_name: str,
+    *,
+    reverse_second_row: bool = False,
+    mirror_second_row_columns: tuple[int, ...] = (),
+) -> None:
+    """Pack an eight-phase save in both authored screen directions."""
+    source = Image.open(source_path).convert("RGBA")
+    boxes = connected_component_boxes(source)
+    if len(boxes) != 16:
+        raise ValueError(f"{source_path.name} must contain 16 figures, found {len(boxes)}")
+
+    boxes.sort(key=lambda box: (box[1] + box[3]) / 2)
+    rows = []
+    for row_index in range(2):
+        row = boxes[row_index * 8:(row_index + 1) * 8]
+        row.sort(key=lambda box: (box[0] + box[2]) / 2)
+        if row_index == 1 and reverse_second_row:
+            row.reverse()
+        rows.append(row)
+
+    frame_width, frame_height = KEEPER_FRAME_SIZE
+    atlas = Image.new("RGBA", KEEPER_SAVE_FAMILY_SIZE, (0, 0, 0, 0))
+    for row_index, row in enumerate(rows):
+        for col_index, box in enumerate(row):
+            if row_index == 1 and col_index in mirror_second_row_columns:
+                sprite = ImageOps.mirror(source.crop(rows[0][col_index]))
+            else:
+                sprite = source.crop(box)
+            sprite = remove_detached_fragments(sprite)
+            alpha_box = sprite.getchannel("A").getbbox()
+            if alpha_box:
+                sprite = sprite.crop(alpha_box)
+            # Body length remains constant while the silhouette rotates through
+            # launch, contact and landing. This prevents visible scale pumping.
+            scale = 205 / max(sprite.width, sprite.height)
+            sprite = sprite.resize(
+                (max(1, round(sprite.width * scale)), max(1, round(sprite.height * scale))),
+                Image.Resampling.NEAREST,
+            )
+            if sprite.width > frame_width - 8 or sprite.height > frame_height - 8:
+                raise ValueError(
+                    f"{output_name} frame {row_index * 8 + col_index} does not fit: {sprite.size}"
+                )
+            x = col_index * frame_width + (frame_width - sprite.width) // 2
+            y = row_index * frame_height + frame_height - sprite.height - 8
+            atlas.alpha_composite(sprite, (x, y))
+    atlas.save(OUT / output_name, optimize=True)
 
 
 def build_keeper_dive_motion_atlas() -> None:
@@ -535,6 +600,28 @@ def main() -> None:
     build_keeper_low_save_atlas()
     build_keeper_handling_atlas()
     build_keeper_high_claim_atlas()
+    build_keeper_save_family_atlas(
+        KEEPER_LOW_SMOTHER_SOURCE,
+        "keeper-low-smother-sheet-hd.png",
+    )
+    build_keeper_save_family_atlas(
+        KEEPER_MID_CATCH_SOURCE,
+        "keeper-mid-catch-sheet-hd.png",
+    )
+    build_keeper_save_family_atlas(
+        KEEPER_UPPER_PARRY_SOURCE,
+        "keeper-upper-parry-sheet-hd.png",
+        reverse_second_row=True,
+    )
+    build_keeper_save_family_atlas(
+        KEEPER_TOP_TIP_SOURCE,
+        "keeper-top-tip-sheet-hd.png",
+    )
+    build_keeper_save_family_atlas(
+        KEEPER_REFLEX_FOOT_SOURCE,
+        "keeper-reflex-foot-sheet-hd.png",
+        mirror_second_row_columns=(4,),
+    )
 
     # Remove the footballs baked into action/dive reference poses; gameplay owns
     # a separate simulated ball, so these pixels must never double-render.

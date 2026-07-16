@@ -79,6 +79,22 @@ test('career data contains five coherent ten-level cups', () => {
   }
 });
 
+test('Level 15 and low-shot technique levels stay placement-open instead of forcing centre circles', () => {
+  assert.equal(LEVELS[14].id, 'curve-05');
+  assert.equal(LEVELS[14].objective.type, 'dip');
+  assert.equal(LEVELS[14].target, null);
+  assert.ok(LEVELS[14].objective.minimumHeight <= 1.95);
+
+  for (const level of LEVELS.filter((entry) => entry.objective.type === 'low-shot')) {
+    assert.equal(level.target, null, `${level.id} should reward the low route, not a mandatory circle`);
+  }
+
+  const targetObjectives = new Set(['target', 'target-streak', 'curve-target', 'wind-target']);
+  for (const level of LEVELS.filter((entry) => entry.target)) {
+    assert.ok(targetObjectives.has(level.objective.type), `${level.id} uses a target on a non-target objective`);
+  }
+});
+
 test('seeded scenarios and RNG are deterministic while preserving RNG injection', () => {
   assert.deepEqual(randomScenario('2026-07-12'), randomScenario('2026-07-12'));
   assert.notDeepEqual(randomScenario('2026-07-12'), randomScenario('2026-07-13'));

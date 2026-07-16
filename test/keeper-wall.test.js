@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { Ball } from '../src/objects/Ball.js';
-import { Goalkeeper } from '../src/objects/Goalkeeper.js';
+import { Goalkeeper, classifySaveFamily } from '../src/objects/Goalkeeper.js';
 import { Wall } from '../src/objects/Wall.js';
 import { BALL_R, CAM, PHYS, project } from '../src/config.js';
 
@@ -24,13 +24,13 @@ function sceneStub(textures = []) {
   };
 }
 
-test('keeper perception is repeatable with a seed', () => {
+test('keeper shot reads are deterministic and ignore outcome RNG', () => {
   const goalZ = CAM.ballDist + 18;
   const ball = new Ball();
   ball.kick(1.2, 6.5, 27, 0.75);
 
-  const first = new Goalkeeper(sceneStub(), 0.55, goalZ, { seed: 12345 });
-  const second = new Goalkeeper(sceneStub(), 0.55, goalZ, { seed: 12345 });
+  const first = new Goalkeeper(sceneStub(), 0.55, goalZ, { rng: () => 0 });
+  const second = new Goalkeeper(sceneStub(), 0.55, goalZ, { rng: () => 1 });
   first.onShot(ball, goalZ);
   second.onShot(ball, goalZ);
 
@@ -151,7 +151,7 @@ test('keeper recovery adds six grounded phases per screen direction', () => {
   keeper.grounded = true;
   keeper.diveDir = 1;
 
-  for (const [time, frame] of [[0, 0], [0.2, 1], [0.36, 2], [0.5, 3], [0.66, 4], [0.84, 5]]) {
+  for (const [time, frame] of [[0, 0], [0.16, 1], [0.25, 2], [0.36, 3], [0.45, 4], [0.55, 5]]) {
     keeper.stateT = time;
     assert.equal(keeper.getRecoveryFrame(), frame);
   }
@@ -159,7 +159,7 @@ test('keeper recovery adds six grounded phases per screen direction', () => {
   keeper.diveDir = -1;
   keeper.stateT = 0;
   assert.equal(keeper.getRecoveryFrame(), 6);
-  keeper.stateT = 0.84;
+  keeper.stateT = 0.55;
   assert.equal(keeper.getRecoveryFrame(), 11);
 });
 
@@ -375,7 +375,7 @@ test('grounded keeper recovery is bottom-anchored to the pitch', () => {
   assert.deepEqual(keeper.spr.calls.setPosition, [pitch.x, pitch.y]);
 });
 
-test('save result hold covers landing, six recovery phases and return to position', () => {
+test('save result hold shows impact without waiting for a full return to position', () => {
   const keeper = new Goalkeeper(
     sceneStub(['keeper-anim-hd', 'keeper-recovery-hd']),
     0.7,
@@ -392,13 +392,13 @@ test('save result hold covers landing, six recovery phases and return to positio
   keeper.moveVx = 0;
 
   const holdMs = keeper.getResultHoldMs();
-  assert.ok(holdMs > 1500, 'a high save is held longer than the old fixed reset');
+  assert.ok(holdMs >= 750);
+  assert.ok(holdMs <= 1050, 'a high save must not stall the next-shot loop');
 
   for (let elapsed = 0; elapsed < holdMs / 1000; elapsed += PHYS.fixedStep) {
     keeper.update(PHYS.fixedStep);
   }
-  assert.equal(keeper.state, 'idle');
-  assert.ok(Math.abs(keeper.x) <= 0.06);
+  assert.notEqual(keeper.state, 'idle', 'the scene is allowed to reset before the full jog home');
 });
 
 test('standing parry follows the real contact direction and begins a full recovery', () => {
@@ -414,7 +414,91 @@ test('standing parry follows the real contact direction and begins a full recove
   assert.equal(keeper.pose, 'dive');
   assert.equal(keeper.diveDir, -1);
   assert.ok(keeper.moveVx < 0);
-  assert.ok(keeper.getResultHoldMs() > 1000);
+  assert.ok(keeper.getResultHoldMs() <= 1050);
+});
+
+test('save families are chosen deterministically from shot height and speed', () => {
+  assert.equal(classifySaveFamily({ y: 0.42, speed: 17, lateral: 1.2 }), 'low-smother');
+  assert.equal(classifySaveFamily({ y: 0.42, speed: 27, lateral: 1.2 }), 'reflex-foot');
+  assert.equal(classifySaveFamily({ y: 0.82, speed: 24, lateral: 2 }), 'low-extension');
+  assert.equal(classifySaveFamily({ y: 1.2, speed: 22, lateral: 2 }), 'mid-catch');
+  assert.equal(classifySaveFamily({ y: 1.75, speed: 24, lateral: 2 }), 'upper-parry');
+  assert.equal(classifySaveFamily({ y: 2.45, speed: 24, lateral: 2 }), 'top-tip');
+});
+
+test('slow corner shots are tracked until crossing and caught when physically reachable', () => {
+  const goalZ = CAM.ballDist + 18;
+  const crossingT = 1.6;
+  const ball = {
+    z: 0, vx: 0, vy: 2, vz: 17, spin: 0,
+    predictAt: () => ({ x: 2, y: 0.45, T: crossingT })
+  };
+  const keeper = new Goalkeeper(sceneStub(), 0.4, goalZ);
+  keeper.onShot(ball, goalZ);
+  for (let elapsed = 0; elapsed < crossingT; elapsed += PHYS.fixedStep) keeper.update(PHYS.fixedStep);
+
+  assert.equal(keeper.state, 'dive');
+  assert.equal(keeper.saveFamily, 'low-smother');
+  assert.equal(keeper.contact({ x: 2, y: 0.45 }, ball)?.result, 'catch');
+});
+
+test('slow dead-centre ground shots keep the planted keeper centred for a scoop catch', () => {
+  const goalZ = CAM.ballDist + 18;
+  const crossingT = 1.4;
+  const ball = {
+    z: 0, vx: 0, vy: 1, vz: 17, spin: 0,
+    predictAt: () => ({ x: 0, y: 0.4, T: crossingT })
+  };
+  const keeper = new Goalkeeper(sceneStub(), 0.4, goalZ);
+  keeper.onShot(ball, goalZ);
+  for (let elapsed = 0; elapsed < crossingT; elapsed += PHYS.fixedStep) keeper.update(PHYS.fixedStep);
+
+  assert.ok(Math.abs(keeper.x) < 1e-8);
+  assert.equal(keeper.state, 'set');
+  assert.equal(keeper.contact({ x: 0, y: 0.4 }, ball)?.result, 'catch');
+});
+
+test('physical reach lets fast top bins beat a medium keeper but saves a slower nearby high shot', () => {
+  const goalZ = CAM.ballDist + 18;
+  const simulate = ({ x, y, T, vz }) => {
+    const ball = {
+      z: 0, vx: x * 1.5, vy: y * 2, vz, spin: 0,
+      predictAt: () => ({ x, y, T })
+    };
+    const keeper = new Goalkeeper(sceneStub(), 0.4, goalZ);
+    keeper.onShot(ball, goalZ);
+    for (let elapsed = 0; elapsed < T; elapsed += PHYS.fixedStep) keeper.update(PHYS.fixedStep);
+    return { keeper, contact: keeper.contact({ x, y }, ball) };
+  };
+
+  const topBins = simulate({ x: 3.7, y: 2.65, T: 0.55, vz: 29 });
+  assert.equal(topBins.contact, false);
+  assert.ok(topBins.keeper.targetY < 2.65, 'medium keeper cannot manufacture unlimited vertical reach');
+
+  const readable = simulate({ x: 2, y: 1.85, T: 1.1, vz: 19 });
+  assert.equal(readable.contact?.result, 'parry');
+  assert.ok(
+    Math.abs(readable.keeper.contactRootX - readable.keeper.diveStartX) <=
+      readable.keeper.maxDiveRootTravel + 1e-9,
+    'dive root stays inside its physical travel budget'
+  );
+});
+
+test('new direction-authored save atlases map shot bands without sprite flipping', () => {
+  const keeper = new Goalkeeper(
+    sceneStub(['keeper-upper-parry-hd', 'keeper-top-tip-hd', 'keeper-reflex-foot-hd']),
+    0.6,
+    CAM.ballDist + 18
+  );
+  keeper.state = 'dive';
+  keeper.pose = 'dive';
+  keeper.standingSave = false;
+  keeper.saveFamily = 'upper-parry';
+  keeper.diveDir = -1;
+  keeper.diveP = 0.6;
+  keeper.draw();
+  assert.deepEqual(keeper.spr.calls.setTexture, ['keeper-upper-parry-hd', 14]);
+  assert.deepEqual(keeper.spr.calls.setFlipX, [false]);
 });
 
 test('wall jump variation is deterministic and frame-rate invariant', () => {

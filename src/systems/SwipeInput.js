@@ -156,6 +156,15 @@ export class SwipeInput {
     this.onInvalidShot = typeof invalidOptions === 'function'
       ? invalidOptions
       : invalidOptions?.onInvalidShot ?? null;
+    this.canStart = typeof invalidOptions === 'object' && typeof invalidOptions?.canStart === 'function'
+      ? invalidOptions.canStart
+      : null;
+    this.onStart = typeof invalidOptions === 'object' && typeof invalidOptions?.onStart === 'function'
+      ? invalidOptions.onStart
+      : null;
+    this.onEnd = typeof invalidOptions === 'object' && typeof invalidOptions?.onEnd === 'function'
+      ? invalidOptions.onEnd
+      : null;
     this.enabled = false;
     this.samples = [];
     this.activePointerId = null;
@@ -177,11 +186,18 @@ export class SwipeInput {
 
   _onDown(pointer) {
     if (!this.enabled || this.activePointerId !== null) return;
-    if (logicalPoint(pointer).y < 35) return; // HUD strip - don't let button taps start a swipe
+    const point = logicalPoint(pointer);
+    if (point.y < 35) return; // HUD strip - don't let button taps start a swipe
+    if (this.canStart && !this.canStart(point)) {
+      this.lastInvalidReason = 'start-zone';
+      this.onInvalidShot?.('start-zone', [{ ...point, t: eventTime(pointer, this.scene.time?.now ?? 0) }]);
+      return;
+    }
 
     this.activePointerId = getPointerId(pointer);
     this.samples = [];
     this._append(pointer, true);
+    this.onStart?.(point);
   }
 
   _onMove(pointer) {
@@ -197,6 +213,7 @@ export class SwipeInput {
     const shot = this._computeShot();
     const reason = this.lastInvalidReason;
     this.cancel();
+    this.onEnd?.(Boolean(shot));
 
     if (shot) this.onShot(shot);
     else this.onInvalidShot?.(reason, completedPath);
@@ -206,10 +223,13 @@ export class SwipeInput {
     if (this.activePointerId === null) return;
     if (pointer && getPointerId(pointer) !== this.activePointerId) return;
     this.cancel();
+    this.onEnd?.(false);
   }
 
   _onGameOut() {
+    const wasActive = this.activePointerId !== null;
     this.cancel();
+    if (wasActive) this.onEnd?.(false);
   }
 
   _append(pointer, endpoint = false) {
