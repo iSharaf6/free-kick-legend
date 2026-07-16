@@ -100,6 +100,8 @@ export class GameScene extends Phaser.Scene {
     this.over = false;
     this.ballCaught = false;
     this.keeperContactChecked = false;
+    this.netTouched = false;
+    this.netSideRippled = false;
     this.frameTouched = false;
     this.frameImpactT = null;
     this.frameCollisionCooldown = 0;
@@ -784,13 +786,55 @@ export class GameScene extends Phaser.Scene {
     this.keeper.update(dt, renderTime);
     if (this.netPhysics?.active) {
       this.netPhysics.update(dt);
-      if (this.netPhysics.needsRedraw) this.netPhysics.draw(this.netBack, project, { alpha: 0.28 });
+      if (this.netPhysics.needsRedraw) this.netPhysics.draw(this.netBack, project, { alpha: 0.36 });
     }
 
-    if (this.state === 'FLIGHT' || this.state === 'RESULT') this.ball.update(dt);
+    if (this.state === 'FLIGHT' || this.state === 'RESULT') {
+      const vx = this.ball.vx;
+      const vy = this.ball.vy;
+      const vz = this.ball.vz;
+      this.ball.update(dt);
+      if (this.ball.inNet) this.checkNetContact(vx, vy, vz);
+    }
     if (this.state === 'FLIGHT') {
       this.flightT += dt;
       this.checkFlight();
+    }
+  }
+
+  checkNetContact(vx, vy, vz) {
+    const ball = this.ball;
+    const net = this.netPhysics;
+    if (!net) return;
+
+    if (!this.netTouched && Number.isFinite(ball.netBackZ) &&
+        ball.z + BALL_R >= ball.netBackZ - 0.12) {
+      this.netTouched = true;
+      net.impact({
+        x: ball.x,
+        y: ball.y,
+        speed: Math.max(Math.hypot(vx, vy, vz), (this.netEntrySpeed || 0) * 0.7),
+        radius: 0.95
+      });
+      Audio.net();
+      return;
+    }
+
+    if (!this.netSideRippled) {
+      const sideLimit = GOAL_W / 2 - BALL_R;
+      const hitSide = Math.abs(ball.x) >= sideLimit - 1e-6 && vx * Math.sign(ball.x) > 1.2;
+      const hitRoof = ball.y >= GOAL_H - BALL_R - 1e-6 && vy > 1.2;
+      if (hitSide || hitRoof) {
+        this.netSideRippled = true;
+        net.impact({
+          x: hitSide ? Math.sign(ball.x) * (GOAL_W / 2 - 0.5) : ball.x,
+          y: hitRoof ? GOAL_H * 0.9 : ball.y,
+          speed: Math.abs(hitSide ? vx : vy) * 2,
+          strength: 0.55,
+          radius: 0.75
+        });
+        Audio.net();
+      }
     }
   }
 
@@ -946,19 +990,15 @@ export class GameScene extends Phaser.Scene {
     let isTopCorner = shotRating.topCorner;
     switch (outcome) {
       case 'GOAL': {
-        this.netPhysics?.impact({
-          x: pt.x,
-          y: pt.y,
-          speed: Math.hypot(this.ball.vx, this.ball.vy, this.ball.vz),
-          radius: 0.82
-        });
+        this.netTouched = false;
+        this.netSideRippled = false;
+        this.netEntrySpeed = Math.hypot(this.ball.vx, this.ball.vy, this.ball.vz);
         this.ball.enterNet(this.zGoal + 2.15);
         this.netFront?.setVisible(true);
         this.time.delayedCall(180, () => this.kicker?.celebrate(720));
         const spos = project(pt.x, pt.y, this.zGoal);
         this.confetti.explode(60, spos.x, spos.y);
         this.showBanner(isTopCorner ? 'TOP BINS' : shotRating.grade === 'S' ? 'WORLD CLASS' : 'GOAL', '#f2c832');
-        Audio.net();
         Audio.goal();
         this.playCrowdWave();
         if (!this.settings.reducedMotion) {
@@ -1203,6 +1243,8 @@ export class GameScene extends Phaser.Scene {
     this.frameImpactT = null;
     this.frameCollisionCooldown = 0;
     this.netFront?.setVisible(false);
+    this.netTouched = false;
+    this.netSideRippled = false;
     this.netPhysics?.reset();
     if (this.netPhysics?.needsRedraw) this.netPhysics.draw(this.netBack, project, { alpha: 0.28 });
     this.ballSpr.setVisible(true);

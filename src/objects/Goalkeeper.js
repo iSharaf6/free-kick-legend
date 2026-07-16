@@ -20,6 +20,7 @@ const SAVE_FAMILY_TEXTURES = Object.freeze({
   'reflex-foot': 'keeper-reflex-foot-hd'
 });
 const KEEPER_STANDING_REFERENCE_H = 210;
+const KEEPER_ANIM_STANDING_H = Object.freeze({ 0: 231, 1: 218, 2: 194, 3: 218, 4: 206 });
 const KEEPER_DIVE_REFERENCE_H = 180;
 const KEEPER_RECOVERY_REFERENCE_H = 205;
 const KEEPER_MOTION_REFERENCE_H = 200;
@@ -712,8 +713,7 @@ export class Goalkeeper {
       !groundedRecovery;
     const returnPhase = this.hasReturnAtlas && this.state === 'return';
     const footworkPhase = this.hasFootworkAtlas &&
-      ((!this.hasReturnAtlas && this.state === 'return') ||
-        (this.state === 'read' && Math.abs(this.moveVx) > 0.08));
+      ((!this.hasReturnAtlas && this.state === 'return') || this.state === 'read');
     const highClaim = this.state === 'catch' && this.catchType === 'high' && this.hasHighClaimAtlas;
     const handling = this.state === 'catch' && this.catchType !== 'high' && this.hasHandlingAtlas;
 
@@ -870,7 +870,9 @@ export class Goalkeeper {
       this.spr.setTexture(texture, animationFrame).setOrigin(0.5, 1);
       this.spr.setFlipX(false);
       this.spr.setPosition(pos.x, pos.y);
-      const textureH = usingAtlas ? KEEPER_STANDING_REFERENCE_H : spriteFrameHeight(this.spr);
+      const textureH = usingAtlas
+        ? (KEEPER_ANIM_STANDING_H[animationFrame] ?? KEEPER_STANDING_REFERENCE_H)
+        : spriteFrameHeight(this.spr);
       const baseScale = (pos.s * KEEPER_H) / textureH;
       const setting = !this.reducedMotion && this.state === 'set';
       const reading = !this.reducedMotion && this.state === 'read';

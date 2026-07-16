@@ -41,7 +41,7 @@ export const PHYS = {
   fixedStep: 1 / 120,
   maxSubsteps: 12,
   maxFrameDt: 0.10,
-  netDrag: 4.8,
+  netDrag: 1.5,
   netBounce: 0.13,
   wind: { x: 0, y: 0, z: 0 }
 };

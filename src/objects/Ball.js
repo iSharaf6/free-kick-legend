@@ -142,9 +142,9 @@ export class Ball {
 
     if (Number.isFinite(this.netBackZ) && this.vz > 0 && this.z + BALL_R >= this.netBackZ) {
       this.z = this.netBackZ - BALL_R;
-      this.vz *= -PHYS.netBounce;
-      this.vx *= 0.65;
-      this.vy *= 0.65;
+      this.vz = -Math.min(this.vz * PHYS.netBounce, 1.4);
+      this.vx *= 0.55;
+      this.vy *= 0.55;
       this.spin *= 0.5;
     }
   }

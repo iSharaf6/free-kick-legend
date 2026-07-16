@@ -5,10 +5,10 @@ const DEFAULTS = Object.freeze({
   backHeightRatio: 0.92,
   columns: 15,
   rows: 7,
-  stiffness: 31,
-  coupling: 25,
-  damping: 6.6,
-  maxDisplacement: 0.82,
+  stiffness: 27,
+  coupling: 29,
+  damping: 5.2,
+  maxDisplacement: 1.05,
   fixedStep: 1 / 120,
   maxFrameDt: 0.05
 });
@@ -103,7 +103,7 @@ export class GoalNetPhysics {
     const hitX = clamp(x, -this.goalWidth / 2, this.goalWidth / 2);
     const hitY = clamp(y * (this.backHeight / this.goalHeight), 0, this.backHeight);
     const spread = Math.max(0.3, radius);
-    const impulse = clamp(speed * 0.16, 1.2, 5.2) * clamp(strength, 0, 2);
+    const impulse = clamp(speed * 0.26, 1.6, 7.5) * clamp(strength, 0, 2);
     if (impulse <= 0) return;
 
     let affected = false;
@@ -199,7 +199,8 @@ export class GoalNetPhysics {
       : screen;
     const screenPoint = (column, row) => {
       const point = this.node(column, row);
-      const screen = project(point.x, point.y, point.z);
+      const sag = Math.min(Math.max(point.displacement, 0) * 0.5, Math.max(point.y, 0) * 0.8);
+      const screen = project(point.x, point.y - sag, point.z);
       return pixelSnap
         ? { x: Math.round(screen.x) + 0.5, y: Math.round(screen.y) + 0.5 }
         : screen;
