@@ -84,6 +84,16 @@ test('keeper contact follows actual dive height and progress', () => {
   assert.equal(contact.result, 'catch');
 });
 
+test('standing save envelope matches the visible body instead of covering a metre-wide lane', () => {
+  const keeper = new Goalkeeper(sceneStub(), 0.7, CAM.ballDist + 17, { seed: 9 });
+  assert.ok(keeper.contact({ x: 0.62, y: 1.15 }), 'near glove contact remains reachable');
+  assert.equal(
+    keeper.contact({ x: 0.82, y: 1.15 }),
+    false,
+    'a visibly wide shot must pass the planted keeper'
+  );
+});
+
 test('keeper advances through read, set and dive states', () => {
   const goalZ = CAM.ballDist + 17;
   const ball = new Ball();
@@ -183,6 +193,27 @@ test('expanded dive atlas maps twelve phases to each screen direction without fl
   assert.deepEqual(keeper.spr.calls.setFlipX, [false]);
 });
 
+test('low shots select the dedicated low-save atlas while higher dives keep the full-stretch sheet', () => {
+  const keeper = new Goalkeeper(
+    sceneStub(['keeper-dive-motion-hd', 'keeper-low-save-hd']),
+    0.7,
+    CAM.ballDist + 17,
+    { seed: 14 }
+  );
+  keeper.pose = 'dive';
+  keeper.state = 'dive';
+  keeper.diveDir = 1;
+  keeper.diveP = 0.52;
+  keeper.targetY = 0.72;
+  keeper.standingSave = false;
+  keeper.draw();
+  assert.deepEqual(keeper.spr.calls.setTexture, ['keeper-low-save-hd', 6]);
+
+  keeper.targetY = 1.8;
+  keeper.draw();
+  assert.deepEqual(keeper.spr.calls.setTexture, ['keeper-dive-motion-hd', 8]);
+});
+
 test('keeper times the authored contact phase to the ball crossing', () => {
   const goalZ = CAM.ballDist + 17;
   const ball = new Ball();
@@ -280,6 +311,43 @@ test('footwork and handling atlases animate both travel and catch follow-through
   assert.equal(keeper.getHandlingFrame(), 4);
   keeper.draw();
   assert.deepEqual(keeper.spr.calls.setTexture, ['keeper-high-claim-hd', 4]);
+});
+
+test('return-to-centre motion uses directional frames and settles without overshoot', () => {
+  const keeper = new Goalkeeper(
+    sceneStub(['keeper-anim-hd', 'keeper-return-hd']),
+    0.7,
+    CAM.ballDist + 17,
+    { seed: 31 }
+  );
+  keeper.state = 'return';
+  keeper.pose = 'idle';
+  keeper.x = 1.4;
+  keeper.moveVx = 0;
+
+  let previousX = keeper.x;
+  let minimumX = keeper.x;
+  for (let elapsed = 0; elapsed < 2; elapsed += PHYS.fixedStep) {
+    keeper.update(PHYS.fixedStep);
+    minimumX = Math.min(minimumX, keeper.x);
+    assert.ok(keeper.x <= previousX + 1e-10, 'screen-left return remains monotonic');
+    previousX = keeper.x;
+    if (keeper.state === 'idle') break;
+  }
+
+  assert.equal(keeper.state, 'idle');
+  assert.equal(keeper.x, 0);
+  assert.equal(keeper.moveVx, 0);
+  assert.ok(minimumX >= 0, 'keeper never crosses to the opposite side');
+
+  keeper.state = 'return';
+  keeper.stateT = 0.3;
+  keeper.x = -1;
+  keeper.moveVx = 1;
+  keeper.footworkDistance = 0.22;
+  assert.ok(keeper.getReturnFrame() >= 9, 'screen-right travel uses the second authored row');
+  keeper.draw();
+  assert.equal(keeper.spr.calls.setTexture[0], 'keeper-return-hd');
 });
 
 test('grounded keeper recovery is bottom-anchored to the pitch', () => {

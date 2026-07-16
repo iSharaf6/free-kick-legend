@@ -58,6 +58,14 @@ export class BootScene extends Phaser.Scene {
       frameWidth: 320,
       frameHeight: 280
     });
+    this.load.spritesheet('keeper-return-hd', `${base}assets/hd/keeper-return-sheet-hd.png`, {
+      frameWidth: 320,
+      frameHeight: 280
+    });
+    this.load.spritesheet('keeper-low-save-hd', `${base}assets/hd/keeper-low-save-sheet-hd.png`, {
+      frameWidth: 320,
+      frameHeight: 280
+    });
     this.load.spritesheet('keeper-handling-hd', `${base}assets/hd/keeper-handling-sheet-hd.png`, {
       frameWidth: 320,
       frameHeight: 280

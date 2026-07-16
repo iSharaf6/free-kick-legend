@@ -15,6 +15,8 @@ KEEPER_ANIMATION_SOURCE = ROOT / "assets/source/keeper-animation-sheet-v1-alpha.
 KEEPER_RECOVERY_SOURCE = ROOT / "assets/source/keeper-recovery-sheet-v1-alpha.png"
 KEEPER_DIVE_MOTION_SOURCE = ROOT / "assets/source/keeper-dive-motion-sheet-v2-alpha.png"
 KEEPER_FOOTWORK_SOURCE = ROOT / "assets/source/keeper-footwork-return-sheet-v1-alpha.png"
+KEEPER_RETURN_SOURCE = ROOT / "assets/source/keeper-return-transition-sheet-v2-alpha.png"
+KEEPER_LOW_SAVE_SOURCE = ROOT / "assets/source/keeper-low-save-sheet-v1-alpha.png"
 KEEPER_HANDLING_SOURCE = ROOT / "assets/source/keeper-handling-claims-sheet-v1-alpha.png"
 KEEPER_HIGH_CLAIM_SOURCE = ROOT / "assets/source/keeper-high-claim-sheet-v1-alpha.png"
 OUT = ROOT / "public/assets/hd"
@@ -23,6 +25,8 @@ KEEPER_ANIMATION_SIZE = (1600, 1120)
 KEEPER_RECOVERY_SIZE = (1920, 560)
 KEEPER_DIVE_MOTION_SIZE = (1920, 1120)
 KEEPER_FOOTWORK_SIZE = (1600, 560)
+KEEPER_RETURN_SIZE = (2880, 560)
+KEEPER_LOW_SAVE_SIZE = (2560, 560)
 KEEPER_HANDLING_SIZE = (1600, 560)
 KEEPER_HIGH_CLAIM_SIZE = (1600, 360)
 KEEPER_FRAME_SIZE = (320, 280)
@@ -393,6 +397,82 @@ def build_keeper_footwork_atlas() -> None:
     atlas.save(OUT / "keeper-footwork-sheet-hd.png", optimize=True)
 
 
+def build_keeper_return_atlas() -> None:
+    """Pack ten grounded return-to-set phases per travel direction."""
+    source = Image.open(KEEPER_RETURN_SOURCE).convert("RGBA")
+    boxes = connected_component_boxes(source)
+    if len(boxes) != 18:
+        raise ValueError(f"keeper return source must contain 18 figures, found {len(boxes)}")
+
+    boxes.sort(key=lambda box: (box[1] + box[3]) / 2)
+    rows = []
+    for row_index in range(2):
+        row = boxes[row_index * 9:(row_index + 1) * 9]
+        row.sort(key=lambda box: (box[0] + box[2]) / 2)
+        rows.append(row)
+
+    frame_width, frame_height = KEEPER_FRAME_SIZE
+    atlas = Image.new("RGBA", KEEPER_RETURN_SIZE, (0, 0, 0, 0))
+    for row_index, row in enumerate(rows):
+        for col_index, box in enumerate(row):
+            sprite = remove_detached_fragments(source.crop(box))
+            alpha_box = sprite.getchannel("A").getbbox()
+            if alpha_box:
+                sprite = sprite.crop(alpha_box)
+            scale = 205 / sprite.height
+            sprite = sprite.resize(
+                (max(1, round(sprite.width * scale)), 205),
+                Image.Resampling.NEAREST,
+            )
+            if sprite.width > frame_width - 8:
+                raise ValueError(
+                    f"keeper return frame {row_index * 9 + col_index} is too wide: {sprite.size}"
+                )
+            x = col_index * frame_width + (frame_width - sprite.width) // 2
+            y = row_index * frame_height + frame_height - sprite.height - 8
+            atlas.alpha_composite(sprite, (x, y))
+    atlas.save(OUT / "keeper-return-sheet-hd.png", optimize=True)
+
+
+def build_keeper_low_save_atlas() -> None:
+    """Pack eight low side-save phases per screen direction."""
+    source = Image.open(KEEPER_LOW_SAVE_SOURCE).convert("RGBA")
+    boxes = connected_component_boxes(source)
+    if len(boxes) != 16:
+        raise ValueError(f"keeper low-save source must contain 16 figures, found {len(boxes)}")
+
+    boxes.sort(key=lambda box: (box[1] + box[3]) / 2)
+    rows = []
+    for row_index in range(2):
+        row = boxes[row_index * 8:(row_index + 1) * 8]
+        row.sort(key=lambda box: (box[0] + box[2]) / 2)
+        rows.append(row)
+
+    frame_width, frame_height = KEEPER_FRAME_SIZE
+    atlas = Image.new("RGBA", KEEPER_LOW_SAVE_SIZE, (0, 0, 0, 0))
+    for row_index, row in enumerate(rows):
+        for col_index, box in enumerate(row):
+            sprite = remove_detached_fragments(source.crop(box))
+            if col_index <= 3:
+                scale = 205 / sprite.height
+            else:
+                # Low-flight silhouettes register by reach so launch, parry and
+                # turf impact retain a constant body scale while rotating.
+                scale = 250 / max(sprite.width, sprite.height)
+            sprite = sprite.resize(
+                (max(1, round(sprite.width * scale)), max(1, round(sprite.height * scale))),
+                Image.Resampling.NEAREST,
+            )
+            if sprite.width > frame_width - 8 or sprite.height > frame_height - 8:
+                raise ValueError(
+                    f"keeper low-save frame {row_index * 8 + col_index} does not fit: {sprite.size}"
+                )
+            x = col_index * frame_width + (frame_width - sprite.width) // 2
+            y = row_index * frame_height + frame_height - sprite.height - 8
+            atlas.alpha_composite(sprite, (x, y))
+    atlas.save(OUT / "keeper-low-save-sheet-hd.png", optimize=True)
+
+
 def build_keeper_handling_atlas() -> None:
     """Pack low and chest handling into two regular four-frame rows."""
     source = Image.open(KEEPER_HANDLING_SOURCE).convert("RGBA")
@@ -451,6 +531,8 @@ def main() -> None:
     build_keeper_recovery_atlas()
     build_keeper_dive_motion_atlas()
     build_keeper_footwork_atlas()
+    build_keeper_return_atlas()
+    build_keeper_low_save_atlas()
     build_keeper_handling_atlas()
     build_keeper_high_claim_atlas()
 
