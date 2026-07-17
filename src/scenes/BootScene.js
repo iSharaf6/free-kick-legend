@@ -6,6 +6,7 @@ import { PlatformService } from '../systems/PlatformService.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
 import { makePuppetTextures } from '../art/PuppetTextures.js';
+import { CROWD_ANIMATION } from '../data/crowdAnimation.js';
 
 const KICKER_POSES = {
   idle: MAPS.kickerIdle,
@@ -96,6 +97,10 @@ export class BootScene extends Phaser.Scene {
     }
     this.load.image('defender-hd', `${base}assets/hd/defender-hd.png`);
     this.load.image('ball-classic-hd', `${base}assets/hd/ball-classic-hd.png`);
+    this.load.spritesheet(CROWD_ANIMATION.textureKey, `${base}${CROWD_ANIMATION.assetPath}`, {
+      frameWidth: CROWD_ANIMATION.frameWidth,
+      frameHeight: CROWD_ANIMATION.frameHeight
+    });
   }
 
   create() {

@@ -21,6 +21,7 @@ import {
   drawPanel, addScanlines, configureHdCamera, crispText, FONT
 } from '../ui.js';
 import { PAL } from '../pixelart.js';
+import { CROWD_ANIMATION } from '../data/crowdAnimation.js';
 
 const ATTEMPTS = 3;
 const ARCADE_TIME = 60;
@@ -115,8 +116,8 @@ export class GameScene extends Phaser.Scene {
     this.crowdGlow = this.add.rectangle(GAME_W / 2, CAM.horizonY / 2, GAME_W, CAM.horizonY, PAL.gold, 0)
       .setDepth(1)
       .setBlendMode('ADD');
-    this.buildCrowdWave();
     this.drawPitch();
+    this.buildNearCrowd(atmosphereTint);
     // Floodlight beams angled onto the penalty area sell the night-match
     // lighting; the vignette pulls focus toward the goalmouth.
     const beams = this.add.graphics().setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
@@ -234,35 +235,93 @@ export class GameScene extends Phaser.Scene {
 
   // ---------------------------------------------------------------- visuals
 
-  buildCrowdWave() {
-    this.crowdWave = [];
-    const colors = [0xf2c832, 0x47a7ff, 0xe96f4d, 0xf4ead2, 0x52b36a];
-    for (let i = 0; i < 32; i++) {
-      const block = this.add.rectangle(5 + i * 15, 68 + (i % 3) * 7, 4, 5, colors[i % colors.length], 0)
-        .setDepth(2);
-      block.homeY = block.y;
-      this.crowdWave.push(block);
+  buildNearCrowd(atmosphereTint = null) {
+    this.nearCrowd = [];
+    if (!this.textures.exists(CROWD_ANIMATION.textureKey)) return;
+
+    if (!this.anims.exists(CROWD_ANIMATION.ambientKey)) {
+      this.anims.create({
+        key: CROWD_ANIMATION.ambientKey,
+        frames: CROWD_ANIMATION.ambientFrames.map((frame) => ({
+          key: CROWD_ANIMATION.textureKey,
+          frame
+        })),
+        frameRate: CROWD_ANIMATION.ambientFrameRate,
+        repeat: -1
+      });
+    }
+    if (!this.anims.exists(CROWD_ANIMATION.goalKey)) {
+      this.anims.create({
+        key: CROWD_ANIMATION.goalKey,
+        frames: CROWD_ANIMATION.goalFrames.map((frame) => ({
+          key: CROWD_ANIMATION.textureKey,
+          frame
+        })),
+        frameRate: CROWD_ANIMATION.goalFrameRate,
+        repeat: 2,
+        repeatDelay: 45
+      });
+    }
+
+    // The lower stand now finishes only a few pixels behind the goal line.
+    // This removes the empty strip of pitch that made the crowd feel remote.
+    const railY = Math.round(project(0, 0, this.zGoal + 3.2).y);
+    const standTop = CAM.horizonY - 2;
+    this.nearCrowdBackdrop = this.add.rectangle(
+      GAME_W / 2,
+      standTop + (railY - standTop) / 2,
+      GAME_W,
+      railY - standTop + 2,
+      PAL.night,
+      0.94
+    ).setDepth(1.18);
+
+    const sectionWidth = CROWD_ANIMATION.frameWidth * CROWD_ANIMATION.sectionScale;
+    const coverageWidth = sectionWidth * CROWD_ANIMATION.sectionCount;
+    const startX = (GAME_W - coverageWidth) / 2 + sectionWidth / 2;
+    for (let index = 0; index < CROWD_ANIMATION.sectionCount; index++) {
+      const section = this.add.sprite(
+        startX + index * sectionWidth,
+        railY,
+        CROWD_ANIMATION.textureKey,
+        CROWD_ANIMATION.ambientFrames[index % CROWD_ANIMATION.ambientFrames.length]
+      )
+        .setOrigin(0.5, 1)
+        .setScale(CROWD_ANIMATION.sectionScale)
+        .setFlipX(index % 2 === 1)
+        .setDepth(1.3);
+      if (atmosphereTint) section.setTint(atmosphereTint);
+      if (!this.settings.reducedMotion) {
+        section.play({
+          key: CROWD_ANIMATION.ambientKey,
+          startFrame: index % CROWD_ANIMATION.ambientFrames.length
+        });
+      }
+      this.nearCrowd.push(section);
     }
   }
 
-  playCrowdWave() {
-    this.crowdWave.forEach((block, index) => {
-      this.tweens.killTweensOf(block);
-      block.setY(block.homeY).setAlpha(0.85);
+  playCrowdGoal() {
+    this.nearCrowd?.forEach((section, index) => {
+      section.anims.stop();
       if (this.settings.reducedMotion) {
-        this.tweens.add({ targets: block, alpha: 0, delay: 420, duration: 180, ease: 'Cubic.easeOut' });
+        section.setFrame(CROWD_ANIMATION.goalFrames[1]);
+        this.time.delayedCall(520, () => {
+          if (section.active) section.setFrame(CROWD_ANIMATION.ambientFrames[index % 6]);
+        });
         return;
       }
-      this.tweens.add({
-        targets: block,
-        y: block.homeY - 4,
-        alpha: { from: 0.85, to: 0.3 },
-        delay: (index % 8) * 30,
-        duration: 120,
-        yoyo: true,
-        repeat: 2,
-        ease: 'Cubic.easeOut',
-        onComplete: () => block.setY(block.homeY).setAlpha(0)
+
+      section.once('animationcomplete', (animation) => {
+        if (animation.key !== CROWD_ANIMATION.goalKey || !section.active) return;
+        section.play({
+          key: CROWD_ANIMATION.ambientKey,
+          startFrame: (index * 2) % CROWD_ANIMATION.ambientFrames.length
+        });
+      });
+      section.play({
+        key: CROWD_ANIMATION.goalKey,
+        delay: (index % 3) * 32
       });
     });
   }
@@ -1002,7 +1061,7 @@ export class GameScene extends Phaser.Scene {
         this.confetti.explode(60, spos.x, spos.y);
         this.showBanner(isTopCorner ? 'TOP BINS' : shotRating.grade === 'S' ? 'WORLD CLASS' : 'GOAL', '#f2c832');
         Audio.goal();
-        this.playCrowdWave();
+        this.playCrowdGoal();
         if (!this.settings.reducedMotion) {
           this.tweens.add({
             targets: this.crowdGlow,
