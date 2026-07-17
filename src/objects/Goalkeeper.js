@@ -6,7 +6,7 @@ const DIVE_H = 1.30;
 const GROUND_Y = 0;         // visual root height above the pitch
 const HALF_GOAL = GOAL_W / 2;
 const KEEPER_ANIMATION_TEXTURE = 'keeper-anim-hd';
-const KEEPER_RECOVERY_TEXTURE = 'keeper-recovery-hd';
+const KEEPER_RECOVERY_TEXTURE = 'keeper-practical-recovery-hd';
 const KEEPER_DIVE_MOTION_TEXTURE = 'keeper-dive-motion-hd';
 const KEEPER_FOOTWORK_TEXTURE = 'keeper-footwork-hd';
 const KEEPER_RETURN_TEXTURE = 'keeper-return-hd';
@@ -21,6 +21,24 @@ const SAVE_FAMILY_TEXTURES = Object.freeze({
   'top-tip': 'keeper-top-tip-hd',
   'reflex-foot': 'keeper-reflex-foot-hd'
 });
+const DIRECTIONAL_PRACTICAL_MOVES = Object.freeze({
+  'full-stretch': Object.freeze({ left: 'full-stretch-dive-left', right: 'full-stretch-dive-right' }),
+  'low-dive': Object.freeze({ left: 'low-dive-left', right: 'low-dive-right' }),
+  'mid-dive': Object.freeze({ left: 'mid-height-dive-left', right: 'mid-height-dive-right' }),
+  'top-tip': Object.freeze({ left: 'top-left-fingertip-tip', right: 'top-right-fingertip-tip' }),
+  'upper-parry': Object.freeze({ left: 'upper-parry-left', right: 'upper-parry-right' }),
+  'low-parry': Object.freeze({ left: 'low-parry-left', right: 'low-parry-right' }),
+  'low-catch': Object.freeze({ left: 'low-catch-left', right: 'low-catch-right' }),
+  'mid-catch': Object.freeze({ left: 'mid-catch-left', right: 'mid-catch-right' }),
+  'low-smother': Object.freeze({ left: 'smother-left', right: 'smother-right' }),
+  'reflex-foot': Object.freeze({ left: 'foot-save-left', right: 'foot-save-right' })
+});
+const CENTRE_PRACTICAL_MOVES = Object.freeze({
+  'front-smother': 'front-smother',
+  'spread-save': 'spread-save',
+  'high-claim': 'high-claim-standing',
+  'jump-catch': 'jump-catch-cross-claim'
+});
 const KEEPER_STANDING_REFERENCE_H = 210;
 const KEEPER_ANIM_STANDING_H = Object.freeze({ 0: 231, 1: 218, 2: 194, 3: 218, 4: 206 });
 const KEEPER_DIVE_REFERENCE_H = 180;
@@ -30,7 +48,8 @@ const KEEPER_RETURN_REFERENCE_H = 205;
 const KEEPER_LOW_SAVE_REFERENCE_H = 205;
 const KEEPER_HANDLING_REFERENCE_H = 205;
 const KEEPER_ACTION_REFERENCE_H = 205;
-const GROUND_RECOVERY_DURATION = 0.52;
+const IDLE_FRAME_SECONDS = (getKeeperMove('idle-stance')?.frameMs ?? 520) / 1000;
+const GROUND_RECOVERY_DURATION = 0.86;
 const GROUND_IMPACT_HOLD = 0.06;
 const CONTACT_PROGRESS = 0.68;
 const CONTACT_HOLD_DURATION = 0.058;
@@ -46,6 +65,9 @@ const SITUATIONAL_SAVE_FAMILIES = Object.freeze([
   'two-fist-punch',
   'single-hand-punch-left',
   'single-hand-punch-right'
+]);
+const GROUNDED_PRACTICAL_FAMILIES = Object.freeze([
+  'low-smother', 'low-catch', 'low-parry', 'low-dive', 'reflex-foot', 'spread-save'
 ]);
 const SITUATIONAL_SAVE_FRAMES = Object.freeze({
   'narrow-block': Object.freeze([0, 1, 2, 5]),
@@ -117,14 +139,30 @@ function ellipseDistance(point, shape) {
 
 export function classifySaveFamily({ y = 1, speed = 20, lateral = 1 } = {}) {
   if (y < 0.58 && speed >= 23.5 && lateral <= 1.55) return 'reflex-foot';
-  if (speed >= 26 && lateral <= 0.38 && y >= 1.05 && y < 1.52) return 'body-block';
-  if (speed >= 25.5 && lateral <= 0.38 && y < 1.05) return 'narrow-block';
-  if (speed >= 25.5 && lateral <= 0.92 && y < 1.15) return 'spread-save';
-  if (y < 0.66 && speed < 23.5) return 'low-smother';
-  if (y < 1.02) return 'low-extension';
-  if (y < 1.36) return 'mid-catch';
+  if (speed >= 25.5 && lateral <= 0.92 && y < 1.45) return 'spread-save';
+  if (lateral <= 0.38) {
+    if (y < 0.58 && speed < 21.5) return 'front-smother';
+    if (y < 0.86) return speed < 23 ? 'low-catch' : 'low-parry';
+    if (y < 1.55) return speed >= 24 ? 'upper-parry' : 'mid-catch';
+    if (y < 1.98) return speed >= 24 ? 'upper-parry' : 'high-claim';
+    return speed >= 24 ? 'top-tip' : 'jump-catch';
+  }
+  if (y < 0.64 && speed < 21.5) return 'low-smother';
+  if (y < 0.82) return speed >= 24.5 ? 'low-parry' : 'low-dive';
+  if (y < 1.38) return speed < 21.5 ? 'mid-catch' : 'mid-dive';
+  if (y >= 2.02) return 'top-tip';
+  if (lateral >= 1.25) return 'full-stretch';
   if (y < 2.02) return 'upper-parry';
   return 'top-tip';
+}
+
+function practicalMoveIdForFamily(family, direction, standing = false) {
+  if (family === 'mid-catch' && standing) return 'mid-catch-centre';
+  const centre = CENTRE_PRACTICAL_MOVES[family];
+  if (centre) return centre;
+  const pair = DIRECTIONAL_PRACTICAL_MOVES[family];
+  if (!pair) return null;
+  return direction < 0 ? pair.left : pair.right;
 }
 
 function defaultSeed(skill, zGoal) {
@@ -179,6 +217,7 @@ export class Goalkeeper {
     this.maxHandY = 2;
     this.maxDiveRootTravel = 0;
     this.saveFamily = 'mid-catch';
+    this.activeSaveMoveId = null;
     this.diveDir = 1;
     this.catchY = 1;
     this.landY = GROUND_Y;
@@ -191,10 +230,12 @@ export class Goalkeeper {
     this.catchDuration = 0.82;
     this.catchSecureT = 0.46;
     this.catchDistributed = false;
+    this.hasBall = false;
     this.distributionId = KEEPER_DISTRIBUTION_IDS[0];
     this.presentationAction = null;
     this.presentationT = 0;
     this.presentationDuration = 0;
+    this.hasOrganisedWall = false;
     this.standingSave = false;
     this.idlePhase = this._random() * Math.PI * 2;
     this.hasAnimationAtlas = Boolean(scene.textures?.exists?.(KEEPER_ANIMATION_TEXTURE));
@@ -240,6 +281,7 @@ export class Goalkeeper {
   }
 
   onShot(ball, zGoal) {
+    this.hasBall = false;
     const interceptZ = this.z > ball.z ? this.z : zGoal;
     const prediction = ball.predictAt(interceptZ);
     const flightT = Number.isFinite(prediction.T) ? prediction.T : 0.6;
@@ -277,6 +319,11 @@ export class Goalkeeper {
     });
     this.standingSave = Math.abs(shotDeltaX) <= STANDING_SAVE_REACH &&
       this.saveFamily !== 'spread-save';
+    this.activeSaveMoveId = practicalMoveIdForFamily(
+      this.saveFamily,
+      this.diveDir,
+      this.standingSave
+    );
 
     // Time the contact pose to the ball's actual keeper-plane crossing. Slow
     // shots create more visible tracking footwork; fast shots compress the
@@ -527,13 +574,6 @@ export class Goalkeeper {
       case 'catch':
         this.stateT += dt;
         this.pose = 'catch';
-        if (!this.catchDistributed && this.stateT >= this.catchSecureT) {
-          this.catchDistributed = true;
-          this.playPresentation(
-            this.distributionId,
-            Math.max(0.42, this.catchDuration - this.catchSecureT)
-          );
-        }
         if (this.stateT >= this.catchDuration) {
           this.state = 'return';
           this.pose = 'idle';
@@ -602,24 +642,59 @@ export class Goalkeeper {
       return progress < 0.52 ? KEEPER_FRAMES.anticipate : KEEPER_FRAMES.set;
     }
 
-    const phaseOffset = this.idlePhase / (Math.PI * 2) * 0.88;
-    const index = Math.floor((this.idleClock + phaseOffset) / 0.22) % KEEPER_FRAMES.idle.length;
+    const idleCycle = IDLE_FRAME_SECONDS * KEEPER_FRAMES.idle.length;
+    const phaseOffset = this.idlePhase / (Math.PI * 2) * idleCycle;
+    const index = Math.floor((this.idleClock + phaseOffset) / IDLE_FRAME_SECONDS) % KEEPER_FRAMES.idle.length;
     return KEEPER_FRAMES.idle[index];
   }
 
   getRecoveryFrame() {
-    const base = this.diveDir > 0 ? 0 : 6;
     const progress = clamp(
       (this.stateT - GROUND_IMPACT_HOLD) / GROUND_RECOVERY_DURATION,
       0,
       1
     );
-    if (progress < 0.12) return base;
-    if (progress < 0.28) return base + 1;
-    if (progress < 0.47) return base + 2;
-    if (progress < 0.66) return base + 3;
-    if (progress < 0.84) return base + 4;
-    return base + 5;
+    if (!this.hasBall) {
+      return 12 + Math.min(5, Math.floor(progress * 6));
+    }
+    if (progress < 0.38) {
+      const base = this.diveDir > 0 ? 0 : 6;
+      const holdProgress = progress / 0.38;
+      return base + Math.min(5, Math.floor(holdProgress * 6));
+    }
+    const getUpProgress = (progress - 0.38) / 0.62;
+    return 12 + Math.min(5, Math.floor(getUpProgress * 6));
+  }
+
+  getActivePracticalMove() {
+    const move = getKeeperMove(this.activeSaveMoveId);
+    if (!move || !this.scene.textures?.exists?.(move.texture)) return null;
+    return move;
+  }
+
+  getPracticalSaveFrame(move) {
+    const frames = move.frames;
+    if (this.state === 'set') {
+      const setProgress = this.setT > 0 ? clamp(this.stateT / this.setT, 0, 1) : 1;
+      return frames[setProgress < 0.55 ? 0 : Math.min(1, frames.length - 1)];
+    }
+    if (this.state === 'land') return frames[frames.length - 1];
+
+    const lastFlightIndex = Math.max(1, frames.length - 2);
+    if (this.contactHoldT > 0) {
+      return frames[Math.min(lastFlightIndex, Math.round(lastFlightIndex * CONTACT_PROGRESS))];
+    }
+    const index = Math.min(
+      lastFlightIndex,
+      Math.max(1, Math.floor(clamp(this.diveP, 0, 1) * (lastFlightIndex + 1)))
+    );
+    return frames[index];
+  }
+
+  getPracticalCatchFrame(move) {
+    const progress = clamp(this.stateT / Math.max(this.catchDuration, 0.01), 0, 1);
+    const index = Math.min(move.frames.length - 1, Math.floor(progress * move.frames.length));
+    return move.frames[index];
   }
 
   getDiveMotionFrame() {
@@ -737,7 +812,10 @@ export class Goalkeeper {
   }
 
   organiseWall(duration = 0.82) {
-    return this.playPresentation('organise-wall', duration);
+    if (this.hasOrganisedWall) return false;
+    const started = this.playPresentation('organise-wall', duration);
+    if (started) this.hasOrganisedWall = true;
+    return started;
   }
 
   reactToGoal(duration = 0.82) {
@@ -798,7 +876,7 @@ export class Goalkeeper {
     } else {
       return 650;
     }
-    return Math.ceil(clamp(remaining + 0.06, 0.55, 1.05) * 1000);
+    return Math.ceil(clamp(remaining + 0.06, 0.55, 1.35) * 1000);
   }
 
   draw() {
@@ -811,11 +889,16 @@ export class Goalkeeper {
       this.grounded &&
       (!(this.hasDiveMotionAtlas || this.hasLowSaveAtlas) || this.stateT >= GROUND_IMPACT_HOLD);
     const familyTexture = SAVE_FAMILY_TEXTURES[this.saveFamily];
-    const situationalPhase = this.hasSituationalAtlas &&
+    const practicalMove = this.getActivePracticalMove();
+    const practicalSavePhase = Boolean(practicalMove) &&
+      !this.standingSave &&
+      (this.state === 'set' || this.state === 'dive' || this.state === 'land') &&
+      !groundedRecovery;
+    const situationalPhase = !practicalSavePhase && this.hasSituationalAtlas &&
       SITUATIONAL_SAVE_FAMILIES.includes(this.saveFamily) &&
       (this.state === 'set' || this.state === 'dive' || this.state === 'land') &&
       !groundedRecovery;
-    const saveFamilyPhase = !situationalPhase &&
+    const saveFamilyPhase = !practicalSavePhase && !situationalPhase &&
       Boolean(familyTexture && this.hasSaveFamilyAtlas[this.saveFamily]) &&
       !this.standingSave &&
       (this.state === 'set' || this.state === 'dive' || this.state === 'land') &&
@@ -832,11 +915,13 @@ export class Goalkeeper {
     const returnPhase = this.hasReturnAtlas && this.state === 'return';
     const footworkPhase = this.hasFootworkAtlas &&
       ((!this.hasReturnAtlas && this.state === 'return') || this.state === 'read');
-    const highClaim = this.state === 'catch' && this.catchType === 'high' && this.hasHighClaimAtlas;
-    const handling = this.state === 'catch' && this.catchType !== 'high' && this.hasHandlingAtlas;
+    const practicalCatchMove = this.state === 'catch' ? this.getActivePracticalMove() : null;
+    const practicalCatchPhase = Boolean(practicalCatchMove);
+    const highClaim = !practicalCatchPhase && this.state === 'catch' && this.catchType === 'high' && this.hasHighClaimAtlas;
+    const handling = !practicalCatchPhase && this.state === 'catch' && this.catchType !== 'high' && this.hasHandlingAtlas;
 
-    if (!situationalPhase && !saveFamilyPhase && !lowSavePhase && !motionPhase && !groundedRecovery && !returnPhase &&
-        !footworkPhase && !highClaim && !handling) {
+    if (!practicalSavePhase && !situationalPhase && !saveFamilyPhase && !lowSavePhase && !motionPhase && !groundedRecovery && !returnPhase &&
+        !footworkPhase && !practicalCatchPhase && !highClaim && !handling) {
       this.drawLegacy();
       return;
     }
@@ -846,7 +931,15 @@ export class Goalkeeper {
     let referenceHeight;
     let rootLift = 0;
 
-    if (situationalPhase) {
+    if (practicalSavePhase) {
+      texture = practicalMove.texture;
+      frame = this.getPracticalSaveFrame(practicalMove);
+      referenceHeight = KEEPER_ACTION_REFERENCE_H;
+      const groundedTechnique = GROUNDED_PRACTICAL_FAMILIES.includes(this.saveFamily);
+      rootLift = this.state === 'dive'
+        ? this.visualLift * (groundedTechnique ? 0.25 : 1)
+        : this.state === 'land' ? this.landY : 0;
+    } else if (situationalPhase) {
       texture = KEEPER_SITUATIONAL_TEXTURE;
       frame = this.getSituationalSaveFrame();
       referenceHeight = KEEPER_ACTION_REFERENCE_H;
@@ -881,6 +974,10 @@ export class Goalkeeper {
       texture = KEEPER_FOOTWORK_TEXTURE;
       frame = this.getFootworkFrame();
       referenceHeight = KEEPER_HANDLING_REFERENCE_H;
+    } else if (practicalCatchPhase) {
+      texture = practicalCatchMove.texture;
+      frame = this.getPracticalCatchFrame(practicalCatchMove);
+      referenceHeight = KEEPER_ACTION_REFERENCE_H;
     } else if (highClaim) {
       texture = KEEPER_HIGH_CLAIM_TEXTURE;
       frame = this.getHandlingFrame();
@@ -1088,7 +1185,8 @@ export class Goalkeeper {
       : hit.distance < 0.40;
     const divingFamilyCanCatch = !isDiving ||
       this.saveFamily === 'low-smother' ||
-      this.saveFamily === 'low-extension' ||
+      this.saveFamily === 'low-dive' ||
+      this.saveFamily === 'low-catch' ||
       this.saveFamily === 'mid-catch';
     return {
       result: divingFamilyCanCatch && secure && speed <= catchSpeed ? 'catch' : 'parry',
@@ -1104,9 +1202,11 @@ export class Goalkeeper {
   }
 
   catchBall(pt) {
+    this.hasBall = true;
     this.contactPulse = 1;
     this.spr.setTint?.(0xfff3c4);
     this.scene.time?.delayedCall?.(95, () => this.spr?.clearTint?.());
+    this.catchY = clamp(pt?.y ?? 1, 0.35, 2.15);
 
     this.distributionId = this.chooseDistribution(pt);
     this.catchDistributed = false;
@@ -1114,6 +1214,12 @@ export class Goalkeeper {
     // A diving catch remains part of the dive. Snapping to an upright catch
     // here was the most visible source of discontinuity at ball contact.
     if (this.state === 'dive' || this.state === 'land') {
+      if (this.catchY < 0.86 && !['low-smother', 'reflex-foot'].includes(this.saveFamily)) {
+        this.saveFamily = 'low-catch';
+      } else if (this.catchY < 1.45 && this.saveFamily === 'mid-dive') {
+        this.saveFamily = 'mid-catch';
+      }
+      this.activeSaveMoveId = practicalMoveIdForFamily(this.saveFamily, this.diveDir, false);
       this.contactRegistered = true;
       if (this.state === 'dive') this.contactHoldT = CONTACT_HOLD_DURATION;
       this.pendingLandImpulse = Math.max(this.pendingLandImpulse, 0.55);
@@ -1123,22 +1229,34 @@ export class Goalkeeper {
     this.state = 'catch';
     this.pose = 'catch';
     this.stateT = 0;
-    this.catchY = clamp(pt?.y ?? 1, 0.35, 2.15);
     const requestedX = clamp(pt?.x ?? this.x, -HALF_GOAL + 0.5, HALF_GOAL - 0.5);
     this.x = clamp(requestedX, this.x - 0.14, this.x + 0.14);
     this.moveVx = 0;
     this.catchType = this.catchY < 0.78 ? 'low' : this.catchY > 1.62 ? 'high' : 'chest';
+    this.saveFamily = this.catchType === 'low'
+      ? 'front-smother'
+      : this.catchType === 'high'
+        ? (this.catchY >= 1.98 ? 'jump-catch' : 'high-claim')
+        : 'mid-catch';
+    this.activeSaveMoveId = practicalMoveIdForFamily(this.saveFamily, this.diveDir, true);
     this.catchDuration = this.catchType === 'high' ? 1.02 : this.catchType === 'low' ? 0.98 : 0.94;
     this.catchSecureT = this.catchType === 'high' ? 0.52 : 0.46;
   }
 
   impact(pt = null, ball = null) {
+    this.hasBall = false;
     this.contactPulse = 1;
     this.spr.setTint?.(0xfff3c4);
     this.scene.time?.delayedCall?.(95, () => this.spr?.clearTint?.());
     if (!ball) return;
 
     if (this.state === 'dive' || this.state === 'land') {
+      if (this.targetY < 0.86 && !['reflex-foot', 'spread-save'].includes(this.saveFamily)) {
+        this.saveFamily = 'low-parry';
+      } else if (this.targetY < 1.45 && ['mid-catch', 'mid-dive'].includes(this.saveFamily)) {
+        this.saveFamily = 'mid-dive';
+      }
+      this.activeSaveMoveId = practicalMoveIdForFamily(this.saveFamily, this.diveDir, false);
       // Hold the authored contact pose for only a few frames, then preserve
       // the existing horizontal momentum through descent and turf impact.
       this.contactRegistered = true;
@@ -1165,11 +1283,9 @@ export class Goalkeeper {
       speed: this.shotSpeed,
       lateral
     });
-    this.saveFamily = contactY >= 1.52 && lateral <= 0.95
-      ? lateral <= 0.32
-        ? 'two-fist-punch'
-        : contactX < this.x ? 'single-hand-punch-left' : 'single-hand-punch-right'
-      : classifiedFamily;
+    this.saveFamily = classifiedFamily;
+    this.standingSave = false;
+    this.activeSaveMoveId = practicalMoveIdForFamily(this.saveFamily, this.diveDir, false);
     this.moveTargetX = clamp(
       contactX - this.diveDir * 0.58,
       -HALF_GOAL + 0.55,
@@ -1227,6 +1343,7 @@ export class Goalkeeper {
     this.maxHandY = 2;
     this.maxDiveRootTravel = 0;
     this.saveFamily = 'mid-catch';
+    this.activeSaveMoveId = null;
     this.catchY = 1;
     this.landY = GROUND_Y;
     this.landVy = 0;
@@ -1238,6 +1355,7 @@ export class Goalkeeper {
     this.catchDuration = 0.82;
     this.catchSecureT = 0.46;
     this.catchDistributed = false;
+    this.hasBall = false;
     this.distributionId = KEEPER_DISTRIBUTION_IDS[0];
     this.presentationAction = null;
     this.presentationT = 0;

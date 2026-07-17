@@ -145,13 +145,29 @@ test('keeper maps simulation phases and screen direction to authored animation f
   assert.equal(keeper.getAnimationFrame(), 18);
 });
 
-test('keeper recovery adds six grounded phases per screen direction', () => {
+test('idle stance holds each authored frame for a calm half-second cadence', () => {
+  const keeper = new Goalkeeper(sceneStub(['keeper-anim-hd']), 0.6, CAM.ballDist + 17, { seed: 4 });
+  keeper.idlePhase = 0;
+  keeper.idleClock = 0;
+  assert.equal(keeper.getAnimationFrame(), 0);
+  keeper.idleClock = 0.49;
+  assert.equal(keeper.getAnimationFrame(), 0);
+  keeper.idleClock = 0.53;
+  assert.equal(keeper.getAnimationFrame(), 1);
+});
+
+test('keeper recovery holds each side then completes a shared six-frame get-up', () => {
   const keeper = new Goalkeeper(sceneStub(), 0.6, CAM.ballDist + 17, { seed: 4 });
   keeper.state = 'land';
   keeper.grounded = true;
   keeper.diveDir = 1;
+  keeper.hasBall = true;
 
-  for (const [time, frame] of [[0, 0], [0.16, 1], [0.25, 2], [0.36, 3], [0.45, 4], [0.55, 5]]) {
+  for (const [time, frame] of [[0, 0], [0.12, 1], [0.18, 2], [0.24, 3], [0.30, 4], [0.35, 5]]) {
+    keeper.stateT = time;
+    assert.equal(keeper.getRecoveryFrame(), frame);
+  }
+  for (const [time, frame] of [[0.40, 12], [0.50, 13], [0.60, 14], [0.70, 15], [0.80, 16], [0.90, 17]]) {
     keeper.stateT = time;
     assert.equal(keeper.getRecoveryFrame(), frame);
   }
@@ -159,8 +175,16 @@ test('keeper recovery adds six grounded phases per screen direction', () => {
   keeper.diveDir = -1;
   keeper.stateT = 0;
   assert.equal(keeper.getRecoveryFrame(), 6);
-  keeper.stateT = 0.55;
+  keeper.stateT = 0.35;
   assert.equal(keeper.getRecoveryFrame(), 11);
+  keeper.stateT = 0.90;
+  assert.equal(keeper.getRecoveryFrame(), 17);
+
+  keeper.hasBall = false;
+  keeper.stateT = 0;
+  assert.equal(keeper.getRecoveryFrame(), 12, 'a parry begins the ball-free centre get-up');
+  keeper.stateT = 0.9;
+  assert.equal(keeper.getRecoveryFrame(), 17);
 });
 
 test('expanded dive atlas maps twelve phases to each screen direction without flipping', () => {
@@ -299,6 +323,7 @@ test('footwork and handling atlases animate both travel and catch follow-through
 
   keeper.state = 'idle';
   keeper.catchBall({ x: 0.05, y: 0.55 });
+  assert.equal(keeper.hasBall, true);
   assert.equal(keeper.catchType, 'low');
   assert.equal(keeper.getHandlingFrame(), 0);
   keeper.stateT = keeper.catchDuration * 0.9;
@@ -352,7 +377,7 @@ test('return-to-centre motion uses directional frames and settles without oversh
 
 test('grounded keeper recovery is bottom-anchored to the pitch', () => {
   const keeper = new Goalkeeper(
-    sceneStub(['keeper-anim-hd', 'keeper-recovery-hd']),
+    sceneStub(['keeper-anim-hd', 'keeper-practical-recovery-hd']),
     0.6,
     CAM.ballDist + 17,
     { seed: 4 }
@@ -367,17 +392,18 @@ test('grounded keeper recovery is bottom-anchored to the pitch', () => {
   assert.deepEqual(keeper.spr.calls.setTexture, ['keeper-anim-hd', 8]);
 
   keeper.grounded = true;
+  keeper.hasBall = true;
   keeper.stateT = 0;
   keeper.draw();
   const pitch = project(keeper.x, 0, keeper.z);
   assert.deepEqual(keeper.spr.calls.setOrigin, [0.5, 1]);
-  assert.deepEqual(keeper.spr.calls.setTexture, ['keeper-recovery-hd', 0]);
+  assert.deepEqual(keeper.spr.calls.setTexture, ['keeper-practical-recovery-hd', 0]);
   assert.deepEqual(keeper.spr.calls.setPosition, [pitch.x, pitch.y]);
 });
 
 test('save result hold shows impact without waiting for a full return to position', () => {
   const keeper = new Goalkeeper(
-    sceneStub(['keeper-anim-hd', 'keeper-recovery-hd']),
+    sceneStub(['keeper-anim-hd', 'keeper-practical-recovery-hd']),
     0.7,
     CAM.ballDist + 17,
     { seed: 4 }
@@ -393,7 +419,7 @@ test('save result hold shows impact without waiting for a full return to positio
 
   const holdMs = keeper.getResultHoldMs();
   assert.ok(holdMs >= 750);
-  assert.ok(holdMs <= 1050, 'a high save must not stall the next-shot loop');
+  assert.ok(holdMs <= 1350, 'a high save must not stall the next-shot loop');
 
   for (let elapsed = 0; elapsed < holdMs / 1000; elapsed += PHYS.fixedStep) {
     keeper.update(PHYS.fixedStep);
@@ -413,16 +439,17 @@ test('standing parry follows the real contact direction and begins a full recove
   assert.equal(keeper.state, 'dive');
   assert.equal(keeper.pose, 'dive');
   assert.equal(keeper.diveDir, -1);
+  assert.equal(keeper.hasBall, false);
   assert.ok(keeper.moveVx < 0);
-  assert.ok(keeper.getResultHoldMs() <= 1050);
+  assert.ok(keeper.getResultHoldMs() <= 1350);
 });
 
 test('save families are chosen deterministically from shot height and speed', () => {
   assert.equal(classifySaveFamily({ y: 0.42, speed: 17, lateral: 1.2 }), 'low-smother');
   assert.equal(classifySaveFamily({ y: 0.42, speed: 27, lateral: 1.2 }), 'reflex-foot');
-  assert.equal(classifySaveFamily({ y: 0.82, speed: 24, lateral: 2 }), 'low-extension');
-  assert.equal(classifySaveFamily({ y: 1.2, speed: 22, lateral: 2 }), 'mid-catch');
-  assert.equal(classifySaveFamily({ y: 1.75, speed: 24, lateral: 2 }), 'upper-parry');
+  assert.equal(classifySaveFamily({ y: 0.72, speed: 24, lateral: 2 }), 'low-dive');
+  assert.equal(classifySaveFamily({ y: 1.2, speed: 22, lateral: 2 }), 'mid-dive');
+  assert.equal(classifySaveFamily({ y: 1.75, speed: 24, lateral: 0.8 }), 'upper-parry');
   assert.equal(classifySaveFamily({ y: 2.45, speed: 24, lateral: 2 }), 'top-tip');
 });
 

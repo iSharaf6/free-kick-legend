@@ -1021,7 +1021,6 @@ export class GameScene extends Phaser.Scene {
         break;
       case 'SAVE':
         this.showBanner('SAVED!', '#ff8a65');
-        this.time.delayedCall(560, () => this.keeper?.celebrateSave());
         Audio.groan();
         break;
       case 'WALL':
@@ -1233,7 +1232,7 @@ export class GameScene extends Phaser.Scene {
   resultResetDelay(outcome, minimum = 750) {
     if (outcome !== 'SAVE' && outcome !== 'CAUGHT') return minimum;
     const keeperHold = this.keeper?.getResultHoldMs?.() || minimum;
-    return Math.max(minimum, Math.min(keeperHold, 1050));
+    return Math.max(minimum, Math.min(keeperHold, 1350));
   }
 
   resetAttempt() {
@@ -1255,7 +1254,6 @@ export class GameScene extends Phaser.Scene {
     this.keeper.reset();
     this.kicker?.cancelSequence().setPose('ready');
     this.buildWall();
-    if (this.wall) this.keeper.organiseWall();
     this.trailPts = [];
     this.trailGfx.clear();
     this.prevBallScreen = null;

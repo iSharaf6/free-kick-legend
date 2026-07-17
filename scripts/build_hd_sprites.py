@@ -28,6 +28,9 @@ KEEPER_SITUATIONAL_PUNCH_SOURCE = ROOT / "assets/source/keeper-situational-punch
 KEEPER_DISTRIBUTION_SOURCE = ROOT / "assets/source/keeper-distribution-sheet-v1-alpha.png"
 KEEPER_FOOT_DISTRIBUTION_SOURCE = ROOT / "assets/source/keeper-foot-distribution-sheet-v1-alpha.png"
 KEEPER_REACTIONS_SOURCE = ROOT / "assets/source/keeper-reactions-sheet-v1-alpha.png"
+KEEPER_PRACTICAL_LOW_SOURCE = ROOT / "assets/source/keeper-practical-low-sheet-v3-alpha.png"
+KEEPER_MID_DIVE_SOURCE = ROOT / "assets/source/keeper-mid-dive-sheet-v3-alpha.png"
+KEEPER_PRACTICAL_RECOVERY_SOURCE = ROOT / "assets/source/keeper-practical-recovery-sheet-v1-alpha.png"
 OUT = ROOT / "public/assets/hd"
 
 KEEPER_ANIMATION_SIZE = (1600, 1120)
@@ -70,7 +73,7 @@ def rgb(color: int) -> tuple[int, int, int]:
     return ((color >> 16) & 255, (color >> 8) & 255, color & 255)
 
 
-def remove_detached_fragments(image: Image.Image) -> Image.Image:
+def remove_detached_fragments(image: Image.Image, minimum_ratio: float = 0.025) -> Image.Image:
     """Remove isolated generation debris without softening any pixel edges."""
     out = image.copy()
     alpha = out.getchannel("A")
@@ -106,7 +109,7 @@ def remove_detached_fragments(image: Image.Image) -> Image.Image:
     if not components:
         return out
     largest = max(len(component) for component in components)
-    minimum = max(18, round(largest * 0.025))
+    minimum = max(18, round(largest * minimum_ratio))
     pixels = out.load()
     for component in components:
         if len(component) >= minimum:
@@ -199,6 +202,58 @@ def connected_component_boxes(image: Image.Image, minimum: int = 1000) -> list[t
             if count >= minimum:
                 boxes.append((left, top, right + 1, bottom + 1))
     return boxes
+
+
+def connected_component_sprites(
+    image: Image.Image,
+    minimum: int = 1000,
+) -> list[tuple[tuple[int, int, int, int], Image.Image]]:
+    """Extract isolated components without neighboring pixels inside their bounds."""
+    alpha = image.getchannel("A")
+    width, height = image.size
+    alpha_pixels = alpha.load()
+    source_pixels = image.load()
+    seen = bytearray(width * height)
+    components: list[tuple[tuple[int, int, int, int], Image.Image]] = []
+
+    for y in range(height):
+        for x in range(width):
+            index = y * width + x
+            if seen[index] or alpha_pixels[x, y] < 8:
+                continue
+            seen[index] = 1
+            stack = [(x, y)]
+            pixels: list[tuple[int, int]] = []
+            left = right = x
+            top = bottom = y
+            while stack:
+                px, py = stack.pop()
+                pixels.append((px, py))
+                left = min(left, px)
+                right = max(right, px)
+                top = min(top, py)
+                bottom = max(bottom, py)
+                for oy in (-1, 0, 1):
+                    for ox in (-1, 0, 1):
+                        if ox == 0 and oy == 0:
+                            continue
+                        nx, ny = px + ox, py + oy
+                        if not (0 <= nx < width and 0 <= ny < height):
+                            continue
+                        neighbor = ny * width + nx
+                        if seen[neighbor] or alpha_pixels[nx, ny] < 8:
+                            continue
+                        seen[neighbor] = 1
+                        stack.append((nx, ny))
+            if len(pixels) < minimum:
+                continue
+            box = (left, top, right + 1, bottom + 1)
+            sprite = Image.new("RGBA", (right - left + 1, bottom - top + 1), (0, 0, 0, 0))
+            sprite_pixels = sprite.load()
+            for px, py in pixels:
+                sprite_pixels[px - left, py - top] = source_pixels[px, py]
+            components.append((box, sprite))
+    return components
 
 
 def build_keeper_animation_atlas() -> None:
@@ -515,6 +570,151 @@ def build_keeper_action_atlas(
     atlas.save(OUT / output_name, optimize=True)
 
 
+def pack_keeper_frames(
+    source: Image.Image,
+    boxes: list[tuple[int, int, int, int]],
+    output_name: str,
+    atlas_columns: int,
+) -> None:
+    """Pack keeper silhouettes at one stable body scale and turf baseline."""
+    frame_width, frame_height = KEEPER_FRAME_SIZE
+    atlas_rows = (len(boxes) + atlas_columns - 1) // atlas_columns
+    atlas = Image.new(
+        "RGBA",
+        (atlas_columns * frame_width, atlas_rows * frame_height),
+        (0, 0, 0, 0),
+    )
+    for frame_index, box in enumerate(boxes):
+        sprite = remove_detached_fragments(source.crop(box))
+        alpha_box = sprite.getchannel("A").getbbox()
+        if alpha_box:
+            sprite = sprite.crop(alpha_box)
+        scale = min(
+            205 / max(sprite.width, sprite.height),
+            (frame_width - 16) / max(sprite.width, 1),
+            (frame_height - 16) / max(sprite.height, 1),
+        )
+        sprite = sprite.resize(
+            (max(1, round(sprite.width * scale)), max(1, round(sprite.height * scale))),
+            Image.Resampling.NEAREST,
+        )
+        atlas_col = frame_index % atlas_columns
+        atlas_row = frame_index // atlas_columns
+        x = atlas_col * frame_width + (frame_width - sprite.width) // 2
+        y = atlas_row * frame_height + frame_height - sprite.height - 8
+        atlas.alpha_composite(sprite, (x, y))
+    atlas.save(OUT / output_name, optimize=True)
+
+
+def build_keeper_practical_low_atlas() -> None:
+    """Build dedicated low parry/catch clips and strict mirrored sides.
+
+    The generated master intentionally authors only the screen-right actions.
+    Mirroring those validated masters guarantees identical timing and reach for
+    both gameplay directions while keeping parries distinct from catches.
+    """
+    source = Image.open(KEEPER_PRACTICAL_LOW_SOURCE).convert("RGBA")
+    components = connected_component_sprites(source)
+    parry_masters = [
+        component for component in components
+        if (component[0][1] + component[0][3]) / 2 < source.height / 2
+    ]
+    catch_masters = [
+        component for component in components
+        if (component[0][1] + component[0][3]) / 2 >= source.height / 2
+    ]
+    parry_masters.sort(key=lambda component: (component[0][0] + component[0][2]) / 2)
+    catch_masters.sort(key=lambda component: (component[0][0] + component[0][2]) / 2)
+    masters = parry_masters + catch_masters
+    if len(parry_masters) != 8 or len(catch_masters) != 8:
+        raise ValueError(
+            "practical low master must contain 8 isolated parry and 8 isolated catch figures, "
+            f"found {len(parry_masters)} and {len(catch_masters)}"
+        )
+
+    frame_width, frame_height = KEEPER_FRAME_SIZE
+    master_frames = []
+    for _, isolated_sprite in masters:
+        sprite = isolated_sprite.copy()
+        scale = min(
+            205 / max(sprite.width, sprite.height),
+            (frame_width - 16) / max(sprite.width, 1),
+            (frame_height - 16) / max(sprite.height, 1),
+        )
+        sprite = sprite.resize(
+            (max(1, round(sprite.width * scale)), max(1, round(sprite.height * scale))),
+            Image.Resampling.NEAREST,
+        )
+        frame = Image.new("RGBA", KEEPER_FRAME_SIZE, (0, 0, 0, 0))
+        x = (frame_width - sprite.width) // 2
+        y = frame_height - sprite.height - 8
+        frame.alpha_composite(sprite, (x, y))
+        master_frames.append(frame)
+
+    atlas = Image.new("RGBA", (8 * frame_width, 4 * frame_height), (0, 0, 0, 0))
+    runtime_rows = (
+        (master_frames[:8], False),
+        (master_frames[:8], True),
+        (master_frames[8:], False),
+        (master_frames[8:], True),
+    )
+    for row_index, (row, mirrored) in enumerate(runtime_rows):
+        for col_index, frame in enumerate(row):
+            runtime_frame = ImageOps.mirror(frame) if mirrored else frame
+            atlas.alpha_composite(runtime_frame, (col_index * frame_width, row_index * frame_height))
+    atlas.save(OUT / "keeper-practical-low-sheet-hd.png", optimize=True)
+
+
+def build_keeper_mid_dive_atlas() -> None:
+    """Pack the clean no-ball right-dive master and a strict left mirror."""
+    source = Image.open(KEEPER_MID_DIVE_SOURCE).convert("RGBA")
+    right_master = connected_component_sprites(source)
+    right_master.sort(key=lambda component: (component[0][0] + component[0][2]) / 2)
+    if len(right_master) != 8:
+        raise ValueError(
+            f"mid-dive right master must contain 8 no-ball figures, found {len(right_master)}"
+        )
+
+    frame_width, frame_height = KEEPER_FRAME_SIZE
+    master_frames = []
+    for _, isolated_sprite in right_master:
+        sprite = isolated_sprite.copy()
+        scale = min(
+            205 / max(sprite.width, sprite.height),
+            (frame_width - 16) / max(sprite.width, 1),
+            (frame_height - 16) / max(sprite.height, 1),
+        )
+        sprite = sprite.resize(
+            (max(1, round(sprite.width * scale)), max(1, round(sprite.height * scale))),
+            Image.Resampling.NEAREST,
+        )
+        frame = Image.new("RGBA", KEEPER_FRAME_SIZE, (0, 0, 0, 0))
+        frame.alpha_composite(
+            sprite,
+            ((frame_width - sprite.width) // 2, frame_height - sprite.height - 8),
+        )
+        master_frames.append(frame)
+
+    atlas = Image.new("RGBA", (8 * frame_width, 2 * frame_height), (0, 0, 0, 0))
+    for col_index, frame in enumerate(master_frames):
+        atlas.alpha_composite(frame, (col_index * frame_width, 0))
+        atlas.alpha_composite(
+            ImageOps.mirror(frame),
+            (col_index * frame_width, frame_height),
+        )
+    atlas.save(OUT / "keeper-mid-dive-sheet-hd.png", optimize=True)
+
+
+def build_keeper_practical_recovery_atlas() -> None:
+    """Pack secure right/left holds and a centre get-up into three rows."""
+    source = Image.open(KEEPER_PRACTICAL_RECOVERY_SOURCE).convert("RGBA")
+    grouped = grouped_actor_boxes(source, (6, 6, 6))
+    boxes = [entry["combined"] for entry in grouped]
+    if len(boxes) != 18:
+        raise ValueError(f"practical recovery source must contain 18 figures, found {len(boxes)}")
+    pack_keeper_frames(source, boxes, "keeper-practical-recovery-sheet-hd.png", 6)
+
+
 def build_keeper_footwork_atlas() -> None:
     """Pack five planted shuffle frames per screen direction."""
     source = Image.open(KEEPER_FOOTWORK_SOURCE).convert("RGBA")
@@ -723,6 +923,9 @@ def main() -> None:
         (6, 6, 6),
         6,
     )
+    build_keeper_practical_low_atlas()
+    build_keeper_mid_dive_atlas()
+    build_keeper_practical_recovery_atlas()
 
     # Remove the footballs baked into action/dive reference poses; gameplay owns
     # a separate simulated ball, so these pixels must never double-render.

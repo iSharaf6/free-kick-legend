@@ -14,7 +14,7 @@ const move = (id, label, tier, category, texture, frames, options = {}) => Objec
 // summary). Keep every row explicit so QA and gameplay never lose a move to an
 // accidental alias or an implicit left/right mirror.
 export const KEEPER_MOVESET = Object.freeze([
-  move('idle-stance', 'Idle stance', 'core-gameplay', 'base', 'keeper-anim-hd', [0, 1, 0, 3], { loop: true, frameMs: 220 }),
+  move('idle-stance', 'Idle stance', 'core-gameplay', 'base', 'keeper-anim-hd', [0, 1, 0, 3], { loop: true, frameMs: 520 }),
   move('ready-set', 'Ready bounce / set', 'core-gameplay', 'base', 'keeper-anim-hd', [2, 4, 2, 4], { loop: true, frameMs: 130 }),
   move('weight-shift', 'Weight shift / anticipation', 'core-gameplay', 'base', 'keeper-anim-hd', [1, 2, 3, 2], { loop: true, frameMs: 145 }),
 
@@ -25,10 +25,10 @@ export const KEEPER_MOVESET = Object.freeze([
   move('forward-attack-step', 'Forward attack step', 'core-gameplay', 'footwork', 'keeper-situational-punch-hd', [0, 1, 2]),
   move('backpedal-retreat', 'Backpedal / retreat', 'core-gameplay', 'footwork', 'keeper-situational-punch-hd', [5, 2, 1, 0]),
 
-  move('low-catch-left', 'Low catch left', 'core-gameplay', 'low-saves', 'keeper-low-smother-hd', [8, 9, 10, 11, 12, 13, 13, 15], { side: 'left' }),
-  move('low-catch-right', 'Low catch right', 'core-gameplay', 'low-saves', 'keeper-low-smother-hd', [0, 1, 2, 3, 4, 5, 5, 7], { side: 'right' }),
-  move('low-parry-left', 'Low parry left', 'core-gameplay', 'low-saves', 'keeper-low-save-hd', [8, 9, 10, 11, 12, 13, 14], { side: 'left' }),
-  move('low-parry-right', 'Low parry right', 'core-gameplay', 'low-saves', 'keeper-low-save-hd', [0, 1, 2, 3, 4, 5, 6], { side: 'right' }),
+  move('low-catch-left', 'Low catch left', 'core-gameplay', 'low-saves', 'keeper-practical-low-hd', [24, 25, 26, 27, 28, 29, 30, 31], { side: 'left' }),
+  move('low-catch-right', 'Low catch right', 'core-gameplay', 'low-saves', 'keeper-practical-low-hd', [16, 17, 18, 19, 20, 21, 22, 23], { side: 'right' }),
+  move('low-parry-left', 'Low parry left', 'core-gameplay', 'low-saves', 'keeper-practical-low-hd', [8, 9, 10, 11, 12, 13, 14, 15], { side: 'left' }),
+  move('low-parry-right', 'Low parry right', 'core-gameplay', 'low-saves', 'keeper-practical-low-hd', [0, 1, 2, 3, 4, 5, 6, 7], { side: 'right' }),
   move('front-smother', 'Front smother', 'core-gameplay', 'low-saves', 'keeper-handling-hd', [0, 1, 2, 3]),
   move('smother-left', 'Smother left', 'core-gameplay', 'low-saves', 'keeper-low-smother-hd', [8, 9, 10, 11, 12, 13, 14, 15], { side: 'left' }),
   move('smother-right', 'Smother right', 'core-gameplay', 'low-saves', 'keeper-low-smother-hd', [0, 1, 2, 3, 4, 5, 6, 7], { side: 'right' }),
@@ -49,8 +49,8 @@ export const KEEPER_MOVESET = Object.freeze([
 
   move('full-stretch-dive-left', 'Full-stretch dive left', 'core-gameplay', 'diving', 'keeper-dive-motion-hd', [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23], { side: 'left' }),
   move('full-stretch-dive-right', 'Full-stretch dive right', 'core-gameplay', 'diving', 'keeper-dive-motion-hd', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], { side: 'right' }),
-  move('mid-height-dive-left', 'Dive left mid-height', 'core-gameplay', 'diving', 'keeper-mid-catch-hd', [8, 9, 10, 11, 12, 13, 14, 15], { side: 'left' }),
-  move('mid-height-dive-right', 'Dive right mid-height', 'core-gameplay', 'diving', 'keeper-mid-catch-hd', [0, 1, 2, 3, 4, 5, 6, 7], { side: 'right' }),
+  move('mid-height-dive-left', 'Dive left mid-height', 'core-gameplay', 'diving', 'keeper-mid-dive-hd', [8, 9, 10, 11, 12, 13, 14, 15], { side: 'left' }),
+  move('mid-height-dive-right', 'Dive right mid-height', 'core-gameplay', 'diving', 'keeper-mid-dive-hd', [0, 1, 2, 3, 4, 5, 6, 7], { side: 'right' }),
   move('low-dive-left', 'Dive left low', 'core-gameplay', 'diving', 'keeper-low-save-hd', [8, 9, 10, 11, 12, 13, 14, 15], { side: 'left' }),
   move('low-dive-right', 'Dive right low', 'core-gameplay', 'diving', 'keeper-low-save-hd', [0, 1, 2, 3, 4, 5, 6, 7], { side: 'right' }),
 
@@ -72,9 +72,9 @@ export const KEEPER_MOVESET = Object.freeze([
   move('drop-kick', 'Drop kick', 'polish', 'distribution', 'keeper-foot-distribution-hd', [6, 7, 8, 9, 10, 11]),
   move('side-volley-half-volley', 'Side volley / half-volley', 'polish', 'distribution', 'keeper-foot-distribution-hd', [24, 25, 26, 27, 28, 29]),
 
-  move('ground-hold-after-save', 'Ground hold after save', 'polish', 'recovery', 'keeper-recovery-hd', [0]),
-  move('get-up-left-side', 'Get up from left side', 'polish', 'recovery', 'keeper-recovery-hd', [6, 7, 8, 9, 10, 11], { side: 'left' }),
-  move('get-up-right-side', 'Get up from right side', 'polish', 'recovery', 'keeper-recovery-hd', [0, 1, 2, 3, 4, 5], { side: 'right' }),
+  move('save-and-hold-left', 'Save-and-hold recovery left', 'core-gameplay', 'recovery', 'keeper-practical-recovery-hd', [6, 7, 8, 9, 10, 11], { side: 'left' }),
+  move('save-and-hold-right', 'Save-and-hold recovery right', 'core-gameplay', 'recovery', 'keeper-practical-recovery-hd', [0, 1, 2, 3, 4, 5], { side: 'right' }),
+  move('get-up-centre', 'Get-up recovery centre', 'core-gameplay', 'recovery', 'keeper-practical-recovery-hd', [12, 13, 14, 15, 16, 17]),
 
   move('concede-reaction', 'Concede reaction', 'polish', 'reactions', 'keeper-reactions-hd', [0, 1, 2, 3, 4, 5]),
   move('big-save-celebration', 'Big save celebration', 'polish', 'reactions', 'keeper-reactions-hd', [6, 7, 8, 9, 10, 11]),
@@ -87,6 +87,25 @@ export const KEEPER_MOVES_BY_ID = Object.freeze(Object.fromEntries(
 ));
 export const KEEPER_DISTRIBUTION_IDS = Object.freeze(
   KEEPER_MOVESET.filter((entry) => entry.category === 'distribution').map((entry) => entry.id)
+);
+
+export const KEEPER_PRACTICAL_IDS = Object.freeze([
+  'full-stretch-dive-left', 'full-stretch-dive-right',
+  'low-dive-left', 'low-dive-right',
+  'mid-height-dive-left', 'mid-height-dive-right',
+  'top-left-fingertip-tip', 'top-right-fingertip-tip',
+  'upper-parry-left', 'upper-parry-right',
+  'low-parry-left', 'low-parry-right',
+  'low-catch-left', 'low-catch-right',
+  'mid-catch-centre', 'mid-catch-left', 'mid-catch-right',
+  'high-claim-standing', 'jump-catch-cross-claim',
+  'front-smother', 'smother-left', 'smother-right',
+  'spread-save', 'foot-save-left', 'foot-save-right',
+  'save-and-hold-left', 'save-and-hold-right', 'get-up-centre'
+]);
+
+export const KEEPER_PRACTICAL_MOVESET = Object.freeze(
+  KEEPER_PRACTICAL_IDS.map((id) => KEEPER_MOVES_BY_ID[id])
 );
 
 export function getKeeperMove(id) {
