@@ -174,6 +174,7 @@ export class GameScene extends Phaser.Scene {
       style: this.level.style
     });
     this.buildWall();
+    if (this.wall) this.keeper.organiseWall();
 
     this.trailPts = [];
     this.trailGfx = this.add.graphics();
@@ -996,6 +997,7 @@ export class GameScene extends Phaser.Scene {
         this.ball.enterNet(this.zGoal + 2.15);
         this.netFront?.setVisible(true);
         this.time.delayedCall(180, () => this.kicker?.celebrate(720));
+        this.time.delayedCall(150, () => this.keeper?.reactToGoal());
         const spos = project(pt.x, pt.y, this.zGoal);
         this.confetti.explode(60, spos.x, spos.y);
         this.showBanner(isTopCorner ? 'TOP BINS' : shotRating.grade === 'S' ? 'WORLD CLASS' : 'GOAL', '#f2c832');
@@ -1019,6 +1021,7 @@ export class GameScene extends Phaser.Scene {
         break;
       case 'SAVE':
         this.showBanner('SAVED!', '#ff8a65');
+        this.time.delayedCall(560, () => this.keeper?.celebrateSave());
         Audio.groan();
         break;
       case 'WALL':
@@ -1252,6 +1255,7 @@ export class GameScene extends Phaser.Scene {
     this.keeper.reset();
     this.kicker?.cancelSequence().setPose('ready');
     this.buildWall();
+    if (this.wall) this.keeper.organiseWall();
     this.trailPts = [];
     this.trailGfx.clear();
     this.prevBallScreen = null;

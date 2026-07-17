@@ -80,6 +80,12 @@ export class BootScene extends Phaser.Scene {
         frameHeight: 280
       });
     }
+    for (const sheet of ['situational-punch', 'distribution', 'foot-distribution', 'reactions']) {
+      this.load.spritesheet(`keeper-${sheet}-hd`, `${base}assets/hd/keeper-${sheet}-sheet-hd.png`, {
+        frameWidth: 320,
+        frameHeight: 280
+      });
+    }
     this.load.image('defender-hd', `${base}assets/hd/defender-hd.png`);
     this.load.image('ball-classic-hd', `${base}assets/hd/ball-classic-hd.png`);
   }
