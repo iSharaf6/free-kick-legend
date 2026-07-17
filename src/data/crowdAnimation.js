@@ -14,6 +14,5 @@ export const CROWD_ANIMATION = Object.freeze({
   goalKey: 'crowd-goal-jump',
   ambientFrameRate: 2.5,
   goalFrameRate: 9,
-  sectionCount: 6,
-  sectionScale: 0.16
+  sectionCount: 7
 });

@@ -22,6 +22,9 @@ import {
 } from '../ui.js';
 import { PAL } from '../pixelart.js';
 import { CROWD_ANIMATION } from '../data/crowdAnimation.js';
+import {
+  GAMEPLAY_LAYOUT, perspectiveScale, pixelSafeSize, screenX, screenY, snapLogical
+} from '../gameplayLayout.js';
 
 const ATTEMPTS = 3;
 const ARCADE_TIME = 60;
@@ -79,9 +82,11 @@ export class GameScene extends Phaser.Scene {
     Audio.setVolume(this.settings.sfxVolume ?? 1);
     if (this.mode === 'daily') SaveManager.ensureDaily(this.dailyDate);
     PlatformService.gameplayStart();
-    CAM.x = this.level.offsetX * 0.85;
+    // Keep the frame centred; off-axis free kicks now move the ball and wall,
+    // not the camera and goal artwork.
+    CAM.x = 0;
     this.zGoal = CAM.ballDist + this.level.distance;
-    this.zWall = CAM.ballDist + Math.min(WALL_DIST, this.level.distance * 0.55);
+    this.zWall = CAM.ballDist + Math.min(WALL_DIST, this.level.distance * GAMEPLAY_LAYOUT.wall.distanceRatio);
 
     this.state = 'AIMING';
     this.attempt = 1;
@@ -121,10 +126,10 @@ export class GameScene extends Phaser.Scene {
     // Floodlight beams angled onto the penalty area sell the night-match
     // lighting; the vignette pulls focus toward the goalmouth.
     const beams = this.add.graphics().setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
-    beams.fillStyle(PAL.flood, 0.05);
+    beams.fillStyle(PAL.flood, 0.032);
     beams.fillTriangle(48, 14, 82, 14, 262, 236);
     beams.fillTriangle(398, 14, 432, 14, 218, 236);
-    beams.fillStyle(PAL.flood, 0.035);
+    beams.fillStyle(PAL.flood, 0.022);
     beams.fillTriangle(128, 14, 154, 14, 248, 208);
     beams.fillTriangle(326, 14, 352, 14, 232, 208);
     this.add.image(0, 0, 'vignette').setOrigin(0, 0).setDepth(1950);
@@ -160,11 +165,20 @@ export class GameScene extends Phaser.Scene {
     }));
     this.prevBallScreen = null;
 
+    this.aimConeGfx = this.add.graphics().setDepth(1.75);
+    this.drawAimingCone();
+
     const ballStart = project(this.ball.x, this.ball.y, this.ball.z);
-    this.kicker = new Kicker(this, ballStart.x - 23, ballStart.y + 15, {
+    const kickerX = snapLogical(ballStart.x + screenX(GAMEPLAY_LAYOUT.kicker.offsetX));
+    const kickerY = snapLogical(ballStart.y + screenY(GAMEPLAY_LAYOUT.kicker.offsetY));
+    const kickerTextureHeight = pixelSafeSize(
+      GAMEPLAY_LAYOUT.kicker.textureBoxHeight * perspectiveScale(kickerY)
+    );
+    this.kicker = new Kicker(this, kickerX, kickerY, {
       kitId: this.loadout.kit,
       pose: 'ready',
-      scale: 2.35,
+      scale: GAMEPLAY_LAYOUT.kicker.shadowScale,
+      visualHeight: kickerTextureHeight,
       depth: 1260,
       ambient: !this.settings.reducedMotion,
       reducedMotion: this.settings.reducedMotion
@@ -276,7 +290,8 @@ export class GameScene extends Phaser.Scene {
       0.94
     ).setDepth(1.18);
 
-    const sectionWidth = CROWD_ANIMATION.frameWidth * CROWD_ANIMATION.sectionScale;
+    const sectionScale = GAMEPLAY_LAYOUT.crowd.spriteBaseScale * perspectiveScale(railY);
+    const sectionWidth = CROWD_ANIMATION.frameWidth * sectionScale;
     const coverageWidth = sectionWidth * CROWD_ANIMATION.sectionCount;
     const startX = (GAME_W - coverageWidth) / 2 + sectionWidth / 2;
     for (let index = 0; index < CROWD_ANIMATION.sectionCount; index++) {
@@ -287,7 +302,7 @@ export class GameScene extends Phaser.Scene {
         CROWD_ANIMATION.ambientFrames[index % CROWD_ANIMATION.ambientFrames.length]
       )
         .setOrigin(0.5, 1)
-        .setScale(CROWD_ANIMATION.sectionScale)
+        .setScale(sectionScale)
         .setFlipX(index % 2 === 1)
         .setDepth(1.3);
       if (atmosphereTint) section.setTint(atmosphereTint);
@@ -342,6 +357,17 @@ export class GameScene extends Phaser.Scene {
       ease: 'Sine.easeInOut',
       onComplete: () => camera.setScroll(baseX, baseY)
     });
+  }
+
+  drawAimingCone() {
+    if (!this.aimConeGfx || !this.ball) return;
+    const origin = project(this.ball.x, this.ball.y, this.ball.z);
+    const halfWidth = GOAL_W * GAMEPLAY_LAYOUT.aimCone.goalWidthFraction * 0.5;
+    const left = project(-halfWidth, GOAL_H * 0.16, this.zGoal - 0.08);
+    const right = project(halfWidth, GOAL_H * 0.16, this.zGoal - 0.08);
+    this.aimConeGfx.clear();
+    this.aimConeGfx.fillStyle(PAL.flood, GAMEPLAY_LAYOUT.aimCone.alpha);
+    this.aimConeGfx.fillTriangle(origin.x, origin.y, left.x, left.y, right.x, right.y);
   }
 
   drawPitch() {
@@ -511,64 +537,72 @@ export class GameScene extends Phaser.Scene {
       this.wall = null;
       return;
     }
-    // Wall stands on the line between the ball and the goal center, shaded
-    // toward the near post - the far-post curler is always a real option.
+    // Wall stands on the aiming line between the ball and the goal centre.
     const t = (this.zWall - CAM.ballDist) / (this.zGoal - CAM.ballDist);
-    const lineX = this.level.offsetX * (1 - t) + Math.sign(this.level.offsetX) * 0.3;
-    this.wall = new Wall(this, this.level.wall, this.zWall, lineX);
+    const lineX = this.level.offsetX * (1 - t);
+    const playerCount = Math.max(GAMEPLAY_LAYOUT.wall.minPlayers, this.level.wall);
+    this.wall = new Wall(this, playerCount, this.zWall, lineX);
   }
 
   buildHud() {
+    const header = GAMEPLAY_LAYOUT.header;
     const chrome = this.add.graphics().setDepth(1988);
-    drawPanel(chrome, 4, 3, GAME_W - 8, 31, {
+    drawPanel(chrome, screenX(header.x), screenY(header.y), screenX(header.width), screenY(header.height), {
       fill: PAL.panel,
       border: PAL.borderDark,
       corner: PAL.goldDark
     });
 
-    makeButton(this, 34, 18, 54, 23, 'EXIT', () => {
+    makeButton(this, screenX(header.exit.x), screenY(header.exit.y),
+      screenX(header.exit.width), screenY(header.exit.height), 'EXIT', () => {
       this.scene.start(this.mode === 'career' ? 'LevelSelect' : 'Menu');
     }, {
       color: PAL.panelHi, hover: PAL.blue, border: PAL.borderDark,
-      icon: 'icon-back', iconScale: 0.62, iconX: 12,
-      fontSize: '7px', hitWidth: 58, hitHeight: 29
+      icon: 'icon-back', iconScale: 0.52, iconX: 10,
+      fontSize: '6px', hitWidth: 51, hitHeight: 25
     }).setDepth(2000);
 
-    this.muteButton = makeIconButton(this, 70, 18, 21,
+    this.muteButton = makeIconButton(this, screenX(header.audio.x), screenY(header.audio.y), screenY(header.audio.size),
       Audio.muted ? 'icon-mute' : 'icon-sound', () => {
         const muted = Audio.toggleMuted();
         SaveManager.setSetting('muted', muted);
         this.muteButton.buttonIcon?.setTexture(muted ? 'icon-mute' : 'icon-sound');
       }, {
         color: PAL.panelHi, hover: PAL.blue, border: PAL.borderDark,
-        iconScale: 0.67, hitWidth: 29, hitHeight: 29
+        iconScale: 0.57, hitWidth: 25, hitHeight: 25
       }).setDepth(2000);
 
     if (this.mode === 'career') {
-      bodyText(this, 91, 11, `${String(this.level.cup || 'career').toUpperCase()} CUP  ·  MATCH ${String(this.levelIndex + 1).padStart(2, '0')}`, {
+      bodyText(this, screenX(header.titleX), screenY(header.eyebrowY), `${String(this.level.cup || 'career').toUpperCase()} CUP  ·  MATCH ${String(this.levelIndex + 1).padStart(2, '0')}`, {
         fontSize: '6px', color: '#8fa2ab', letterSpacing: 0.38
       }).setDepth(2000);
-      bodyText(this, 91, 24, String(this.level.name).toUpperCase(), {
-        fontFamily: FONT, fontSize: '8px', color: '#f3e7c3', letterSpacing: 0.2
+      bodyText(this, screenX(header.titleX), screenY(header.titleY), String(this.level.name).toUpperCase(), {
+        fontFamily: FONT, fontSize: '7px', color: '#f3e7c3', letterSpacing: 0.2
       }).setDepth(2000);
 
       // Slim one-line strip; fades away while the shot is live so the bottom
       // of the pitch belongs to the ball, not a UI slab.
+      const objective = GAMEPLAY_LAYOUT.objective;
+      const objectiveW = pixelSafeSize(screenX(objective.width));
+      const objectiveH = pixelSafeSize(screenY(objective.height));
+      const objectiveX = snapLogical((GAME_W - objectiveW) / 2);
+      const objectiveY = snapLogical(GAME_H - screenY(objective.bottom) - objectiveH);
+      const objectiveMidY = objectiveY + objectiveH / 2;
       const objectivePlate = this.add.graphics().setDepth(1975);
-      drawPanel(objectivePlate, 137, GAME_H - 27, 337, 22, {
+      drawPanel(objectivePlate, objectiveX, objectiveY, objectiveW, objectiveH, {
         fill: PAL.panel, border: PAL.borderDark, corner: PAL.goldDark, alpha: 0.93
       });
-      const objectiveLabel = bodyText(this, 148, GAME_H - 16, 'OBJECTIVE', {
+      const objectiveLabel = bodyText(this, objectiveX + screenX(objective.labelInset), objectiveMidY, 'OBJECTIVE', {
         fontFamily: FONT, fontSize: '6px', color: '#f3c449', letterSpacing: 0.45
       }).setDepth(2000);
-      const objectiveCopy = bodyText(this, 207, GAME_H - 16, this.level.objective?.label || 'Score the free kick', {
+      const objectiveCopy = bodyText(this, objectiveX + screenX(objective.copyInset), objectiveMidY, this.level.objective?.label || 'Score the free kick', {
         fontSize: '7px', color: '#d7dfda', letterSpacing: 0.15
       }).setDepth(2000);
       this.objectiveUi = [objectivePlate, objectiveLabel, objectiveCopy];
 
       const needed = Math.max(1, this.level.objective?.goals || 1);
       if (needed > 1) {
-        this.objectiveProgressTxt = bodyText(this, 464, GAME_H - 16, `0/${needed}`, {
+        this.objectiveProgressTxt = bodyText(this, objectiveX + objectiveW - 10, objectiveMidY, `0/${needed}`, {
           originX: 1, fontFamily: FONT, fontSize: '9px', color: '#f3c449'
         }).setDepth(2000);
         this.objectiveUi.push(this.objectiveProgressTxt);
@@ -578,13 +612,16 @@ export class GameScene extends Phaser.Scene {
       // so size the HUD icons from the texture instead of a fixed scale.
       const iconTexW = this.textures.get(this.ballTexture).getSourceImage()?.width || 12;
       for (let i = 0; i < this.maxAttempts; i++) {
-        const icon = this.add.image(GAME_W - 15 - i * 14, 18, this.ballTexture)
-          .setScale(11 / iconTexW).setDepth(2000);
+        const icon = this.add.image(
+          screenX(header.attemptsRightX) - i * screenX(header.attemptsGap),
+          screenY(header.attemptsY),
+          this.ballTexture
+        ).setScale(screenX(header.attemptDiameter) / iconTexW).setDepth(2000);
         this.attemptIcons.push(icon);
       }
       const windX = typeof this.level.wind === 'object' ? Number(this.level.wind.x || 0) : Number(this.level.wind || 0);
       if (Math.abs(windX) >= 0.1) {
-        bodyText(this, GAME_W - 64, 28, `WIND ${Math.abs(windX).toFixed(1)} ${windX > 0 ? '>' : '<'}`, {
+        bodyText(this, screenX(0.80), screenY(header.titleY), `WIND ${Math.abs(windX).toFixed(1)} ${windX > 0 ? '>' : '<'}`, {
           originX: 0.5, fontSize: '6px', color: '#f3c449'
         }).setDepth(2000);
       }
@@ -596,48 +633,72 @@ export class GameScene extends Phaser.Scene {
             ? 'DRAG UP FROM THE BALL  ·  ARC THE SWIPE TO BEND'
             : null;
       if (techniqueHint) {
-        this.hint = crispText(this.add.text(GAME_W / 2 + 30, GAME_H - 84, techniqueHint, {
-          fontFamily: FONT, fontSize: '7px', color: '#f3e7c3', stroke: '#071018', strokeThickness: 2
+        this.hint = crispText(this.add.text(GAME_W / 2, GAME_H - 38, techniqueHint, {
+          fontFamily: FONT, fontSize: '5px', color: '#f3e7c3', stroke: '#071018', strokeThickness: 2
         }).setOrigin(0.5).setDepth(2000));
         this.tweens.add({ targets: this.hint, alpha: 0.35, duration: 600, yoyo: true, repeat: -1 });
       }
     } else if (this.mode === 'daily') {
-      bodyText(this, 91, 11, `DAILY KICK  ·  ${this.dailyDate}`, {
+      bodyText(this, screenX(header.titleX), screenY(header.eyebrowY), `DAILY KICK  ·  ${this.dailyDate}`, {
         fontSize: '6px', color: '#f3c449', letterSpacing: 0.32
       }).setDepth(2000);
-      bodyText(this, 91, 24, 'FIVE SHOTS  ·  ONE SHARED CHALLENGE', {
+      bodyText(this, screenX(header.titleX), screenY(header.titleY), 'FIVE SHOTS  ·  ONE SHARED CHALLENGE', {
         fontFamily: FONT, fontSize: '7px', color: '#f3e7c3', letterSpacing: 0.18
       }).setDepth(2000);
-      this.scoreTxt = bodyText(this, 302, 18, `SCORE ${this.score}`, {
-        originX: 0.5, fontFamily: FONT, fontSize: '9px', color: '#f3e7c3'
+      this.scoreTxt = bodyText(this, screenX(header.statusX), screenY(header.attemptsY), `SCORE ${this.score}`, {
+        originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '8px', color: '#f3e7c3'
       }).setDepth(2000);
-      const shots = makeStatChip(this, GAME_W - 42, 18, 70, 'icon-star', `1/${this.maxAttempts}`, {
-        height: 23, fill: PAL.night, border: PAL.goldDark, color: '#f3c449', fontSize: '9px'
-      }).setDepth(2000);
+      const shots = makeStatChip(
+        this,
+        screenX(header.chipX),
+        screenY(header.attemptsY),
+        screenX(header.chipWidth),
+        'icon-star',
+        `1/${this.maxAttempts}`,
+        {
+          height: screenY(header.chipHeight), fill: PAL.night, border: PAL.goldDark,
+          color: '#f3c449', fontSize: '8px'
+        }
+      ).setDepth(2000);
       this.dailyShotsTxt = shots.valueText;
 
+      const objective = GAMEPLAY_LAYOUT.objective;
+      const objectiveW = pixelSafeSize(screenX(objective.width));
+      const objectiveH = pixelSafeSize(screenY(objective.height));
+      const objectiveX = snapLogical((GAME_W - objectiveW) / 2);
+      const objectiveY = snapLogical(GAME_H - screenY(objective.bottom) - objectiveH);
+      const objectiveMidY = objectiveY + objectiveH / 2;
       const objectivePlate = this.add.graphics().setDepth(1975);
-      drawPanel(objectivePlate, 137, GAME_H - 27, 337, 22, {
+      drawPanel(objectivePlate, objectiveX, objectiveY, objectiveW, objectiveH, {
         fill: PAL.panel, border: PAL.goldDark, corner: PAL.gold, alpha: 0.93
       });
-      const dailyLabel = bodyText(this, 148, GAME_H - 16, 'DAILY BONUS', {
+      const dailyLabel = bodyText(this, objectiveX + screenX(objective.labelInset), objectiveMidY, 'DAILY BONUS', {
         fontFamily: FONT, fontSize: '6px', color: '#f3c449', letterSpacing: 0.45
       }).setDepth(2000);
-      const dailyCopy = bodyText(this, 216, GAME_H - 16, 'Hit the moving target for +650. Every goal counts.', {
+      const dailyCopy = bodyText(this, objectiveX + screenX(objective.copyInset) + 4, objectiveMidY, 'Hit the moving target for +650. Every goal counts.', {
         fontSize: '7px', color: '#d7dfda', letterSpacing: 0.12
       }).setDepth(2000);
       this.objectiveUi = [objectivePlate, dailyLabel, dailyCopy];
     } else {
-      this.scoreTxt = bodyText(this, GAME_W / 2, 12, `SCORE ${this.score}`, {
-        originX: 0.5, fontFamily: FONT, fontSize: '10px', color: '#f3e7c3'
+      this.scoreTxt = bodyText(this, GAME_W / 2, screenY(header.eyebrowY), `SCORE ${this.score}`, {
+        originX: 0.5, fontFamily: FONT, fontSize: '8px', color: '#f3e7c3'
       }).setDepth(2000);
-      this.comboTxt = bodyText(this, GAME_W / 2, 26,
+      this.comboTxt = bodyText(this, GAME_W / 2, screenY(header.titleY),
         this.combo > 1 ? `x${this.combo} COMBO` : `${this.goals} GOALS`, {
           originX: 0.5, fontSize: '6px', color: '#74bde8', letterSpacing: 0.35
         }).setDepth(2000);
-      const timer = makeStatChip(this, GAME_W - 40, 18, 66, 'icon-clock', Math.ceil(this.timeLeft), {
-        height: 23, fill: PAL.night, border: PAL.goldDark, color: '#f3c449', fontSize: '10px'
-      }).setDepth(2000);
+      const timer = makeStatChip(
+        this,
+        screenX(header.chipX),
+        screenY(header.attemptsY),
+        screenX(header.chipWidth),
+        'icon-clock',
+        Math.ceil(this.timeLeft),
+        {
+          height: screenY(header.chipHeight), fill: PAL.night, border: PAL.goldDark,
+          color: '#f3c449', fontSize: '8px'
+        }
+      ).setDepth(2000);
       this.timerTxt = timer.valueText;
     }
 
@@ -835,6 +896,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.drawBall();
+    this.aimConeGfx?.setVisible(this.state === 'AIMING' || this.state === 'WINDUP');
     this.drawAim();
   }
 
@@ -1550,7 +1612,9 @@ export class GameScene extends Phaser.Scene {
     const b = this.ball;
     const pos = project(b.x, b.y, b.z);
     const depth = 1000 - b.z * 10;
-    const ballScale = (pos.s * BALL_R * 2) / (this.ballSpr.texture.source[0]?.width || 12);
+    const ballTextureW = this.ballSpr.texture.source[0]?.width || 12;
+    const ballDiameter = pixelSafeSize(pos.s * BALL_R * 2 * GAMEPLAY_LAYOUT.ball.visualScale, 4);
+    const ballScale = ballDiameter / ballTextureW;
     this.ballSpr
       .setPosition(pos.x, pos.y)
       .setScale(ballScale)
@@ -1584,14 +1648,18 @@ export class GameScene extends Phaser.Scene {
     const k = Phaser.Math.Clamp(1 - b.y * 0.1, 0.3, 1);
     this.shadowSpr
       .setPosition(sh.x, sh.y)
-      .setScale((sh.s * BALL_R * 2 * 1.7 * k) / 10)
+      .setScale((sh.s * BALL_R * 2 * GAMEPLAY_LAYOUT.ball.visualScale * 1.7 * k) / 10)
       .setAlpha(0.5 * k)
       .setDepth(depth - 1);
 
     // trail: fading pixel squares
     if (this.state === 'FLIGHT' || this.state === 'RESULT') {
       if (b.flying) {
-        this.trailPts.push({ x: pos.x, y: pos.y, r: Math.max(pos.s * BALL_R, 1) });
+        this.trailPts.push({
+          x: pos.x,
+          y: pos.y,
+          r: Math.max(pos.s * BALL_R * GAMEPLAY_LAYOUT.ball.visualScale, 1)
+        });
         const maxTrail = this.trailStyle.enabled ? 24 : 10;
         if (this.trailPts.length > maxTrail) this.trailPts.shift();
       }

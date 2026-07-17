@@ -7,6 +7,7 @@ import {
 import { SaveManager } from '../systems/SaveManager.js';
 import { LEVELS, CUPS as CUP_DATA } from '../data/levels.js';
 import { PAL } from '../pixelart.js';
+import { GAMEPLAY_LAYOUT } from '../gameplayLayout.js';
 
 const LEVELS_PER_CUP = 10;
 const CUP_COUNT = 5;
@@ -238,9 +239,12 @@ export class LevelSelectScene extends Phaser.Scene {
     name.setWordWrapWidth(144, true).setAlign('center');
     const rating = makeStars(this, 384, 135, stars, { scale: 0.9, gap: 17 });
 
+    const displayedWallPlayers = level.wall > 0
+      ? Math.max(GAMEPLAY_LAYOUT.wall.minPlayers, level.wall)
+      : 0;
     const metrics = [
       ['DISTANCE', `${Math.round(level.distance || 0)} M`],
-      ['WALL', `${level.wall || 0} PLAYERS`],
+      ['WALL', `${displayedWallPlayers} PLAYERS`],
       ['KEEPER', this.keeperLabel(level.keeper)]
     ];
     metrics.forEach(([metric, value], row) => {
