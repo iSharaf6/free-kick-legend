@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { Ball } from '../src/objects/Ball.js';
-import { BALL_R, CAM, GOAL_H, GOAL_W, PHYS } from '../src/config.js';
+import { BALL_R, CAM, PHYS } from '../src/config.js';
 
 function simulateAtFps(fps, seconds, setup) {
   const ball = new Ball();
@@ -118,16 +118,16 @@ test('side and roof netting contain scored balls', () => {
   const side = new Ball();
   side.kick(10, 0, 8, 0.4);
   side.enterNet(CAM.ballDist + 5);
-  side.x = GOAL_W / 2 - BALL_R - 0.01;
+  side.x = 9 / 2 - BALL_R - 0.01;
   side.step(1 / 60);
-  assert.ok(side.x <= GOAL_W / 2 - BALL_R);
+  assert.ok(side.x <= 9 / 2 - BALL_R);
   assert.ok(side.vx <= 0, 'side net must return an outward-moving ball');
 
   const roof = new Ball();
   roof.kick(0, 8, 8, 0);
   roof.enterNet(CAM.ballDist + 5);
-  roof.y = GOAL_H - BALL_R - 0.01;
+  roof.y = 3.1 - BALL_R - 0.01;
   roof.step(1 / 60);
-  assert.ok(roof.y <= GOAL_H - BALL_R);
+  assert.ok(roof.y <= 3.1 - BALL_R);
   assert.ok(roof.vy <= 0, 'roof net must return an upward-moving ball');
 });

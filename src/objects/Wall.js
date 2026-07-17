@@ -1,7 +1,6 @@
 import { project, PLAYER_H, BALL_R, PHYS } from '../config.js';
-import { GAMEPLAY_LAYOUT, perspectiveScale, pixelSafeSize } from '../gameplayLayout.js';
 
-export const WALL_SPACING = GAMEPLAY_LAYOUT.wall.spacing;
+const SPACING = 0.58;      // shoulder-to-shoulder without sealing the goal
 const JUMP_GRAVITY = 11;
 
 function deterministicJumpSpeed(index, count) {
@@ -9,6 +8,17 @@ function deterministicJumpSpeed(index, count) {
   // identical shot change outcome between retries or replay recordings.
   const bucket = (index * 37 + count * 17 + 11) % 9;
   return 3.55 + bucket * 0.075;
+}
+
+function deterministicBuild(index, count) {
+  const bucket = (index * 29 + count * 13 + 5) % 7;
+  // Keep natural build variation without turning the shortest defenders into
+  // children beside a farther-away goalkeeper.
+  const heightFactor = 0.92 + bucket * 0.018;
+  return {
+    height: PLAYER_H * heightFactor,
+    halfWidth: 0.255 + (bucket % 3) * 0.018
+  };
 }
 
 // The defensive wall: a row of defenders that jumps as the ball arrives.
@@ -24,7 +34,7 @@ export class Wall {
     this.rng = typeof options === 'function' ? options : options?.rng;
     this.players = [];
     for (let i = 0; i < count; i++) {
-      const x = centerX + (i - (count - 1) / 2) * WALL_SPACING;
+      const x = centerX + (i - (count - 1) / 2) * SPACING;
       const hd = Boolean(scene.textures?.exists?.('defender-hd'));
       const spr = scene.add.sprite(0, 0, hd ? 'defender-hd' : (i % 2 ? 'defender2' : 'defender'))
         .setOrigin(0.5, 1)
@@ -32,12 +42,11 @@ export class Wall {
       const jumpSpeed = this.rng
         ? 3.55 + Math.max(0, Math.min(1, Number(this.rng()) || 0)) * 0.60
         : deterministicJumpSpeed(i, count);
+      const build = deterministicBuild(i, count);
       this.players.push({
         x, jumpY: 0, vy: 0, jumpSpeed, spr, index: i,
         flinch: 0, flinchDir: 1, landSquash: 0,
-        height: PLAYER_H,
-        halfWidth: 0.27,
-        opaqueHeightRatio: hd ? 188 / 204 : 1
+        ...build
       });
     }
     this.draw();
@@ -82,14 +91,9 @@ export class Wall {
   draw() {
     for (const p of this.players) {
       const pos = project(p.x, p.jumpY, this.z);
-      const baseline = project(p.x, 0, this.z);
       p.spr.setPosition(pos.x, pos.y);
       const textureH = p.spr.texture?.source?.[0]?.height || 28;
-      const opaqueHeight = textureH * p.opaqueHeightRatio;
-      const targetHeight = pixelSafeSize(
-        GAMEPLAY_LAYOUT.character.foregroundOpaqueHeight * perspectiveScale(baseline.y)
-      );
-      const baseScale = targetHeight / opaqueHeight;
+      const baseScale = (pos.s * p.height) / textureH;
       // Impact flinch tips the hit defender from the boots; a faint idle sway
       // keeps the line alive while they wait on the whistle.
       const sway = p.jumpY > 0 ? 0 : Math.sin(this.clock * 1.5 + p.index * 0.9) * 0.012;
