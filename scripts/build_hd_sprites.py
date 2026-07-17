@@ -24,6 +24,10 @@ KEEPER_MID_CATCH_SOURCE = ROOT / "assets/source/keeper-mid-catch-sheet-v1-alpha.
 KEEPER_UPPER_PARRY_SOURCE = ROOT / "assets/source/keeper-upper-parry-sheet-v1-alpha.png"
 KEEPER_TOP_TIP_SOURCE = ROOT / "assets/source/keeper-top-tip-sheet-v1-alpha.png"
 KEEPER_REFLEX_FOOT_SOURCE = ROOT / "assets/source/keeper-reflex-foot-sheet-v1-alpha.png"
+KEEPER_SITUATIONAL_PUNCH_SOURCE = ROOT / "assets/source/keeper-situational-punch-sheet-v1-alpha.png"
+KEEPER_DISTRIBUTION_SOURCE = ROOT / "assets/source/keeper-distribution-sheet-v1-alpha.png"
+KEEPER_FOOT_DISTRIBUTION_SOURCE = ROOT / "assets/source/keeper-foot-distribution-sheet-v1-alpha.png"
+KEEPER_REACTIONS_SOURCE = ROOT / "assets/source/keeper-reactions-sheet-v1-alpha.png"
 OUT = ROOT / "public/assets/hd"
 
 KEEPER_ANIMATION_SIZE = (1600, 1120)
@@ -404,11 +408,20 @@ def grid_cell_box(source: Image.Image, row: int, rows: int, col: int, cols: int)
 
 def grouped_actor_boxes(source: Image.Image, row_counts: tuple[int, ...]):
     """Group detached football props with the nearest large keeper figure."""
-    components = connected_component_boxes(source)
-    actors = [box for box in components if (box[2] - box[0]) * (box[3] - box[1]) > 20_000]
-    props = [box for box in components if box not in actors]
-    if len(actors) != sum(row_counts):
-        raise ValueError(f"expected {sum(row_counts)} keeper figures, found {len(actors)}")
+    components = connected_component_boxes(source, minimum=80)
+    frame_count = sum(row_counts)
+    ranked = sorted(
+        components,
+        key=lambda box: (box[2] - box[0]) * (box[3] - box[1]),
+        reverse=True,
+    )
+    actors = ranked[:frame_count]
+    props = [
+        box for box in components
+        if box not in actors and (box[2] - box[0]) * (box[3] - box[1]) >= 400
+    ]
+    if len(actors) != frame_count:
+        raise ValueError(f"expected {frame_count} keeper figures, found {len(actors)}")
 
     actors.sort(key=lambda box: (box[1] + box[3]) / 2)
     ordered = []
@@ -438,6 +451,68 @@ def grouped_actor_boxes(source: Image.Image, row_counts: tuple[int, ...]):
             max(actor[2], prop[2]), max(actor[3], prop[3]),
         )
     return grouped
+
+
+def build_keeper_action_atlas(
+    source_path: Path,
+    output_name: str,
+    row_counts: tuple[int, ...],
+    atlas_columns: int,
+    group_props: bool = False,
+) -> None:
+    """Pack regular or mixed-column action boards into contiguous frames.
+
+    The distribution source intentionally uses 6/6/6/10 cells. Flattening the
+    authored row order into a seven-column runtime sheet keeps frame ids 0–27
+    contiguous for Phaser while retaining deterministic source extraction.
+    """
+    source = Image.open(source_path).convert("RGBA")
+    frame_width, frame_height = KEEPER_FRAME_SIZE
+    frame_count = sum(row_counts)
+    atlas_rows = (frame_count + atlas_columns - 1) // atlas_columns
+    atlas = Image.new(
+        "RGBA",
+        (atlas_columns * frame_width, atlas_rows * frame_height),
+        (0, 0, 0, 0),
+    )
+
+    if group_props:
+        ordered_boxes = [entry["combined"] for entry in grouped_actor_boxes(source, row_counts)]
+    else:
+        boxes = connected_component_boxes(source)
+        if len(boxes) != frame_count:
+            raise ValueError(
+                f"{source_path.name} must contain {frame_count} isolated figures, found {len(boxes)}"
+            )
+        boxes.sort(key=lambda box: (box[1] + box[3]) / 2)
+        ordered_boxes = []
+        cursor = 0
+        for count in row_counts:
+            row = boxes[cursor:cursor + count]
+            row.sort(key=lambda box: (box[0] + box[2]) / 2)
+            ordered_boxes.extend(row)
+            cursor += count
+
+    for frame_index, box in enumerate(ordered_boxes):
+        sprite = remove_detached_fragments(source.crop(box))
+        scale = min(
+            205 / max(sprite.height, 1),
+            (frame_width - 16) / max(sprite.width, 1),
+            (frame_height - 16) / max(sprite.height, 1),
+        )
+        sprite = sprite.resize(
+            (max(1, round(sprite.width * scale)), max(1, round(sprite.height * scale))),
+            Image.Resampling.NEAREST,
+        )
+        atlas_col = frame_index % atlas_columns
+        atlas_row = frame_index // atlas_columns
+        x = atlas_col * frame_width + (frame_width - sprite.width) // 2
+        y = atlas_row * frame_height + frame_height - sprite.height - 8
+        atlas.alpha_composite(sprite, (x, y))
+
+    if atlas.size != (atlas_columns * frame_width, atlas_rows * frame_height):
+        raise ValueError(f"unexpected atlas size for {output_name}: {atlas.size}")
+    atlas.save(OUT / output_name, optimize=True)
 
 
 def build_keeper_footwork_atlas() -> None:
@@ -621,6 +696,32 @@ def main() -> None:
         KEEPER_REFLEX_FOOT_SOURCE,
         "keeper-reflex-foot-sheet-hd.png",
         mirror_second_row_columns=(4,),
+    )
+    build_keeper_action_atlas(
+        KEEPER_SITUATIONAL_PUNCH_SOURCE,
+        "keeper-situational-punch-sheet-hd.png",
+        (6, 6, 6, 6),
+        6,
+    )
+    build_keeper_action_atlas(
+        KEEPER_DISTRIBUTION_SOURCE,
+        "keeper-distribution-sheet-hd.png",
+        (6, 6, 6, 10),
+        7,
+        group_props=True,
+    )
+    build_keeper_action_atlas(
+        KEEPER_FOOT_DISTRIBUTION_SOURCE,
+        "keeper-foot-distribution-sheet-hd.png",
+        (6, 6, 6, 6, 6),
+        6,
+        group_props=True,
+    )
+    build_keeper_action_atlas(
+        KEEPER_REACTIONS_SOURCE,
+        "keeper-reactions-sheet-hd.png",
+        (6, 6, 6),
+        6,
     )
 
     # Remove the footballs baked into action/dive reference poses; gameplay owns

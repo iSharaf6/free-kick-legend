@@ -8,7 +8,7 @@ A polished, portal-ready pixel football game built with Phaser 3 and Vite. Draw 
 
 - 50 career matches across five cups, with targets, crosswinds, curve challenges, multi-goal finals, and stable-ID progression.
 - Fixed-step pseudo-3D ball physics at 120 Hz: full-velocity drag, Magnus curl, wind, grounded rolling, bounce, glancing post/crossbar rebounds, net damping, and frame-rate-invariant outcomes.
-- Pose-based goalkeeper contact with deterministic read, set, dive, catch, parry, and recovery states.
+- A 55-animation goalkeeper catalog (the supplied table totals 55), with deterministic read/set footwork, height-specific catches and parries, smothers, full dives, 1v1 blocks, foot saves, punches, eight restart techniques, recovery, commands, celebrations, and concede reactions.
 - Robust mouse/touch swipes with pointer isolation, smoothing, resampling, invalid-gesture feedback, and live power/curl presentation.
 - Score, combo, shot grades, top-corner/target bonuses, three-star mastery, first-clear rewards, and Time Attack.
 - A deterministic five-shot Daily Kick, moving bonus target, seven-day reward cycle, three rotating missions, 12 achievements, claimable coins, and replay-safe rewards.
@@ -44,6 +44,7 @@ src/
 ├── data/
 │   ├── levels.js               50 levels, five cups, targets, seeded arcade/daily
 │   ├── progression.js          daily missions, streak rewards, achievements
+│   ├── keeperMoveset.js         complete keeper animation catalog and frame maps
 │   └── cosmetics.js            visual-only kit, ball, and trail catalog
 ├── systems/
 │   ├── SwipeInput.js           gesture capture, smoothing, shot mapping
@@ -78,7 +79,7 @@ For other portals, the bridge falls back to local storage and no-op lifecycle/ad
 
 Useful official references: [SDK setup](https://docs.crazygames.com/sdk/intro/), [game lifecycle](https://docs.crazygames.com/sdk/game/), [data storage](https://docs.crazygames.com/sdk/data/), and [advertisement requirements](https://docs.crazygames.com/requirements/ads/).
 
-The generated HD art source is preserved at `assets/source/football-sprite-sheet-source.png`; optimized transparent runtime frames live in `public/assets/hd/` and can be rebuilt with `scripts/build_hd_sprites.py` after regenerating the alpha source.
+The generated HD art sources are preserved in `assets/source/`; optimized transparent runtime frames live in `public/assets/hd/` and can be rebuilt with `scripts/build_hd_sprites.py`. The final situational, hand/foot distribution, and reaction prompt/packing contract is documented in `assets/source/KEEPER-COMPLETE-MOVESET-V1-PROMPT.md`.
 
 ## Tuning
 
