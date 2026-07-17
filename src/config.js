@@ -14,14 +14,14 @@ export const RENDER_H = GAME_H * RENDER_SCALE;
 export const CAM = {
   focal: 316,     // pixels per meter at 1m depth - tighter framing so the
                   // goal, keeper and wall read big instead of miniature
-  height: 2.6,    // camera height above the pitch
-  horizonY: 92,   // slightly shallower stands leave more playable pitch
-  ballDist: 6.25, // camera sits this far behind the ball
+  height: 2.3,    // camera height above the pitch
+  horizonY: 95,   // screen y of the horizon line
+  ballDist: 5.7,  // camera sits this far behind the ball
   x: 0            // lateral camera position, set per level
 };
 
-export const GOAL_W = 10.0;  // presentation-tuned goal width
-export const GOAL_H = 3.5;   // presentation-tuned crossbar height
+export const GOAL_W = 9.0;   // goal frame width
+export const GOAL_H = 3.1;   // crossbar height
 export const POST_R = 0.13;  // post thickness
 
 export const BALL_R = 0.26;

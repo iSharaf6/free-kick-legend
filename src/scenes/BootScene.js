@@ -236,13 +236,13 @@ export class BootScene extends Phaser.Scene {
       0xd7a26b, 0x9c6548, 0xf0d7ad, 0x346c91, 0x244866,
       0xb44137, 0x6e3441, 0xd6b63d, 0x42794c, 0x727c91
     ];
-    const drawTier = (y0, y1, cell, seed, emptyChance = 0.12) => {
+    const drawTier = (y0, y1, cell, seed) => {
       g.fillStyle(PAL.night, 1);
       g.fillRect(0, y0, GAME_W, y1 - y0);
       for (let y = y0 + 1; y < y1 - 1; y += cell) {
         for (let x = 2; x < GAME_W - 2; x += cell) {
           const r = hash01(x, y, seed);
-          if (r < emptyChance) continue;
+          if (r < 0.12) continue;
           const color = crowdPalette[Math.floor(hash01(x + 9, y + 4, seed) * crowdPalette.length)];
           g.fillStyle(color, 0.68 + hash01(x + 3, y + 7, seed) * 0.3);
           g.fillRect(x, y, Math.max(1, cell - 2), Math.max(1, cell - 2));
@@ -254,31 +254,31 @@ export class BootScene extends Phaser.Scene {
       }
     };
 
-    drawTier(29, 51, 4, 41, 0.22);
+    drawTier(30, 55, 4, 41);
     g.fillStyle(PAL.ink, 1);
-    g.fillRect(0, 51, GAME_W, 5);
+    g.fillRect(0, 55, GAME_W, 5);
     g.fillStyle(PAL.borderDark, 1);
-    g.fillRect(0, 51, GAME_W, 1);
-    drawTier(56, h - 7, 6, 83, 0.15);
+    g.fillRect(0, 55, GAME_W, 1);
+    drawTier(60, h - 8, 5, 83);
 
     // Aisles and railings separate the mosaic into believable stand sections.
     g.lineStyle(2, PAL.borderDark, 0.9);
     for (const x of [72, 156, 240, 324, 408]) {
-      g.lineBetween(x - 7, 29, x, 51);
-      g.lineBetween(x, 56, x + 6, h - 7);
+      g.lineBetween(x - 7, 30, x, 55);
+      g.lineBetween(x, 60, x + 6, h - 8);
     }
     g.fillStyle(PAL.border, 0.72);
-    g.fillRect(0, 54, GAME_W, 1);
+    g.fillRect(0, 58, GAME_W, 1);
 
     // Fictional sponsor rhythm; no real-world branding.
     g.fillStyle(PAL.ink, 1);
-    g.fillRect(0, h - 7, GAME_W, 7);
+    g.fillRect(0, h - 8, GAME_W, 8);
     const boardColors = [PAL.blue, PAL.red, PAL.green, PAL.goldDark];
     for (let x = 3, i = 0; x < GAME_W; x += 50, i++) {
       g.fillStyle(boardColors[i % boardColors.length], 1);
-      g.fillRect(x, h - 5, 43, 3);
+      g.fillRect(x, h - 6, 43, 4);
       g.fillStyle(PAL.cream, 0.8);
-      g.fillRect(x + 5, h - 4, 14 + (i % 3) * 5, 1);
+      g.fillRect(x + 5, h - 5, 14 + (i % 3) * 5, 1);
     }
   }
 
