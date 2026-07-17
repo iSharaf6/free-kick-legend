@@ -8,12 +8,13 @@ export class Kicker {
     this.kitId = opts.kitId || 'kit-home';
     this.pose = opts.pose || 'idle';
     this.scale = opts.scale ?? 3.6;
+    this.visualHeight = Number.isFinite(opts.visualHeight) ? Math.max(1, Math.round(opts.visualHeight)) : null;
     this.reducedMotion = Boolean(opts.reducedMotion);
     this.sequenceToken = 0;
     this.sequenceTimers = [];
     const texture = this.textureFor(this.pose);
     this.isHd = texture.startsWith('kicker-hd-');
-    this.visualScale = this.scale * (this.isHd ? 0.106 : 1);
+    this.visualScale = this.scaleForTexture(texture);
 
     this.shadow = scene.add.image(x + 1, y - 2, 'shadow')
       .setOrigin(0.5)
@@ -47,10 +48,18 @@ export class Kicker {
     return `kicker-${fallbackPose}`;
   }
 
+  scaleForTexture(texture) {
+    if (this.visualHeight) {
+      const textureHeight = this.scene.textures.get(texture)?.source?.[0]?.height || 1;
+      return this.visualHeight / textureHeight;
+    }
+    return this.scale * (texture.startsWith('kicker-hd-') ? 0.106 : 1);
+  }
+
   applyPoseTexture() {
     const texture = this.textureFor(this.pose);
     this.isHd = texture.startsWith('kicker-hd-');
-    this.visualScale = this.scale * (this.isHd ? 0.106 : 1);
+    this.visualScale = this.scaleForTexture(texture);
     this.sprite.setTexture(texture).setScale(this.visualScale);
   }
 
