@@ -674,18 +674,26 @@ export class GameScene extends Phaser.Scene {
     const reduced = Boolean(this.settings.reducedMotion);
     this.bannerPlate?.setAlpha(0).setY(reduced ? 0 : -7);
     this.banner.setText(text).setColor(color).setAlpha(0).setScale(reduced ? 1 : 0.94).setY(reduced ? 52 : 45);
-    const enter = {
+    // One writer per property. The old version tweened `y` across both objects
+    // AND wrote this.banner.setY() from an onUpdate on the same tween, so two
+    // sources fought over the banner's position and it visibly juddered as it
+    // came in. The plate slides; the banner's y is derived from it, once.
+    this.tweens.add({
       targets: [this.banner, this.bannerPlate],
       alpha: 1,
       duration: reduced ? 120 : 200,
-      ease: 'Cubic.easeOut',
-      onUpdate: () => {
-        if (!reduced) this.banner.setY(52 + this.bannerPlate.y);
-      }
-    };
-    if (!reduced) enter.y = 0;
-    this.tweens.add(enter);
-    if (!reduced) this.tweens.add({ targets: this.banner, scale: 1, duration: 200, ease: 'Cubic.easeOut' });
+      ease: 'Cubic.easeOut'
+    });
+    if (!reduced) {
+      this.tweens.add({
+        targets: this.bannerPlate,
+        y: 0,
+        duration: 200,
+        ease: 'Cubic.easeOut',
+        onUpdate: () => this.banner.setY(52 + this.bannerPlate.y)
+      });
+      this.tweens.add({ targets: this.banner, scale: 1, duration: 200, ease: 'Cubic.easeOut' });
+    }
     this.tweens.add({
       targets: [this.banner, this.bannerPlate],
       alpha: 0,

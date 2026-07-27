@@ -17,6 +17,8 @@ const KICKER_POSES = {
 const HD_KICKER_POSES = ['idle', 'ready', 'strike', 'follow', 'celebrate'];
 
 const HOME_KIT = { B: 0x17365d, C: PAL.gold, D: 0x0e2038, Y: 0xf8f8f4 };
+// Hard ceiling on the boot screen, whatever the platform SDK decides to do.
+const BOOT_HANDOFF_FAILSAFE_MS = 6000;
 
 function hash01(x, y, seed = 97) {
   let n = (Math.imul(x + seed, 374761393) + Math.imul(y + seed * 3, 668265263)) >>> 0;
@@ -114,15 +116,37 @@ export class BootScene extends Phaser.Scene {
     this.makeGrassNoise();
     this.makeVignette();
 
-    PlatformService.loadingStart();
-    PlatformService.init().finally(() => {
-      const settings = SaveManager.reload().settings;
-      Audio.setMuted(Boolean(settings.muted || PlatformService.shouldMuteAudio()));
-      Audio.setVolume(settings.sfxVolume);
-      PlatformService.loadingStop();
+    // Handing off to the menu must be unconditional and happen exactly once.
+    // Anything that can throw here - corrupt save JSON, a portal SDK that never
+    // settles, a browser that denies audio - previously left the player on the
+    // loading card with no way forward, which is indistinguishable from a crash.
+    let handedOff = false;
+    const enterMenu = () => {
+      if (handedOff || !this.scene.isActive('Boot')) return;
+      handedOff = true;
+      try {
+        const settings = SaveManager.reload().settings;
+        Audio.setMuted(Boolean(settings.muted || PlatformService.shouldMuteAudio()));
+        Audio.setVolume(settings.sfxVolume);
+      } catch (error) {
+        console.warn('[Boot] settings unavailable, continuing with defaults', error);
+      }
+      try {
+        PlatformService.loadingStop();
+      } catch (error) {
+        console.warn('[Boot] platform loadingStop failed', error);
+      }
       document.getElementById('loading')?.classList.add('is-hidden');
       this.scene.start('Menu');
-    });
+    };
+
+    PlatformService.loadingStart();
+    PlatformService.init()
+      .catch((error) => console.warn('[Boot] platform init failed', error))
+      .finally(enterMenu);
+    // Belt and braces: even if the promise above is never settled by the SDK,
+    // the match starts.
+    this.time.delayedCall(BOOT_HANDOFF_FAILSAFE_MS, enterMenu);
   }
 
   makeCoreSprites() {

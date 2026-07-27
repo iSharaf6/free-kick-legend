@@ -1,4 +1,6 @@
 const AD_TYPES = new Set(['midgame', 'rewarded']);
+// Upper bound on how long a third-party portal SDK may delay first paint.
+const SDK_INIT_TIMEOUT_MS = 4000;
 
 function browserSdk() {
   try {
@@ -62,7 +64,18 @@ export class PlatformAdapter {
     }
 
     try {
-      if (typeof candidate.init === 'function') await candidate.init();
+      // A portal SDK is third-party code on a domain it may not recognise. If
+      // its init() never settles, every await downstream stalls and the player
+      // is left staring at the loading card forever. Bound it: a slow portal
+      // costs us a few seconds, never the whole game.
+      if (typeof candidate.init === 'function') {
+        await Promise.race([
+          Promise.resolve(candidate.init()),
+          new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('platform-sdk-init-timeout')), SDK_INIT_TIMEOUT_MS);
+          })
+        ]);
+      }
       this._environment = String(candidate.environment ?? 'platform');
       this._available = this._environment !== 'disabled';
       return this._available;

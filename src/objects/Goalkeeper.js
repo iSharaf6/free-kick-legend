@@ -43,7 +43,10 @@ const KEEPER_STANDING_REFERENCE_H = 210;
 const KEEPER_ANIM_STANDING_H = Object.freeze({ 0: 231, 1: 218, 2: 194, 3: 218, 4: 206 });
 const KEEPER_DIVE_REFERENCE_H = 180;
 const KEEPER_RECOVERY_REFERENCE_H = 205;
-const KEEPER_MOTION_REFERENCE_H = 200;
+// Every authored keeper atlas is drawn to the same 205px standing reference.
+// The dive-motion sheet used to declare 200, which popped the keeper 2.5%
+// larger for exactly the frames where he is moving fastest.
+const KEEPER_MOTION_REFERENCE_H = 205;
 const KEEPER_RETURN_REFERENCE_H = 205;
 const KEEPER_LOW_SAVE_REFERENCE_H = 205;
 const KEEPER_HANDLING_REFERENCE_H = 205;
@@ -218,6 +221,8 @@ export class Goalkeeper {
     this.maxDiveRootTravel = 0;
     this.saveFamily = 'mid-catch';
     this.activeSaveMoveId = null;
+    // Atlas locked for the duration of one save; see buildSavePlan().
+    this.savePlan = null;
     this.diveDir = 1;
     this.catchY = 1;
     this.landY = GROUND_Y;
@@ -324,6 +329,11 @@ export class Goalkeeper {
       this.diveDir,
       this.standingSave
     );
+    // Commit to one sprite sheet for this entire save. Later reclassification
+    // in catchBall()/impact() may still refine saveFamily for scoring and
+    // contact geometry, but the rendered atlas no longer changes underneath a
+    // dive that is already in the air.
+    this.savePlan = this.buildSavePlan();
 
     // Time the contact pose to the ball's actual keeper-plane crossing. Slow
     // shots create more visible tracking footwork; fast shots compress the
@@ -879,6 +889,78 @@ export class Goalkeeper {
     return Math.ceil(clamp(remaining + 0.06, 0.55, 1.35) * 1000);
   }
 
+  // Resolve which authored atlas plays this save, ONCE, at the moment the save
+  // is committed. This used to be an eleven-branch cascade re-evaluated on every
+  // single frame, keyed off saveFamily - and catchBall()/impact() rewrite
+  // saveFamily mid-flight. The keeper therefore swapped sprite sheets partway
+  // through a dive, and because each sheet is authored around a different body
+  // baseline he visibly teleported and rescaled between two frames. Locking the
+  // plan is what stops the keeper tearing himself apart mid-save.
+  buildSavePlan() {
+    const familyTexture = SAVE_FAMILY_TEXTURES[this.saveFamily];
+    const practicalMove = this.getActivePracticalMove();
+
+    if (practicalMove && !this.standingSave) {
+      return {
+        kind: 'practical',
+        texture: practicalMove.texture,
+        referenceHeight: KEEPER_ACTION_REFERENCE_H,
+        move: practicalMove,
+        grounded: GROUNDED_PRACTICAL_FAMILIES.includes(this.saveFamily)
+      };
+    }
+    if (this.hasSituationalAtlas && SITUATIONAL_SAVE_FAMILIES.includes(this.saveFamily)) {
+      return {
+        kind: 'situational',
+        texture: KEEPER_SITUATIONAL_TEXTURE,
+        referenceHeight: KEEPER_ACTION_REFERENCE_H,
+        punching: this.saveFamily.includes('punch')
+      };
+    }
+    if (familyTexture && this.hasSaveFamilyAtlas[this.saveFamily] && !this.standingSave) {
+      return {
+        kind: 'family',
+        texture: familyTexture,
+        referenceHeight: KEEPER_HANDLING_REFERENCE_H
+      };
+    }
+    if (this.hasLowSaveAtlas && !this.standingSave && this.targetY <= LOW_SAVE_MAX_Y) {
+      return {
+        kind: 'low',
+        texture: KEEPER_LOW_SAVE_TEXTURE,
+        referenceHeight: KEEPER_LOW_SAVE_REFERENCE_H
+      };
+    }
+    if (this.hasDiveMotionAtlas) {
+      return {
+        kind: 'motion',
+        texture: KEEPER_DIVE_MOTION_TEXTURE,
+        referenceHeight: KEEPER_MOTION_REFERENCE_H
+      };
+    }
+    return null;
+  }
+
+  savePlanFrame(plan) {
+    switch (plan.kind) {
+      case 'practical': return this.getPracticalSaveFrame(plan.move);
+      case 'situational': return this.getSituationalSaveFrame();
+      case 'family': return this.getSaveFamilyFrame();
+      case 'low': return this.getLowSaveFrame();
+      default: return this.getDiveMotionFrame();
+    }
+  }
+
+  savePlanRootLift(plan) {
+    if (this.state === 'land') {
+      return plan.kind === 'situational' ? this.landY * 0.2 : this.landY;
+    }
+    if (this.state !== 'dive') return 0;
+    if (plan.kind === 'practical') return this.visualLift * (plan.grounded ? 0.25 : 1);
+    if (plan.kind === 'situational') return plan.punching ? this.visualLift * 0.24 : 0;
+    return this.visualLift;
+  }
+
   draw() {
     if (this.presentationAction && this.drawPresentation()) return;
     this.ghost?.setVisible?.(false);
@@ -888,30 +970,11 @@ export class Goalkeeper {
       this.state === 'land' &&
       this.grounded &&
       (!(this.hasDiveMotionAtlas || this.hasLowSaveAtlas) || this.stateT >= GROUND_IMPACT_HOLD);
-    const familyTexture = SAVE_FAMILY_TEXTURES[this.saveFamily];
-    const practicalMove = this.getActivePracticalMove();
-    const practicalSavePhase = Boolean(practicalMove) &&
-      !this.standingSave &&
-      (this.state === 'set' || this.state === 'dive' || this.state === 'land') &&
-      !groundedRecovery;
-    const situationalPhase = !practicalSavePhase && this.hasSituationalAtlas &&
-      SITUATIONAL_SAVE_FAMILIES.includes(this.saveFamily) &&
-      (this.state === 'set' || this.state === 'dive' || this.state === 'land') &&
-      !groundedRecovery;
-    const saveFamilyPhase = !practicalSavePhase && !situationalPhase &&
-      Boolean(familyTexture && this.hasSaveFamilyAtlas[this.saveFamily]) &&
-      !this.standingSave &&
-      (this.state === 'set' || this.state === 'dive' || this.state === 'land') &&
-      !groundedRecovery;
-    const lowSavePhase = !saveFamilyPhase && this.hasLowSaveAtlas &&
-      !this.standingSave &&
-      this.targetY <= LOW_SAVE_MAX_Y &&
-      (this.state === 'set' || this.state === 'dive' || this.state === 'land') &&
-      !groundedRecovery;
-    const motionPhase = !saveFamilyPhase && this.hasDiveMotionAtlas &&
-      (this.state === 'set' || this.state === 'dive' || this.state === 'land') &&
-      !lowSavePhase &&
-      !groundedRecovery;
+    const savingState = this.state === 'set' || this.state === 'dive' || this.state === 'land';
+    // Late safety net: if a save began before a plan was built (a shot that
+    // reaches the keeper while he is still reading), build it now and keep it.
+    if (savingState && !this.savePlan) this.savePlan = this.buildSavePlan();
+    const savePhase = savingState && !groundedRecovery && Boolean(this.savePlan);
     const returnPhase = this.hasReturnAtlas && this.state === 'return';
     const footworkPhase = this.hasFootworkAtlas &&
       ((!this.hasReturnAtlas && this.state === 'return') || this.state === 'read');
@@ -920,7 +983,7 @@ export class Goalkeeper {
     const highClaim = !practicalCatchPhase && this.state === 'catch' && this.catchType === 'high' && this.hasHighClaimAtlas;
     const handling = !practicalCatchPhase && this.state === 'catch' && this.catchType !== 'high' && this.hasHandlingAtlas;
 
-    if (!practicalSavePhase && !situationalPhase && !saveFamilyPhase && !lowSavePhase && !motionPhase && !groundedRecovery && !returnPhase &&
+    if (!savePhase && !groundedRecovery && !returnPhase &&
         !footworkPhase && !practicalCatchPhase && !highClaim && !handling) {
       this.drawLegacy();
       return;
@@ -931,37 +994,12 @@ export class Goalkeeper {
     let referenceHeight;
     let rootLift = 0;
 
-    if (practicalSavePhase) {
-      texture = practicalMove.texture;
-      frame = this.getPracticalSaveFrame(practicalMove);
-      referenceHeight = KEEPER_ACTION_REFERENCE_H;
-      const groundedTechnique = GROUNDED_PRACTICAL_FAMILIES.includes(this.saveFamily);
-      rootLift = this.state === 'dive'
-        ? this.visualLift * (groundedTechnique ? 0.25 : 1)
-        : this.state === 'land' ? this.landY : 0;
-    } else if (situationalPhase) {
-      texture = KEEPER_SITUATIONAL_TEXTURE;
-      frame = this.getSituationalSaveFrame();
-      referenceHeight = KEEPER_ACTION_REFERENCE_H;
-      const punching = this.saveFamily.includes('punch');
-      rootLift = punching && this.state === 'dive'
-        ? this.visualLift * 0.24
-        : this.state === 'land' ? this.landY * 0.2 : 0;
-    } else if (saveFamilyPhase) {
-      texture = familyTexture;
-      frame = this.getSaveFamilyFrame();
-      referenceHeight = KEEPER_HANDLING_REFERENCE_H;
-      rootLift = this.state === 'dive' ? this.visualLift : this.state === 'land' ? this.landY : 0;
-    } else if (lowSavePhase) {
-      texture = KEEPER_LOW_SAVE_TEXTURE;
-      frame = this.getLowSaveFrame();
-      referenceHeight = KEEPER_LOW_SAVE_REFERENCE_H;
-      rootLift = this.state === 'dive' ? this.visualLift : this.state === 'land' ? this.landY : 0;
-    } else if (motionPhase) {
-      texture = KEEPER_DIVE_MOTION_TEXTURE;
-      frame = this.getDiveMotionFrame();
-      referenceHeight = KEEPER_MOTION_REFERENCE_H;
-      rootLift = this.state === 'dive' ? this.visualLift : this.state === 'land' ? this.landY : 0;
+    if (savePhase) {
+      const plan = this.savePlan;
+      texture = plan.texture;
+      frame = this.savePlanFrame(plan);
+      referenceHeight = plan.referenceHeight;
+      rootLift = this.savePlanRootLift(plan);
     } else if (groundedRecovery) {
       texture = KEEPER_RECOVERY_TEXTURE;
       frame = this.getRecoveryFrame();
@@ -1286,6 +1324,9 @@ export class Goalkeeper {
     this.saveFamily = classifiedFamily;
     this.standingSave = false;
     this.activeSaveMoveId = practicalMoveIdForFamily(this.saveFamily, this.diveDir, false);
+    // A shot that arrives while the keeper is still reading starts a brand new
+    // dive here, so this is a legitimate point to choose a fresh atlas.
+    this.savePlan = this.buildSavePlan();
     this.moveTargetX = clamp(
       contactX - this.diveDir * 0.58,
       -HALF_GOAL + 0.55,
@@ -1344,6 +1385,7 @@ export class Goalkeeper {
     this.maxDiveRootTravel = 0;
     this.saveFamily = 'mid-catch';
     this.activeSaveMoveId = null;
+    this.savePlan = null;
     this.catchY = 1;
     this.landY = GROUND_Y;
     this.landVy = 0;

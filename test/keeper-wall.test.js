@@ -218,6 +218,37 @@ test('expanded dive atlas maps twelve phases to each screen direction without fl
 });
 
 test('low shots select the dedicated low-save atlas while higher dives keep the full-stretch sheet', () => {
+  const divingKeeper = (targetY) => {
+    const keeper = new Goalkeeper(
+      sceneStub(['keeper-dive-motion-hd', 'keeper-low-save-hd']),
+      0.7,
+      CAM.ballDist + 17,
+      { seed: 14 }
+    );
+    keeper.pose = 'dive';
+    keeper.state = 'dive';
+    keeper.diveDir = 1;
+    keeper.diveP = 0.52;
+    keeper.targetY = targetY;
+    keeper.standingSave = false;
+    return keeper;
+  };
+
+  const low = divingKeeper(0.72);
+  low.draw();
+  assert.deepEqual(low.spr.calls.setTexture, ['keeper-low-save-hd', 6]);
+
+  const high = divingKeeper(1.8);
+  high.draw();
+  assert.deepEqual(high.spr.calls.setTexture, ['keeper-dive-motion-hd', 8]);
+});
+
+// The atlas is chosen once, when the save is committed. Reclassification during
+// flight (catchBall/impact refine saveFamily for scoring and contact geometry)
+// must never swap the sprite sheet under a dive that is already in the air:
+// each sheet is authored around a different body baseline, so a mid-flight swap
+// teleports and rescales the keeper between two consecutive frames.
+test('a committed save keeps one atlas even when its classification changes mid-flight', () => {
   const keeper = new Goalkeeper(
     sceneStub(['keeper-dive-motion-hd', 'keeper-low-save-hd']),
     0.7,
@@ -231,11 +262,18 @@ test('low shots select the dedicated low-save atlas while higher dives keep the 
   keeper.targetY = 0.72;
   keeper.standingSave = false;
   keeper.draw();
-  assert.deepEqual(keeper.spr.calls.setTexture, ['keeper-low-save-hd', 6]);
+  const committed = keeper.spr.calls.setTexture[0];
+  assert.equal(committed, 'keeper-low-save-hd');
 
   keeper.targetY = 1.8;
+  keeper.saveFamily = 'full-stretch';
+  keeper.diveP = 0.8;
   keeper.draw();
-  assert.deepEqual(keeper.spr.calls.setTexture, ['keeper-dive-motion-hd', 8]);
+  assert.equal(keeper.spr.calls.setTexture[0], committed);
+
+  // A brand new save is free to pick a different sheet.
+  keeper.reset();
+  assert.equal(keeper.savePlan, null);
 });
 
 test('keeper times the authored contact phase to the ball crossing', () => {

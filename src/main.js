@@ -30,17 +30,26 @@ const game = new Phaser.Game({
   input: {
     activePointers: 2
   },
-  physics: {
-    default: 'matter',
-    matter: {
-      gravity: { x: 0, y: 0.82 },
-      enableSleeping: true,
-      positionIterations: 8,
-      velocityIterations: 6,
-      constraintIterations: 4,
-      debug: false
+  // Match physics is a bespoke deterministic pseudo-3D integrator (Ball.js,
+  // Goalkeeper.js, GoalNetPhysics.js) - no engine body is ever created during
+  // play. Matter exists purely for PuppetLabScene, the dev-only rig playground.
+  // Declaring it globally spun up and stepped an empty Matter world on every
+  // frame of every shipped match, so it is now dev-only alongside its one user.
+  ...(import.meta.env.DEV
+    ? {
+      physics: {
+        default: 'matter',
+        matter: {
+          gravity: { x: 0, y: 0.82 },
+          enableSleeping: true,
+          positionIterations: 8,
+          velocityIterations: 6,
+          constraintIterations: 4,
+          debug: false
+        }
+      }
     }
-  },
+    : {}),
   scene: [
     BootScene, MenuScene, LevelSelectScene, LockerScene, ProgressScene, GameScene,
     // Internal physics playground: registered in dev builds only so the whole
