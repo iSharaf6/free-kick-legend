@@ -118,22 +118,15 @@ export function makeButton(scene, x, y, w, h, label, onClick, opts = {}) {
   const hover = opts.hover ?? shade(base, 18);
   const pressed = opts.pressed ?? shade(base, -18);
   const bg = scene.add.graphics();
-  // Centring a long label inside an iconed button walks it straight over the
-  // icon. `labelAlign: 'left'` parks the text in a reserved column instead, so
-  // the icon gutter is guaranteed clear however long the copy gets.
-  const leftAligned = opts.labelAlign === 'left';
-  const labelX = leftAligned
-    ? -(w / 2) + (opts.labelX ?? 30)
-    : (opts.icon ? 7 : 0);
-  const txt = crispText(scene.add.text(labelX, opts.labelY ?? 0, label, {
+  const txt = crispText(scene.add.text(opts.icon ? 7 : 0, opts.labelY ?? 0, label, {
     fontFamily: opts.fontFamily ?? FONT,
     fontStyle: opts.fontStyle ?? 'bold',
     fontSize: opts.fontSize ?? '10px',
     color: opts.textColor ?? toCss(PAL.cream),
     stroke: opts.stroke ?? toCss(PAL.ink),
     strokeThickness: opts.strokeThickness ?? 1,
-    align: leftAligned ? 'left' : 'center'
-  }).setOrigin(leftAligned ? 0 : 0.5, 0.5));
+    align: 'center'
+  }).setOrigin(0.5));
   txt.setLetterSpacing(opts.letterSpacing ?? 0.25);
 
   const children = [bg];

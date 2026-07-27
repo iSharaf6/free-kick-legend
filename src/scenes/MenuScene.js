@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME_W, GAME_H, CAM } from '../config.js';
+import { GAME_W, GAME_H } from '../config.js';
 import {
   makeButton, makeIconButton, makeStatChip, titleText, bodyText,
   drawPanel, addScanlines, sceneIntro, formatCompact, configureHdCamera, FONT
@@ -23,17 +23,6 @@ export class MenuScene extends Phaser.Scene {
   create() {
     configureHdCamera(this);
     this.add.image(0, 0, 'stadium-menu').setOrigin(0).setDepth(0);
-    this.add.image(0, CAM.horizonY, 'pitch-grass-hd-v2')
-      .setOrigin(0)
-      .setDisplaySize(GAME_W, GAME_H - CAM.horizonY)
-      .setDepth(1);
-    const crowd = this.add.image(0, CAM.horizonY, 'crowd-panorama-hd-v3')
-      .setOrigin(0, 1)
-      .setDepth(2);
-    // Preserve the panorama's authored aspect ratio. At 480 logical pixels
-    // wide this makes the 320px alpha-tight source about 84px tall, leaving
-    // the procedural roof cap visible while keeping spectators human-scale.
-    crowd.setScale(GAME_W / crowd.width);
     this.drawComposition();
 
     const settings = SaveManager.getSettings?.() || {};
@@ -95,10 +84,19 @@ export class MenuScene extends Phaser.Scene {
   }
 
   drawComposition() {
-    // A radial flood pool and long feathered action-side falloff provide the
-    // same focus as the former triangular wedges without reading as pitch
-    // markings or perspective geometry.
-    this.add.image(0, 0, 'menu-lighting').setOrigin(0).setDepth(10);
+    const shade = this.add.graphics().setDepth(10);
+    shade.fillStyle(PAL.ink, 0.18);
+    shade.fillRect(0, 0, GAME_W, GAME_H);
+    shade.fillStyle(PAL.ink, 0.58);
+    shade.fillRect(210, 30, 270, 227);
+    shade.fillStyle(PAL.night, 0.72);
+    shade.fillTriangle(180, 30, 260, 30, 260, 257);
+
+    // Broadcast framing and a lit touchline behind the player.
+    shade.lineStyle(1, PAL.goldDark, 0.6);
+    shade.lineBetween(210, 32, 210, 256);
+    shade.fillStyle(PAL.flood, 0.12);
+    shade.fillTriangle(24, 30, 176, 30, 123, 235);
   }
 
   makeHeader(totalStars, coins, muted, readyClaims) {
@@ -194,24 +192,20 @@ export class MenuScene extends Phaser.Scene {
     plate.fillStyle(PAL.gold, 1);
     plate.fillRect(102, 232, Math.floor(82 * progress), 4);
 
-    // The plate is drawn at depth 150 and the striker at 130, so his boots used
-    // to disappear behind it and he read as cropped off mid-shin. He now stands
-    // on the turf just above the plate, which also gives the shadow somewhere
-    // believable to fall.
-    this.kicker = new Kicker(this, 104, 202, {
+    this.kicker = new Kicker(this, 111, 220, {
       kitId: equippedKit,
-      scale: 4.4,
+      scale: 4.8,
       depth: 130
     });
     const ballKey = SaveManager.getEquippedCosmetic?.('ball') || 'ball-classic';
     const texture = ballKey === 'ball-classic' && this.textures.exists('ball-classic-hd')
       ? 'ball-classic-hd'
       : (this.textures.exists(ballKey) ? ballKey : 'ball');
-    const ball = this.add.image(158, 196, texture).setDepth(160);
-    ball.setScale(17 / (ball.texture.source[0]?.width || 12));
+    const ball = this.add.image(174, 218, texture).setDepth(160);
+    ball.setScale(19 / (ball.texture.source[0]?.width || 12));
     this.tweens.add({
       targets: ball,
-      y: 189,
+      y: 211,
       rotation: Math.PI * 2,
       duration: 1800,
       ease: 'Sine.easeInOut',
@@ -241,20 +235,15 @@ export class MenuScene extends Phaser.Scene {
     const actionX = 344;
     const actionW = 198;
     const actionH = 25;
-    // Left-aligned labels in a reserved column: the previous centred labels ran
-    // straight over the icon gutter once the copy got long ("DAILY KICK · NEW
-    // CHALLENGE" collided with its own star).
     const make = (y, label, icon, cb, color, hover) => makeButton(
       this, actionX, y, actionW, actionH, label, cb, {
         color,
         hover,
         icon,
         iconScale: 0.82,
-        iconX: 16,
-        labelAlign: 'left',
-        labelX: 31,
+        iconX: 17,
         fontSize: '9px',
-        letterSpacing: 0.4,
+        letterSpacing: 0.45,
         hitHeight: 28
       }
     ).setDepth(230);

@@ -72,6 +72,7 @@ test('production keeper catalog exposes every row in the supplied moveset', () =
     'keeper-top-tip-hd': 16,
     'keeper-dive-motion-hd': 24,
     'keeper-reflex-foot-hd': 16,
+    'keeper-recovery-hd': 12,
     'keeper-practical-low-hd': 32,
     'keeper-mid-dive-hd': 16,
     'keeper-practical-recovery-hd': 18,

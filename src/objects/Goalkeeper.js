@@ -4,6 +4,7 @@ import { getKeeperMove, KEEPER_DISTRIBUTION_IDS } from '../data/keeperMoveset.js
 const KEEPER_H = 1.86;
 const DIVE_H = 1.30;
 const GROUND_Y = 0;         // visual root height above the pitch
+const HALF_GOAL = GOAL_W / 2;
 const KEEPER_ANIMATION_TEXTURE = 'keeper-anim-hd';
 const KEEPER_RECOVERY_TEXTURE = 'keeper-practical-recovery-hd';
 const KEEPER_DIVE_MOTION_TEXTURE = 'keeper-dive-motion-hd';
@@ -42,16 +43,12 @@ const KEEPER_STANDING_REFERENCE_H = 210;
 const KEEPER_ANIM_STANDING_H = Object.freeze({ 0: 231, 1: 218, 2: 194, 3: 218, 4: 206 });
 const KEEPER_DIVE_REFERENCE_H = 180;
 const KEEPER_RECOVERY_REFERENCE_H = 205;
-// Every authored keeper atlas is drawn to the same 205px standing reference.
-// The dive-motion sheet used to declare 200, which popped the keeper 2.5%
-// larger for exactly the frames where he is moving fastest.
-const KEEPER_MOTION_REFERENCE_H = 205;
+const KEEPER_MOTION_REFERENCE_H = 200;
 const KEEPER_RETURN_REFERENCE_H = 205;
 const KEEPER_LOW_SAVE_REFERENCE_H = 205;
 const KEEPER_HANDLING_REFERENCE_H = 205;
 const KEEPER_ACTION_REFERENCE_H = 205;
 const IDLE_FRAME_SECONDS = (getKeeperMove('idle-stance')?.frameMs ?? 520) / 1000;
-const READY_FRAME_SECONDS = (getKeeperMove('ready-set')?.frameMs ?? 130) / 1000;
 const GROUND_RECOVERY_DURATION = 0.86;
 const GROUND_IMPACT_HOLD = 0.06;
 const CONTACT_PROGRESS = 0.68;
@@ -189,22 +186,8 @@ export class Goalkeeper {
     this.style = STYLE_PROFILES[options.style] ? options.style : 'balanced';
     this.profile = STYLE_PROFILES[this.style];
     this.seed = (options.seed ?? defaultSeed(this.skill, zGoal)) >>> 0;
-    this.destroyed = false;
-    this.flashTimer = null;
 
-    this.goalWidth = Number.isFinite(options.goalWidth) && options.goalWidth > 0
-      ? options.goalWidth
-      : GOAL_W;
-    this.goalHeight = Number.isFinite(options.goalHeight) && options.goalHeight > 0
-      ? options.goalHeight
-      : GOAL_H;
-    this.halfGoal = this.goalWidth / 2;
-    this.homeX = clamp(
-      Number(options.homeX) || 0,
-      -this.halfGoal + 0.55,
-      this.halfGoal - 0.55
-    );
-    this.x = this.homeX;
+    this.x = 0;
     this.moveVx = 0;
     this.pose = 'idle';
     this.state = 'idle';
@@ -214,9 +197,9 @@ export class Goalkeeper {
     this.setT = 0;
     this.diveDuration = 0.36;
     this.diveP = 0;
-    this.diveStartX = this.homeX;
-    this.contactRootX = this.homeX;
-    this.landingRootX = this.homeX;
+    this.diveStartX = 0;
+    this.contactRootX = 0;
+    this.landingRootX = 0;
     this.visualLift = 0;
     this.diveHandY = 0.95;
     this.diveVy = 0;
@@ -224,19 +207,17 @@ export class Goalkeeper {
     this.contactHoldT = 0;
     this.contactRegistered = false;
     this.pendingLandImpulse = 0;
-    this.targetX = this.homeX;
-    this.moveTargetX = this.homeX;
-    this.trackTargetX = this.homeX;
+    this.targetX = 0;
+    this.moveTargetX = 0;
+    this.trackTargetX = 0;
     this.targetY = 1;
-    this.shotX = this.homeX;
+    this.shotX = 0;
     this.shotY = 1;
     this.shotSpeed = 20;
     this.maxHandY = 2;
     this.maxDiveRootTravel = 0;
     this.saveFamily = 'mid-catch';
     this.activeSaveMoveId = null;
-    // Atlas locked for the duration of one save; see buildSavePlan().
-    this.savePlan = null;
     this.diveDir = 1;
     this.catchY = 1;
     this.landY = GROUND_Y;
@@ -309,8 +290,8 @@ export class Goalkeeper {
     // track and physically reach; identical shots never roll a different save.
     const curl = 0.5 * ball.spin * PHYS.magnus * Math.max(ball.vz, 0) * flightT * flightT;
     const curlRead = clamp(0.56 + this.skill * 0.34 + this.profile.read, 0.44, 0.96);
-    this.shotX = clamp(prediction.x, -this.halfGoal + 0.2, this.halfGoal - 0.2);
-    this.shotY = clamp(prediction.y, 0.2, this.goalHeight - 0.18);
+    this.shotX = clamp(prediction.x, -HALF_GOAL + 0.2, HALF_GOAL - 0.2);
+    this.shotY = clamp(prediction.y, 0.2, GOAL_H - 0.18);
     this.shotSpeed = Math.hypot(
       Number(ball.vx) || 0,
       Number(ball.vy) || 0,
@@ -323,10 +304,10 @@ export class Goalkeeper {
     );
     this.targetX = clamp(
       prediction.x - curl * (1 - curlRead),
-      -this.halfGoal + 0.35,
-      this.halfGoal - 0.35
+      -HALF_GOAL + 0.35,
+      HALF_GOAL - 0.35
     );
-    this.targetY = clamp(Math.min(prediction.y, this.maxHandY), 0.28, this.goalHeight - 0.28);
+    this.targetY = clamp(Math.min(prediction.y, this.maxHandY), 0.28, GOAL_H - 0.28);
     const shotDeltaX = prediction.x - this.x;
     this.diveDir = Math.abs(shotDeltaX) > 0.18
       ? (shotDeltaX >= 0 ? 1 : -1)
@@ -343,11 +324,6 @@ export class Goalkeeper {
       this.diveDir,
       this.standingSave
     );
-    // Commit to one sprite sheet for this entire save. Later reclassification
-    // in catchBall()/impact() may still refine saveFamily for scoring and
-    // contact geometry, but the rendered atlas no longer changes underneath a
-    // dive that is already in the air.
-    this.savePlan = this.buildSavePlan();
 
     // Time the contact pose to the ball's actual keeper-plane crossing. Slow
     // shots create more visible tracking footwork; fast shots compress the
@@ -366,8 +342,8 @@ export class Goalkeeper {
     const maxTrackTravel = trackSpeed * availableTrackT;
     this.trackTargetX = clamp(
       desiredRootX,
-      Math.max(-this.halfGoal + 0.55, this.x - maxTrackTravel),
-      Math.min(this.halfGoal - 0.55, this.x + maxTrackTravel)
+      Math.max(-HALF_GOAL + 0.55, this.x - maxTrackTravel),
+      Math.min(HALF_GOAL - 0.55, this.x + maxTrackTravel)
     );
     this.moveTargetX = this.trackTargetX;
     const diveRootSpeed = (2.15 + this.skill * 1.55) * this.profile.speed;
@@ -391,7 +367,6 @@ export class Goalkeeper {
   }
 
   update(dt, _time = 0) {
-    if (this.destroyed) return;
     let boundedDt = 0;
     if (Number.isFinite(dt) && dt > 0) {
       boundedDt = Math.min(dt, PHYS.maxFrameDt);
@@ -428,7 +403,7 @@ export class Goalkeeper {
           TRACK_ACCELERATION * dt
         );
         const previousX = this.x;
-        this.x = clamp(this.x + this.moveVx * dt, -this.halfGoal + 0.55, this.halfGoal - 0.55);
+        this.x = clamp(this.x + this.moveVx * dt, -HALF_GOAL + 0.55, HALF_GOAL - 0.55);
         this.footworkDistance += Math.abs(this.x - previousX);
         if (this.stateT >= this.reactT) {
           this.state = 'set';
@@ -448,7 +423,7 @@ export class Goalkeeper {
           TRACK_ACCELERATION * 1.2 * dt
         );
         const previousX = this.x;
-        this.x = clamp(this.x + this.moveVx * dt, -this.halfGoal + 0.55, this.halfGoal - 0.55);
+        this.x = clamp(this.x + this.moveVx * dt, -HALF_GOAL + 0.55, HALF_GOAL - 0.55);
         this.footworkDistance += Math.abs(this.x - previousX);
         if (this.stateT >= this.setT) {
           if (this.standingSave) {
@@ -467,13 +442,13 @@ export class Goalkeeper {
           const desiredContactRootX = this.targetX - this.diveDir * 0.59;
           this.contactRootX = clamp(
             desiredContactRootX,
-            Math.max(-this.halfGoal + 0.45, this.x - this.maxDiveRootTravel),
-            Math.min(this.halfGoal - 0.45, this.x + this.maxDiveRootTravel)
+            Math.max(-HALF_GOAL + 0.45, this.x - this.maxDiveRootTravel),
+            Math.min(HALF_GOAL - 0.45, this.x + this.maxDiveRootTravel)
           );
           this.landingRootX = clamp(
             this.contactRootX + this.diveDir * (0.20 + this.skill * 0.10),
-            -this.halfGoal + 0.4,
-            this.halfGoal - 0.4
+            -HALF_GOAL + 0.4,
+            HALF_GOAL - 0.4
           );
           this.visualLift = 0;
           this.diveHandY = 0.95;
@@ -507,7 +482,7 @@ export class Goalkeeper {
           this.visualLift = this.contactLift * (1 - 0.48 * travel);
           this.diveHandY = lerp(this.targetY, Math.max(0.55, this.targetY - 0.46), smoothstep(followP));
         }
-        this.x = clamp(this.x, -this.halfGoal + 0.4, this.halfGoal - 0.4);
+        this.x = clamp(this.x, -HALF_GOAL + 0.4, HALF_GOAL - 0.4);
         this.moveVx = (this.x - previousX) / dt;
         this.diveVy = (this.visualLift - previousLift) / dt;
 
@@ -529,7 +504,7 @@ export class Goalkeeper {
           this.landVy += 9.2 * dt;
           this.landY -= this.landVy * dt;
           this.diveHandY = Math.max(0.42, this.diveHandY - this.landVy * dt * 0.35);
-          this.x = clamp(this.x + this.moveVx * dt, -this.halfGoal + 0.4, this.halfGoal - 0.4);
+          this.x = clamp(this.x + this.moveVx * dt, -HALF_GOAL + 0.4, HALF_GOAL - 0.4);
           this.moveVx *= Math.max(0, 1 - 1.8 * dt);
           if (this.landY <= 0) {
             this.landY = 0;
@@ -539,14 +514,14 @@ export class Goalkeeper {
           }
         } else {
           this.stateT += dt;
-          this.x = clamp(this.x + this.moveVx * dt, -this.halfGoal + 0.4, this.halfGoal - 0.4);
+          this.x = clamp(this.x + this.moveVx * dt, -HALF_GOAL + 0.4, HALF_GOAL - 0.4);
           this.moveVx *= Math.max(0, 1 - 5 * dt);
           if (this.stateT >= GROUND_IMPACT_HOLD + GROUND_RECOVERY_DURATION) {
             this.state = 'return';
             this.pose = 'idle';
             this.stateT = 0;
             this.footworkDistance = 0;
-            this.returnDirection = Math.sign(this.homeX - this.x);
+            this.returnDirection = -Math.sign(this.x);
             // Recovery art finishes planted. Discard the tiny residual slide so
             // the first return step starts from a stable boot contact.
             this.moveVx = 0;
@@ -558,11 +533,11 @@ export class Goalkeeper {
         this.stateT += dt;
         this.pose = 'idle';
         this.idleClock += dt;
-        const distance = Math.abs(this.x - this.homeX);
+        const distance = Math.abs(this.x);
         if (distance <= 0.022) {
           this.state = 'idle';
           this.stateT = 0;
-          this.x = this.homeX;
+          this.x = 0;
           this.moveVx = 0;
           this.diveP = 0;
           this.visualLift = 0;
@@ -570,9 +545,9 @@ export class Goalkeeper {
         }
 
         // Cap speed by the exact stopping distance. The old spring target kept
-        // carrying velocity through the keeper's home, which made the keeper
-        // flip directions for several frames before finally settling.
-        const direction = Math.sign(this.homeX - this.x);
+        // carrying velocity through x=0, which made the keeper flip directions
+        // for several frames before finally settling.
+        const direction = -Math.sign(this.x);
         const brakingSpeed = Math.sqrt(2 * RETURN_ACCELERATION * distance);
         const desiredVx = direction * Math.min(RETURN_SPEED, brakingSpeed);
         this.moveVx += clamp(
@@ -582,9 +557,8 @@ export class Goalkeeper {
         );
         const previousX = this.x;
         const nextX = this.x + this.moveVx * dt;
-        if ((this.x < this.homeX && nextX >= this.homeX) ||
-            (this.x > this.homeX && nextX <= this.homeX)) {
-          this.x = this.homeX;
+        if ((this.x < 0 && nextX >= 0) || (this.x > 0 && nextX <= 0)) {
+          this.x = 0;
           this.moveVx = 0;
           this.state = 'idle';
           this.stateT = 0;
@@ -605,7 +579,7 @@ export class Goalkeeper {
           this.pose = 'idle';
           this.stateT = 0;
           this.footworkDistance = 0;
-          this.returnDirection = Math.sign(this.homeX - this.x);
+          this.returnDirection = -Math.sign(this.x);
         }
         break;
 
@@ -615,7 +589,7 @@ export class Goalkeeper {
         this.idleClock += dt;
         // Idle animation supplies the weight shift; keep planted feet fixed in
         // world space instead of moving the whole sprite independently.
-        this.x += (this.homeX - this.x) * Math.min(dt * 5, 1);
+        this.x += (0 - this.x) * Math.min(dt * 5, 1);
     }
   }
 
@@ -776,31 +750,22 @@ export class Goalkeeper {
 
   getReturnFrame() {
     let direction = this.returnDirection || this.moveVx;
-    if (Math.abs(direction) < 0.04) direction = this.homeX - this.x;
+    if (Math.abs(direction) < 0.04) direction = -this.x;
     // Generated atlas row one moves screen-left and row two screen-right.
     const base = direction >= 0 ? 9 : 0;
     if (this.stateT < 0.07) return base;
-    if (Math.abs(this.x - this.homeX) < 0.26) return base + (Math.abs(this.moveVx) > 0.30 ? 7 : 8);
+    if (Math.abs(this.x) < 0.26) return base + (Math.abs(this.moveVx) > 0.30 ? 7 : 8);
     return base + 1 + Math.floor(this.footworkDistance / 0.085) % 6;
   }
 
   getFootworkFrame() {
     let direction = this.moveVx;
     if (Math.abs(direction) < 0.05) {
-      direction = this.state === 'return' ? this.homeX - this.x : this.diveDir;
+      direction = this.state === 'return' ? -this.x : this.diveDir;
     }
     // Atlas row one travels screen-left; row two travels screen-right.
     const base = direction >= 0 ? 5 : 0;
-    const footworkTarget = this.state === 'return' ? this.homeX : this.trackTargetX;
-    const planted = Math.abs(this.moveVx) < 0.12 && Math.abs(footworkTarget - this.x) < 0.06;
-    if (planted) {
-      // Both end frames are centred, so alternating them reads as a light set
-      // bounce without sliding the boots. The previous x≈0 check froze a
-      // keeper who had finished tracking away from centre on a mid-shuffle
-      // frame, making the animation appear broken for slow and central shots.
-      const bounce = Math.floor(this.stateT / READY_FRAME_SECONDS) % 2;
-      return base + bounce * 4;
-    }
+    if (Math.abs(this.moveVx) < 0.12 && Math.abs(this.x) < 0.08) return base + 4;
     return base + Math.floor(this.footworkDistance / 0.11) % 4;
   }
 
@@ -914,85 +879,7 @@ export class Goalkeeper {
     return Math.ceil(clamp(remaining + 0.06, 0.55, 1.35) * 1000);
   }
 
-  // Resolve which authored atlas plays this save, ONCE, at the moment the save
-  // is committed. This used to be an eleven-branch cascade re-evaluated on every
-  // single frame, keyed off saveFamily - and catchBall()/impact() rewrite
-  // saveFamily mid-flight. The keeper therefore swapped sprite sheets partway
-  // through a dive, and because each sheet is authored around a different body
-  // baseline he visibly teleported and rescaled between two frames. Locking the
-  // plan is what stops the keeper tearing himself apart mid-save.
-  buildSavePlan() {
-    const familyTexture = SAVE_FAMILY_TEXTURES[this.saveFamily];
-    const practicalMove = this.getActivePracticalMove();
-
-    // A planted central save must remain on the ready/set atlas until actual
-    // ball contact. Falling through to the generic dive sheet made the keeper
-    // lean toward a corner for two frames even though no dive would happen.
-    if (this.standingSave) return null;
-
-    if (practicalMove) {
-      return {
-        kind: 'practical',
-        texture: practicalMove.texture,
-        referenceHeight: KEEPER_ACTION_REFERENCE_H,
-        move: practicalMove,
-        grounded: GROUNDED_PRACTICAL_FAMILIES.includes(this.saveFamily)
-      };
-    }
-    if (this.hasSituationalAtlas && SITUATIONAL_SAVE_FAMILIES.includes(this.saveFamily)) {
-      return {
-        kind: 'situational',
-        texture: KEEPER_SITUATIONAL_TEXTURE,
-        referenceHeight: KEEPER_ACTION_REFERENCE_H,
-        punching: this.saveFamily.includes('punch')
-      };
-    }
-    if (familyTexture && this.hasSaveFamilyAtlas[this.saveFamily]) {
-      return {
-        kind: 'family',
-        texture: familyTexture,
-        referenceHeight: KEEPER_HANDLING_REFERENCE_H
-      };
-    }
-    if (this.hasLowSaveAtlas && this.targetY <= LOW_SAVE_MAX_Y) {
-      return {
-        kind: 'low',
-        texture: KEEPER_LOW_SAVE_TEXTURE,
-        referenceHeight: KEEPER_LOW_SAVE_REFERENCE_H
-      };
-    }
-    if (this.hasDiveMotionAtlas) {
-      return {
-        kind: 'motion',
-        texture: KEEPER_DIVE_MOTION_TEXTURE,
-        referenceHeight: KEEPER_MOTION_REFERENCE_H
-      };
-    }
-    return null;
-  }
-
-  savePlanFrame(plan) {
-    switch (plan.kind) {
-      case 'practical': return this.getPracticalSaveFrame(plan.move);
-      case 'situational': return this.getSituationalSaveFrame();
-      case 'family': return this.getSaveFamilyFrame();
-      case 'low': return this.getLowSaveFrame();
-      default: return this.getDiveMotionFrame();
-    }
-  }
-
-  savePlanRootLift(plan) {
-    if (this.state === 'land') {
-      return plan.kind === 'situational' ? this.landY * 0.2 : this.landY;
-    }
-    if (this.state !== 'dive') return 0;
-    if (plan.kind === 'practical') return this.visualLift * (plan.grounded ? 0.25 : 1);
-    if (plan.kind === 'situational') return plan.punching ? this.visualLift * 0.24 : 0;
-    return this.visualLift;
-  }
-
   draw() {
-    if (this.destroyed || !this.spr) return;
     if (this.presentationAction && this.drawPresentation()) return;
     this.ghost?.setVisible?.(false);
     this.prevDraw = null;
@@ -1001,11 +888,30 @@ export class Goalkeeper {
       this.state === 'land' &&
       this.grounded &&
       (!(this.hasDiveMotionAtlas || this.hasLowSaveAtlas) || this.stateT >= GROUND_IMPACT_HOLD);
-    const savingState = this.state === 'set' || this.state === 'dive' || this.state === 'land';
-    // Late safety net: if a save began before a plan was built (a shot that
-    // reaches the keeper while he is still reading), build it now and keep it.
-    if (savingState && !this.savePlan) this.savePlan = this.buildSavePlan();
-    const savePhase = savingState && !groundedRecovery && Boolean(this.savePlan);
+    const familyTexture = SAVE_FAMILY_TEXTURES[this.saveFamily];
+    const practicalMove = this.getActivePracticalMove();
+    const practicalSavePhase = Boolean(practicalMove) &&
+      !this.standingSave &&
+      (this.state === 'set' || this.state === 'dive' || this.state === 'land') &&
+      !groundedRecovery;
+    const situationalPhase = !practicalSavePhase && this.hasSituationalAtlas &&
+      SITUATIONAL_SAVE_FAMILIES.includes(this.saveFamily) &&
+      (this.state === 'set' || this.state === 'dive' || this.state === 'land') &&
+      !groundedRecovery;
+    const saveFamilyPhase = !practicalSavePhase && !situationalPhase &&
+      Boolean(familyTexture && this.hasSaveFamilyAtlas[this.saveFamily]) &&
+      !this.standingSave &&
+      (this.state === 'set' || this.state === 'dive' || this.state === 'land') &&
+      !groundedRecovery;
+    const lowSavePhase = !saveFamilyPhase && this.hasLowSaveAtlas &&
+      !this.standingSave &&
+      this.targetY <= LOW_SAVE_MAX_Y &&
+      (this.state === 'set' || this.state === 'dive' || this.state === 'land') &&
+      !groundedRecovery;
+    const motionPhase = !saveFamilyPhase && this.hasDiveMotionAtlas &&
+      (this.state === 'set' || this.state === 'dive' || this.state === 'land') &&
+      !lowSavePhase &&
+      !groundedRecovery;
     const returnPhase = this.hasReturnAtlas && this.state === 'return';
     const footworkPhase = this.hasFootworkAtlas &&
       ((!this.hasReturnAtlas && this.state === 'return') || this.state === 'read');
@@ -1014,7 +920,7 @@ export class Goalkeeper {
     const highClaim = !practicalCatchPhase && this.state === 'catch' && this.catchType === 'high' && this.hasHighClaimAtlas;
     const handling = !practicalCatchPhase && this.state === 'catch' && this.catchType !== 'high' && this.hasHandlingAtlas;
 
-    if (!savePhase && !groundedRecovery && !returnPhase &&
+    if (!practicalSavePhase && !situationalPhase && !saveFamilyPhase && !lowSavePhase && !motionPhase && !groundedRecovery && !returnPhase &&
         !footworkPhase && !practicalCatchPhase && !highClaim && !handling) {
       this.drawLegacy();
       return;
@@ -1025,12 +931,37 @@ export class Goalkeeper {
     let referenceHeight;
     let rootLift = 0;
 
-    if (savePhase) {
-      const plan = this.savePlan;
-      texture = plan.texture;
-      frame = this.savePlanFrame(plan);
-      referenceHeight = plan.referenceHeight;
-      rootLift = this.savePlanRootLift(plan);
+    if (practicalSavePhase) {
+      texture = practicalMove.texture;
+      frame = this.getPracticalSaveFrame(practicalMove);
+      referenceHeight = KEEPER_ACTION_REFERENCE_H;
+      const groundedTechnique = GROUNDED_PRACTICAL_FAMILIES.includes(this.saveFamily);
+      rootLift = this.state === 'dive'
+        ? this.visualLift * (groundedTechnique ? 0.25 : 1)
+        : this.state === 'land' ? this.landY : 0;
+    } else if (situationalPhase) {
+      texture = KEEPER_SITUATIONAL_TEXTURE;
+      frame = this.getSituationalSaveFrame();
+      referenceHeight = KEEPER_ACTION_REFERENCE_H;
+      const punching = this.saveFamily.includes('punch');
+      rootLift = punching && this.state === 'dive'
+        ? this.visualLift * 0.24
+        : this.state === 'land' ? this.landY * 0.2 : 0;
+    } else if (saveFamilyPhase) {
+      texture = familyTexture;
+      frame = this.getSaveFamilyFrame();
+      referenceHeight = KEEPER_HANDLING_REFERENCE_H;
+      rootLift = this.state === 'dive' ? this.visualLift : this.state === 'land' ? this.landY : 0;
+    } else if (lowSavePhase) {
+      texture = KEEPER_LOW_SAVE_TEXTURE;
+      frame = this.getLowSaveFrame();
+      referenceHeight = KEEPER_LOW_SAVE_REFERENCE_H;
+      rootLift = this.state === 'dive' ? this.visualLift : this.state === 'land' ? this.landY : 0;
+    } else if (motionPhase) {
+      texture = KEEPER_DIVE_MOTION_TEXTURE;
+      frame = this.getDiveMotionFrame();
+      referenceHeight = KEEPER_MOTION_REFERENCE_H;
+      rootLift = this.state === 'dive' ? this.visualLift : this.state === 'land' ? this.landY : 0;
     } else if (groundedRecovery) {
       texture = KEEPER_RECOVERY_TEXTURE;
       frame = this.getRecoveryFrame();
@@ -1270,20 +1201,11 @@ export class Goalkeeper {
     return this.contact(pt, ball)?.result ?? false;
   }
 
-  flashContact() {
-    if (this.destroyed || !this.spr) return;
-    this.flashTimer?.remove?.(false);
-    this.spr.setTint?.(0xfff3c4);
-    this.flashTimer = this.scene.time?.delayedCall?.(95, () => {
-      this.flashTimer = null;
-      if (!this.destroyed) this.spr?.clearTint?.();
-    }) || null;
-  }
-
   catchBall(pt) {
     this.hasBall = true;
     this.contactPulse = 1;
-    this.flashContact();
+    this.spr.setTint?.(0xfff3c4);
+    this.scene.time?.delayedCall?.(95, () => this.spr?.clearTint?.());
     this.catchY = clamp(pt?.y ?? 1, 0.35, 2.15);
 
     this.distributionId = this.chooseDistribution(pt);
@@ -1307,7 +1229,7 @@ export class Goalkeeper {
     this.state = 'catch';
     this.pose = 'catch';
     this.stateT = 0;
-    const requestedX = clamp(pt?.x ?? this.x, -this.halfGoal + 0.5, this.halfGoal - 0.5);
+    const requestedX = clamp(pt?.x ?? this.x, -HALF_GOAL + 0.5, HALF_GOAL - 0.5);
     this.x = clamp(requestedX, this.x - 0.14, this.x + 0.14);
     this.moveVx = 0;
     this.catchType = this.catchY < 0.78 ? 'low' : this.catchY > 1.62 ? 'high' : 'chest';
@@ -1324,7 +1246,8 @@ export class Goalkeeper {
   impact(pt = null, ball = null) {
     this.hasBall = false;
     this.contactPulse = 1;
-    this.flashContact();
+    this.spr.setTint?.(0xfff3c4);
+    this.scene.time?.delayedCall?.(95, () => this.spr?.clearTint?.());
     if (!ball) return;
 
     if (this.state === 'dive' || this.state === 'land') {
@@ -1349,7 +1272,7 @@ export class Goalkeeper {
     const contactX = Number.isFinite(pt?.x) ? pt.x : this.x;
     const contactY = Number.isFinite(pt?.y) ? pt.y : 1;
     this.diveDir = contactX >= this.x ? 1 : -1;
-    this.targetX = clamp(contactX, -this.halfGoal + 0.35, this.halfGoal - 0.35);
+    this.targetX = clamp(contactX, -HALF_GOAL + 0.35, HALF_GOAL - 0.35);
     this.targetY = clamp(contactY, 0.5, 2.45);
     this.shotX = contactX;
     this.shotY = contactY;
@@ -1363,26 +1286,23 @@ export class Goalkeeper {
     this.saveFamily = classifiedFamily;
     this.standingSave = false;
     this.activeSaveMoveId = practicalMoveIdForFamily(this.saveFamily, this.diveDir, false);
-    // A shot that arrives while the keeper is still reading starts a brand new
-    // dive here, so this is a legitimate point to choose a fresh atlas.
-    this.savePlan = this.buildSavePlan();
     this.moveTargetX = clamp(
       contactX - this.diveDir * 0.58,
-      -this.halfGoal + 0.55,
-      this.halfGoal - 0.55
+      -HALF_GOAL + 0.55,
+      HALF_GOAL - 0.55
     );
     this.state = 'dive';
     this.pose = 'dive';
     this.diveStartX = this.x;
     this.contactRootX = clamp(
       contactX - this.diveDir * 0.50,
-      -this.halfGoal + 0.45,
-      this.halfGoal - 0.45
+      -HALF_GOAL + 0.45,
+      HALF_GOAL - 0.45
     );
     this.landingRootX = clamp(
       this.contactRootX + this.diveDir * (0.22 + this.skill * 0.08),
-      -this.halfGoal + 0.4,
-      this.halfGoal - 0.4
+      -HALF_GOAL + 0.4,
+      HALF_GOAL - 0.4
     );
     this.contactLift = clamp(this.targetY - 0.86, 0.03, 1.58);
     this.visualLift = this.contactLift;
@@ -1396,19 +1316,16 @@ export class Goalkeeper {
   }
 
   reset() {
-    if (this.destroyed) return this;
-    this.flashTimer?.remove?.(false);
-    this.flashTimer = null;
     this.state = 'idle';
     this.pose = 'idle';
     this.stateT = 0;
     this.idleClock = 0;
-    this.x = this.homeX;
+    this.x = 0;
     this.moveVx = 0;
     this.diveP = 0;
-    this.diveStartX = this.homeX;
-    this.contactRootX = this.homeX;
-    this.landingRootX = this.homeX;
+    this.diveStartX = 0;
+    this.contactRootX = 0;
+    this.landingRootX = 0;
     this.visualLift = 0;
     this.diveHandY = 0.95;
     this.diveVy = 0;
@@ -1416,18 +1333,17 @@ export class Goalkeeper {
     this.contactHoldT = 0;
     this.contactRegistered = false;
     this.pendingLandImpulse = 0;
-    this.targetX = this.homeX;
-    this.moveTargetX = this.homeX;
-    this.trackTargetX = this.homeX;
+    this.targetX = 0;
+    this.moveTargetX = 0;
+    this.trackTargetX = 0;
     this.targetY = 1;
-    this.shotX = this.homeX;
+    this.shotX = 0;
     this.shotY = 1;
     this.shotSpeed = 20;
     this.maxHandY = 2;
     this.maxDiveRootTravel = 0;
     this.saveFamily = 'mid-catch';
     this.activeSaveMoveId = null;
-    this.savePlan = null;
     this.catchY = 1;
     this.landY = GROUND_Y;
     this.landVy = 0;
@@ -1448,17 +1364,10 @@ export class Goalkeeper {
     this.spr.clearTint?.();
     this.spr.setRotation?.(0);
     this.draw();
-    return this;
   }
 
   destroy() {
-    if (this.destroyed) return;
-    this.destroyed = true;
-    this.flashTimer?.remove?.(false);
-    this.flashTimer = null;
     this.ghost?.destroy?.();
-    this.spr?.destroy?.();
-    this.ghost = null;
-    this.spr = null;
+    this.spr.destroy();
   }
 }
