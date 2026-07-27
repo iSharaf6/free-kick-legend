@@ -1,6 +1,55 @@
-// Career progression is deliberately data-driven. Existing gameplay only needs
-// name/distance/offsetX/wall/keeper; the remaining fields describe objectives,
-// rewards and presentation for the richer progression scenes.
+// Career progression is deliberately data-driven. The original scalar fields
+// (distance/offsetX/wall/keeper/wind/target) remain the compatibility layer;
+// schema v2 adds structured encounter data without changing stable level IDs.
+
+export const LEVEL_SCHEMA_VERSION = 2;
+
+export const WALL_TYPES = Object.freeze([
+  'standard',
+  'moving',
+  'rushing',
+  'split',
+  'double',
+  'deflector'
+]);
+
+export const HAZARD_TYPES = Object.freeze([
+  'glare',
+  'fog',
+  'snow',
+  'slippery',
+  'crowd-pressure'
+]);
+
+export const ADVANCED_OBJECTIVE_TYPES = Object.freeze([
+  'bank-shot',
+  'ring-shot',
+  'corner-only',
+  'limited-power',
+  'blind-shot',
+  'reverse-target'
+]);
+
+const VALID_OBJECTIVE_TYPES = new Set([
+  'score', 'target', 'loft', 'curve', 'goals', 'curve-target', 'dip',
+  'low-shot', 'power', 'target-streak', 'wind-target', 'streak',
+  'curve-streak', 'final', 'daily-score', ...ADVANCED_OBJECTIVE_TYPES
+]);
+
+const EMPTY_LIST = Object.freeze([]);
+const FULL_GOAL = Object.freeze({ widthScale: 1, heightScale: 1 });
+const STANDARD_SHOT_RULES = Object.freeze({
+  maxPower: 1,
+  aimGuide: 'always',
+  aimFadeCorner: null,
+  powerJitter: 0
+});
+
+function deepFreeze(value) {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
+}
 
 export const CUPS = Object.freeze([
   { id: 'academy', name: 'Rookie Academy', subtitle: 'Learn the strike', levelIds: [] },
@@ -36,8 +85,73 @@ function wind(x, gust = 0, z = 0, customLabel = null) {
   });
 }
 
+// Rotating wind retains x/y/z/gust so older consumers get a safe initial
+// vector. A v2 runtime can rotate that vector from magnitude/period/phase.
+function rotatingWind(magnitude, period, options = {}) {
+  const phase = options.phase ?? 0;
+  const clockwise = options.clockwise ?? true;
+  return deepFreeze({
+    x: Math.cos(phase) * magnitude,
+    y: Math.sin(phase) * magnitude,
+    z: options.z ?? 0,
+    gust: options.gust ?? 0,
+    direction: 'rotating',
+    label: options.label ?? 'Swirling stadium wind',
+    rotation: {
+      magnitude,
+      period,
+      phase,
+      clockwise
+    }
+  });
+}
+
+// Wall distances/ranges are world metres. Oscillation speed is radians/second;
+// rushSpeed is metres/second and phase is radians.
+function wallConfig(type, count, options = {}) {
+  return deepFreeze({ type, count, ...options });
+}
+
+function goal(widthScale, heightScale = 1) {
+  return deepFreeze({ widthScale, heightScale });
+}
+
+function hazard(type, options = {}) {
+  return deepFreeze({ type, ...options });
+}
+
+function keeperConfig(type, options = {}) {
+  return deepFreeze({ type, ...options });
+}
+
+// Hoops use normalized goal coordinates for x/y and normalized ball-to-goal
+// progress for z. Radius remains in world metres for consistent collision.
+function ring(id, x, y, z, radius = 0.65, multiplier = 1.25) {
+  return deepFreeze({ id, x, y, z, radius, multiplier });
+}
+
+function shotRules(options = {}) {
+  return deepFreeze({ ...STANDARD_SHOT_RULES, ...options });
+}
+
+function numberedTarget(number, target) {
+  return deepFreeze({ ...target, id: `zone-${number}`, label: `Zone ${number}`, number });
+}
+
 function objective(type, label, options = {}) {
-  return Object.freeze({
+  const advanced = {};
+  for (const key of [
+    'requiredContact',
+    'ringsRequired',
+    'allowedZones',
+    'maximumPower',
+    'requiredZone',
+    'guideMode'
+  ]) {
+    if (options[key] != null) advanced[key] = options[key];
+  }
+
+  return deepFreeze({
     type,
     label,
     goals: options.goals ?? 1,
@@ -48,7 +162,8 @@ function objective(type, label, options = {}) {
     minimumCurve: Math.min(options.minimumCurve ?? 0, 0.6),
     maximumHeight: options.maximumHeight ?? null,
     minimumHeight: options.minimumHeight ?? null,
-    consecutive: options.consecutive ?? false
+    consecutive: options.consecutive ?? false,
+    ...advanced
   });
 }
 
@@ -57,7 +172,8 @@ function reward(coins, threeStarBonus = Math.round(coins * 0.5)) {
 }
 
 function makeLevel(definition) {
-  return Object.freeze({
+  return deepFreeze({
+    schemaVersion: LEVEL_SCHEMA_VERSION,
     wind: CALM,
     target: null,
     style: 'balanced',
@@ -140,7 +256,8 @@ const RAW_LEVELS = [
   }),
   makeLevel({
     id: 'curve-07', cup: 'curve', name: 'Changing Breeze', distance: 18, offsetX: -2, wall: 4, keeper: 0.4,
-    objective: objective('curve', 'Use the breeze to shape the finish', { curveDirection: 'right', minimumCurve: 0.22 }), wind: wind(0.35, 0.08),
+    objective: objective('curve', 'Read the flags, then shape the finish', { curveDirection: 'right', minimumCurve: 0.22 }),
+    wind: rotatingWind(0.36, 7.2, { phase: 0.3, gust: 0.06, label: 'Slow swirling breeze' }),
     reward: reward(95), style: 'line-reader'
   }),
   makeLevel({
@@ -151,6 +268,7 @@ const RAW_LEVELS = [
   makeLevel({
     id: 'curve-09', cup: 'curve', name: 'Switchback', distance: 18.5, offsetX: -3.5, wall: 4, keeper: 0.42,
     objective: objective('curve', 'Curve against the crosswind', { curveDirection: 'right', minimumCurve: 0.24 }), wind: wind(-0.35, 0.05),
+    wallConfig: wallConfig('moving', 4, { range: 0.55, speed: 0.58, phase: 0.4 }),
     reward: reward(110), style: 'line-reader'
   }),
   makeLevel({
@@ -177,132 +295,332 @@ const RAW_LEVELS = [
   }),
   makeLevel({
     id: 'targets-05', cup: 'targets', name: 'Crossbar Window', distance: 19, offsetX: 0, wall: 4, keeper: 0.46,
-    objective: objective('target', 'Drive through the high centre window'), target: TARGETS.topCenter, reward: reward(110), style: 'anticipator'
+    objective: objective('target', 'Drive through the high centre window'), target: TARGETS.topCenter,
+    goal: goal(0.92), reward: reward(110), style: 'anticipator'
   }),
   makeLevel({
     id: 'targets-06', cup: 'targets', name: 'Dead Centre', distance: 20, offsetX: 0, wall: 5, keeper: 0.48,
     objective: objective('target', 'Thread the centre target'), target: TARGETS.center, wind: wind(-0.3, 0.04),
+    wallConfig: wallConfig('moving', 5, { range: 0.7, speed: 0.64, phase: 1.2 }),
     reward: reward(115), style: 'aggressive'
   }),
   makeLevel({
-    id: 'targets-07', cup: 'targets', name: 'Call Your Corner', distance: 19, offsetX: 4.5, wall: 4, keeper: 0.5,
-    objective: objective('target', 'Hit the far top corner'), target: TARGETS.topLeft, wind: wind(0.25, 0.05),
+    id: 'targets-07', cup: 'targets', name: 'Golden Thread', distance: 19, offsetX: 4.5, wall: 4, keeper: 0.5,
+    objective: objective('ring-shot', 'Thread both hoops, then find the far corner', { ringsRequired: 2 }),
+    target: TARGETS.topLeft, wind: wind(0.25, 0.05),
+    rings: [
+      ring('near-hoop', -0.1, 0.58, 0.45, 0.72),
+      ring('far-hoop', -0.48, 0.72, 0.76, 0.58, 1.5)
+    ],
     reward: reward(120), style: 'anticipator'
   }),
   makeLevel({
-    id: 'targets-08', cup: 'targets', name: 'Bullseye Final', distance: 20, offsetX: -3, wall: 5, keeper: 0.52,
-    objective: objective('target-streak', 'Hit two targets in a row', { goals: 2, consecutive: true }), target: TARGETS.topRight,
+    id: 'targets-08', cup: 'targets', name: 'Split Decision', distance: 20, offsetX: -3, wall: 5, keeper: 0.52,
+    objective: objective('target-streak', 'Time the shifting gap and hit two targets', { goals: 2, consecutive: true }), target: TARGETS.topRight,
+    wallConfig: wallConfig('split', 5, { gapWidth: 1.2, gapRange: 0.72, speed: 0.82, phase: 0.3 }),
     reward: reward(150, 90), style: 'anticipator'
   }),
   makeLevel({
-    id: 'targets-09', cup: 'targets', name: 'Grass Cutter', distance: 18.5, offsetX: 1.5, wall: 4, keeper: 0.48,
-    objective: objective('target', 'Drive through the low centre target'), target: TARGETS.lowCenter, reward: reward(130), style: 'aggressive'
+    id: 'targets-09', cup: 'targets', name: 'Velvet Touch', distance: 18.5, offsetX: 1.5, wall: 4, keeper: 0.48,
+    objective: objective('limited-power', 'Find the low target without exceeding 72% power', { maximumPower: 0.72 }),
+    target: TARGETS.lowCenter, shotRules: shotRules({ maxPower: 0.72 }), reward: reward(130), style: 'aggressive'
   }),
   makeLevel({
-    id: 'targets-10', cup: 'targets', name: 'Double Bullseye', distance: 20, offsetX: -2, wall: 4, keeper: 0.54,
-    objective: objective('target-streak', 'Hit the high target twice', { goals: 2 }), target: TARGETS.topCenter,
+    id: 'targets-10', cup: 'targets', name: 'Zone Seven', distance: 20, offsetX: -2, wall: 4, keeper: 0.54,
+    objective: objective('reverse-target', 'Score twice through numbered zone 7', { goals: 2, requiredZone: 7 }),
+    target: numberedTarget(7, TARGETS.topCenter), goal: goal(0.86, 0.96),
     reward: reward(175, 105), style: 'anticipator'
   }),
 
   // ---------------------------------------------------------------- pressure
   makeLevel({
-    id: 'pressure-01', cup: 'pressure', name: 'The Long Shot', distance: 22, offsetX: 0, wall: 4, keeper: 0.48,
-    objective: objective('score', 'Score from long range'), wind: wind(0.2, 0.05), reward: reward(120), style: 'balanced'
+    id: 'pressure-01', cup: 'pressure', name: 'Through the Haze', distance: 22, offsetX: 0, wall: 4, keeper: 0.48,
+    objective: objective('score', 'Score from long range through light fog'), wind: wind(0.2, 0.05),
+    hazards: [hazard('fog', { density: 0.28, goalVisibility: 0.72 })], reward: reward(120), style: 'balanced'
   }),
   makeLevel({
     id: 'pressure-02', cup: 'pressure', name: 'Wide Left', distance: 18, offsetX: -5.5, wall: 4, keeper: 0.5,
-    objective: objective('curve', 'Recover the angle with curl', { curveDirection: 'right', minimumCurve: 0.3 }), reward: reward(125), style: 'line-reader'
+    objective: objective('curve', 'Recover the angle while the wall tracks you', { curveDirection: 'right', minimumCurve: 0.3 }),
+    wallConfig: wallConfig('moving', 4, { range: 0.9, speed: 0.78, phase: 2.1 }), reward: reward(125), style: 'line-reader'
   }),
   makeLevel({
-    id: 'pressure-03', cup: 'pressure', name: 'Wide Right', distance: 18, offsetX: 5.5, wall: 4, keeper: 0.52,
-    objective: objective('curve', 'Recover the angle with curl', { curveDirection: 'left', minimumCurve: 0.3 }), reward: reward(125), style: 'line-reader'
+    id: 'pressure-03', cup: 'pressure', name: 'Closing Down', distance: 18, offsetX: 5.5, wall: 4, keeper: 0.52,
+    objective: objective('curve', 'Bend it before the wall closes you down', { curveDirection: 'left', minimumCurve: 0.3 }),
+    wallConfig: wallConfig('rushing', 4, { rushDistance: 2.4, rushSpeed: 4.2, trigger: 'strike' }), reward: reward(125), style: 'line-reader'
   }),
   makeLevel({
     id: 'pressure-04', cup: 'pressure', name: 'Into the Wind', distance: 21, offsetX: 0, wall: 5, keeper: 0.52,
-    objective: objective('power', 'Beat the headwind with a driven strike'), wind: wind(0, 0.18, -3.2, 'Strong headwind'), reward: reward(130), style: 'aggressive'
+    objective: objective('power', 'Beat the headwind and hostile crowd'), wind: wind(0, 0.18, -3.2, 'Strong headwind'),
+    hazards: [hazard('crowd-pressure', { intensity: 0.35, aimWindowScale: 0.86, pulseSpeed: 0.8 })],
+    reward: reward(130), style: 'aggressive'
   }),
   makeLevel({
-    id: 'pressure-05', cup: 'pressure', name: 'Left Crosswind', distance: 20, offsetX: 2, wall: 5, keeper: 0.54,
-    objective: objective('wind-target', 'Counter the left crosswind'), target: TARGETS.topRight, wind: wind(-0.65, 0.12),
+    id: 'pressure-05', cup: 'pressure', name: 'Weather Vane', distance: 20, offsetX: 2, wall: 5, keeper: 0.54,
+    objective: objective('wind-target', 'Read the flags and counter the rotating wind'), target: TARGETS.topRight,
+    wind: rotatingWind(0.68, 5.8, { phase: 2.7, gust: 0.1, clockwise: false }),
     reward: reward(135), style: 'anticipator'
   }),
   makeLevel({
-    id: 'pressure-06', cup: 'pressure', name: 'Right Crosswind', distance: 20, offsetX: -2, wall: 5, keeper: 0.56,
-    objective: objective('wind-target', 'Counter the right crosswind'), target: TARGETS.topLeft, wind: wind(0.65, 0.12),
+    id: 'pressure-06', cup: 'pressure', name: 'Lost in the Lights', distance: 20, offsetX: -2, wall: 5, keeper: 0.56,
+    objective: objective('blind-shot', 'Commit early, then finish through the glare', { guideMode: 'hide-on-run-up' }),
+    target: TARGETS.topLeft, wind: wind(0.38, 0.08),
+    hazards: [hazard('glare', { corner: 'top-left', strength: 0.62, radius: 0.34 })],
+    shotRules: shotRules({ aimGuide: 'hide-on-run-up', aimFadeCorner: 'top-left' }),
     reward: reward(135), style: 'anticipator'
   }),
   makeLevel({
-    id: 'pressure-07', cup: 'pressure', name: 'Fortress', distance: 18, offsetX: 0, wall: 6, keeper: 0.58,
-    objective: objective('score', 'Break the six-player fortress'), reward: reward(145), style: 'aggressive'
+    id: 'pressure-07', cup: 'pressure', name: 'Double Decker', distance: 18, offsetX: 0, wall: 6, keeper: 0.58,
+    objective: objective('score', 'Dip the ball beyond two staggered rows'),
+    wallConfig: wallConfig('double', 6, {
+      rows: [
+        { count: 3, depthOffset: -0.55, lateralOffset: -0.48 },
+        { count: 3, depthOffset: 0.55, lateralOffset: 0.48 }
+      ]
+    }),
+    reward: reward(145), style: 'aggressive'
   }),
   makeLevel({
     id: 'pressure-08', cup: 'pressure', name: 'Pressure Final', distance: 21, offsetX: 3.5, wall: 5, keeper: 0.62,
     objective: objective('streak', 'Score two goals without missing', { goals: 2, consecutive: true }), wind: wind(-0.35, 0.1),
+    wallConfig: wallConfig('split', 5, { gapWidth: 1.05, gapRange: 0.82, speed: 1.05, phase: 1.4 }),
+    hazards: [hazard('crowd-pressure', { intensity: 0.56, aimWindowScale: 0.75, pulseSpeed: 1.15 })],
     reward: reward(180, 110), style: 'anticipator'
   }),
   makeLevel({
-    id: 'pressure-09', cup: 'pressure', name: 'Last Minute', distance: 23, offsetX: -2.5, wall: 5, keeper: 0.58,
-    objective: objective('power', 'Score with a driven strike'), wind: wind(0.25, 0.05), reward: reward(155), style: 'aggressive'
+    id: 'pressure-09', cup: 'pressure', name: 'Snow Day', distance: 23, offsetX: -2.5, wall: 5, keeper: 0.58,
+    objective: objective('power', 'Drive through the snow before the ball slows'), wind: wind(0.25, 0.05),
+    hazards: [hazard('snow', { drag: 0.075, trail: true, density: 0.58 })], reward: reward(155), style: 'aggressive'
   }),
   makeLevel({
     id: 'pressure-10', cup: 'pressure', name: 'Hold Your Nerve', distance: 21.5, offsetX: 3, wall: 5, keeper: 0.64,
-    objective: objective('goals', 'Score twice under pressure', { goals: 2 }), wind: wind(-0.3, 0.08),
+    objective: objective('goals', 'Score twice on the slippery run-up', { goals: 2 }), wind: wind(-0.3, 0.08),
+    hazards: [hazard('slippery', { powerJitter: 0.09, frequency: 8.5 })],
+    shotRules: shotRules({ powerJitter: 0.09 }),
     reward: reward(205, 125), style: 'anticipator'
   }),
 
   // ------------------------------------------------------------------ legend
   makeLevel({
-    id: 'legend-01', cup: 'legend', name: 'The Specialist', distance: 20, offsetX: -4, wall: 5, keeper: 0.62,
-    objective: objective('curve-target', 'Curl into the far top corner', { curveDirection: 'right', minimumCurve: 0.34 }), target: TARGETS.topRight,
+    id: 'legend-01', cup: 'legend', name: 'Needlework', distance: 20, offsetX: -4, wall: 5, keeper: 0.62,
+    objective: objective('ring-shot', 'Curve through both hoops into the far corner', { curveDirection: 'right', minimumCurve: 0.34, ringsRequired: 2 }),
+    target: TARGETS.topRight,
+    rings: [
+      ring('bend-gate', -0.15, 0.6, 0.48, 0.62),
+      ring('finish-gate', 0.52, 0.78, 0.8, 0.5, 1.6)
+    ],
     reward: reward(155), style: 'legend'
   }),
   makeLevel({
-    id: 'legend-02', cup: 'legend', name: 'Cat-Like Reflex', distance: 18, offsetX: 2, wall: 4, keeper: 0.66,
-    objective: objective('target', 'Beat the reflex keeper low'), target: TARGETS.lowLeft, reward: reward(160), style: 'legend'
+    id: 'legend-02', cup: 'legend', name: 'Sweeper Trap', distance: 18, offsetX: 2, wall: 4, keeper: 0.66,
+    objective: objective('target', 'Beat the sweeper before he closes the angle'), target: TARGETS.lowLeft,
+    keeperConfig: keeperConfig('sweeper', { rushDistance: 2.2, rushSpeed: 4.8, triggerFlightTime: 0.32 }),
+    reward: reward(160), style: 'legend'
   }),
   makeLevel({
-    id: 'legend-03', cup: 'legend', name: 'Storm Angle', distance: 20, offsetX: 6, wall: 5, keeper: 0.66,
-    objective: objective('wind-target', 'Master the storm from a tight angle'), target: TARGETS.topLeft, wind: wind(0.8, 0.2),
+    id: 'legend-03', cup: 'legend', name: 'Whiteout', distance: 20, offsetX: 6, wall: 5, keeper: 0.66,
+    objective: objective('wind-target', 'Memorise the corner, then master the storm'), target: TARGETS.topLeft,
+    wind: rotatingWind(0.82, 4.9, { phase: 0.8, gust: 0.18, clockwise: false, label: 'Swirling storm' }),
+    hazards: [hazard('fog', { density: 0.6, goalVisibility: 0.38 })],
     reward: reward(170), style: 'legend'
   }),
   makeLevel({
     id: 'legend-04', cup: 'legend', name: 'Top Bins Only', distance: 21, offsetX: 0, wall: 5, keeper: 0.7,
-    objective: objective('target', 'Pick out the top-right postage stamp'), target: TARGETS.topRight,
+    objective: objective('corner-only', 'Only a top-corner finish counts', { allowedZones: ['top-left', 'top-right'] }),
+    goal: goal(0.84, 0.94),
     reward: reward(175), style: 'legend'
   }),
   makeLevel({
-    id: 'legend-05', cup: 'legend', name: 'The Great Wall', distance: 17, offsetX: -1, wall: 6, keeper: 0.7,
-    objective: objective('low-shot', 'Find any low route beneath the great wall', { maximumHeight: 0.72 }),
+    id: 'legend-05', cup: 'legend', name: 'The Deflector', distance: 17, offsetX: -1, wall: 6, keeper: 0.7,
+    objective: objective('low-shot', 'Stay low beneath the defender\'s outstretched leg', { maximumHeight: 0.72 }),
+    wallConfig: wallConfig('deflector', 6, { defenderIndex: 4, extensionChance: 0.72, extensionReach: 0.62 }),
     reward: reward(180), style: 'legend'
   }),
   makeLevel({
-    id: 'legend-06', cup: 'legend', name: 'World Class', distance: 22, offsetX: 4, wall: 5, keeper: 0.74,
-    objective: objective('goals', 'Score twice against a world-class keeper', { goals: 2 }), wind: wind(-0.4, 0.1),
+    id: 'legend-06', cup: 'legend', name: 'Two of a Kind', distance: 22, offsetX: 4, wall: 5, keeper: 0.74,
+    objective: objective('goals', 'Score twice past the cup-final keeper duo', { goals: 2 }), wind: wind(-0.4, 0.1),
+    keeperConfig: keeperConfig('double', { offsets: [-1.75, 1.75], skillScale: 0.82 }),
     reward: reward(190), style: 'legend'
   }),
   makeLevel({
-    id: 'legend-07', cup: 'legend', name: 'Legend Trial', distance: 23, offsetX: -5, wall: 6, keeper: 0.77,
-    objective: objective('curve-streak', 'Score two curved goals in a row', { goals: 2, consecutive: true, minimumCurve: 0.35 }), wind: wind(0.45, 0.14),
+    id: 'legend-07', cup: 'legend', name: 'No Standing Still', distance: 23, offsetX: -5, wall: 6, keeper: 0.77,
+    objective: objective('curve-streak', 'Score two curved goals before the rush', { goals: 2, consecutive: true, minimumCurve: 0.35 }), wind: wind(0.45, 0.14),
+    wallConfig: wallConfig('rushing', 6, { rushDistance: 2.8, rushSpeed: 5.2, trigger: 'strike' }),
+    hazards: [hazard('slippery', { powerJitter: 0.11, frequency: 10 })],
+    shotRules: shotRules({ powerJitter: 0.11 }),
     reward: reward(210), style: 'legend'
   }),
   makeLevel({
-    id: 'legend-08', cup: 'legend', name: 'Final Boss', distance: 21, offsetX: 0, wall: 6, keeper: 0.8,
-    objective: objective('final', 'Score three different finishes', { goals: 3 }), wind: wind(-0.25, 0.16),
+    id: 'legend-08', cup: 'legend', name: 'Vega\'s Duel', distance: 21, offsetX: 0, wall: 6, keeper: 0.8,
+    objective: objective('final', 'Decode Vega and score three different finishes', { goals: 3 }), wind: wind(-0.25, 0.16),
+    keeperConfig: keeperConfig('boss', {
+      name: 'Vega', signature: 'late-double-step', adaptation: 0.16, fakeChance: 0.42
+    }),
+    wallConfig: wallConfig('double', 6, {
+      rows: [
+        { count: 3, depthOffset: -0.5, lateralOffset: -0.42 },
+        { count: 3, depthOffset: 0.5, lateralOffset: 0.42 }
+      ]
+    }),
     reward: reward(300, 200), style: 'boss'
   }),
   makeLevel({
-    id: 'legend-09', cup: 'legend', name: 'No Easy Side', distance: 22, offsetX: 4.5, wall: 6, keeper: 0.76,
-    objective: objective('score', 'Find a way past the legend keeper', { attempts: 4 }), wind: wind(0.35, 0.12),
+    id: 'legend-09', cup: 'legend', name: 'Woodwork', distance: 22, offsetX: 4.5, wall: 6, keeper: 0.76,
+    objective: objective('bank-shot', 'Bank the ball in off a post or the crossbar', { attempts: 4, requiredContact: 'frame' }),
+    wind: wind(0.35, 0.12), goal: goal(0.9, 0.96),
     reward: reward(230, 140), style: 'legend'
   }),
   makeLevel({
     id: 'legend-10', cup: 'legend', name: 'Immortal', distance: 22, offsetX: 0, wall: 6, keeper: 0.78,
-    objective: objective('final', 'Score three different finishes', { goals: 3, attempts: 5 }), wind: wind(-0.2, 0.1),
+    objective: objective('final', 'Score three different finishes in the gauntlet', { goals: 3, attempts: 5 }),
+    wind: rotatingWind(0.52, 5.2, { phase: 2.2, gust: 0.13, label: 'Finals swirl' }),
+    wallConfig: wallConfig('split', 6, { gapWidth: 0.96, gapRange: 0.9, speed: 1.12, phase: 2.4 }),
+    goal: goal(0.82, 0.92),
+    hazards: [
+      hazard('glare', { corner: 'top-right', strength: 0.48, radius: 0.3 }),
+      hazard('crowd-pressure', { intensity: 0.72, aimWindowScale: 0.68, pulseSpeed: 1.35 })
+    ],
+    shotRules: shotRules({ aimGuide: 'fade-near-corner', aimFadeCorner: 'top-right' }),
+    keeperConfig: keeperConfig('boss', { name: 'Vega Prime', signature: 'adaptive-read', adaptation: 0.22 }),
     reward: reward(360, 240), style: 'boss'
   })
 ];
 
 export const LEVELS = Object.freeze(RAW_LEVELS);
+
+const AIM_GUIDE_MODES = new Set(['always', 'hide-on-run-up', 'fade-near-corner', 'commit']);
+const KEEPER_TYPES = new Set(['line', 'sweeper', 'double', 'boss']);
+
+/**
+ * Return stable mechanic tags for menus, telemetry and runtime routing.
+ * The helper accepts legacy levels: absent v2 fields simply produce no tags.
+ */
+export function getLevelMechanics(level) {
+  const mechanics = [];
+  const wall = level?.wallConfig;
+  const goalSize = level?.goal ?? FULL_GOAL;
+
+  if (wall?.type && wall.type !== 'standard') mechanics.push(`${wall.type}-wall`);
+  if (level?.movingTarget) mechanics.push('moving-target');
+  if (level?.wind?.rotation) mechanics.push('rotating-wind');
+  if (goalSize.widthScale < 1 || goalSize.heightScale < 1) mechanics.push('smaller-goal');
+  for (const condition of level?.hazards ?? EMPTY_LIST) mechanics.push(condition.type);
+  if (level?.rings?.length) mechanics.push('hoop-threading');
+  if (ADVANCED_OBJECTIVE_TYPES.includes(level?.objective?.type)) mechanics.push(level.objective.type);
+  if (level?.keeperConfig?.type && level.keeperConfig.type !== 'line') {
+    mechanics.push(`${level.keeperConfig.type}-keeper`);
+  }
+
+  return Object.freeze([...new Set(mechanics)]);
+}
+
+function finite(value) {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function inRange(value, min, max) {
+  return finite(value) && value >= min && value <= max;
+}
+
+/** Validate one authored level without Phaser or browser globals. */
+export function validateLevelDefinition(level) {
+  const errors = [];
+  const fail = (message) => errors.push(`${level?.id ?? '<unknown>'}: ${message}`);
+
+  if (!level || typeof level !== 'object') return ['<unknown>: level must be an object'];
+  if (!/^[a-z]+-\d{2}$/.test(level.id ?? '')) fail('id must use cup-00 format');
+  if (typeof level.name !== 'string' || !level.name.trim()) fail('name is required');
+  if (!inRange(level.distance, 13, 23)) fail('distance must be between 13 and 23 metres');
+  if (!inRange(level.offsetX, -6, 6)) fail('offsetX must be between -6 and 6 metres');
+  if (!Number.isInteger(level.wall) || level.wall < 0 || level.wall > 6) fail('wall must be an integer from 0 to 6');
+  if (!inRange(level.keeper, 0, 0.8)) fail('keeper skill must be between 0 and 0.8');
+  if (!level.objective || typeof level.objective.label !== 'string') fail('objective label is required');
+  if (!VALID_OBJECTIVE_TYPES.has(level.objective?.type)) fail(`unknown objective type ${level.objective?.type}`);
+  if (!Number.isInteger(level.attempts) || level.attempts < 1) fail('attempts must be a positive integer');
+  if (!Number.isInteger(level.objective?.goals) || level.objective.goals < 1) fail('objective goals must be a positive integer');
+  if (level.objective?.goals > level.attempts) fail('objective goals cannot exceed attempts');
+
+  if (!level.wind || !finite(level.wind.x) || !finite(level.wind.y) || !finite(level.wind.z) || !finite(level.wind.gust)) {
+    fail('wind must expose finite x/y/z/gust compatibility fields');
+  }
+  if (level.wind?.rotation) {
+    if (!(level.wind.rotation.magnitude > 0)) fail('rotating wind magnitude must be positive');
+    if (!(level.wind.rotation.period >= 2)) fail('rotating wind period must be at least two seconds');
+    if (!finite(level.wind.rotation.phase)) fail('rotating wind phase must be finite');
+  }
+
+  if (level.target) {
+    if (!inRange(level.target.x, -1, 1) || !inRange(level.target.y, 0, 1)) fail('target centre must be normalized');
+    if (!(level.target.rx > 0) || !(level.target.ry > 0)) fail('target radii must be positive');
+  }
+  if (level.movingTarget) {
+    if (!level.target) fail('movingTarget requires target');
+    if (!(level.movingTarget.range > 0) || !(level.movingTarget.speed > 0) || !finite(level.movingTarget.phase)) {
+      fail('movingTarget requires positive range/speed and finite phase');
+    }
+  }
+
+  if (level.wallConfig) {
+    if (!WALL_TYPES.includes(level.wallConfig.type)) fail(`unknown wall type ${level.wallConfig.type}`);
+    if (level.wallConfig.count !== level.wall) fail('wallConfig.count must match legacy wall');
+    if (level.wallConfig.type === 'double') {
+      const rowCount = (level.wallConfig.rows ?? EMPTY_LIST).reduce((sum, row) => sum + (row.count || 0), 0);
+      if (rowCount !== level.wall) fail('double-wall row counts must match legacy wall');
+    }
+    if (level.wallConfig.type === 'split' && !(level.wallConfig.gapWidth > 0)) fail('split wall needs a positive gapWidth');
+    if (level.wallConfig.type === 'rushing' && !(level.wallConfig.rushSpeed > 0)) fail('rushing wall needs a positive rushSpeed');
+  }
+
+  if (level.goal) {
+    if (!inRange(level.goal.widthScale, 0.65, 1) || !inRange(level.goal.heightScale, 0.65, 1)) {
+      fail('goal scales must be between 0.65 and 1');
+    }
+  }
+  if (level.shotRules) {
+    if (!inRange(level.shotRules.maxPower, 0.45, 1)) fail('shotRules.maxPower must be between 0.45 and 1');
+    if (!AIM_GUIDE_MODES.has(level.shotRules.aimGuide)) fail(`unknown aim guide mode ${level.shotRules.aimGuide}`);
+    if (!inRange(level.shotRules.powerJitter, 0, 0.2)) fail('power jitter must be between 0 and 0.2');
+  }
+
+  const hazardTypes = new Set();
+  for (const condition of level.hazards ?? EMPTY_LIST) {
+    if (!HAZARD_TYPES.includes(condition.type)) fail(`unknown hazard type ${condition.type}`);
+    if (hazardTypes.has(condition.type)) fail(`duplicate hazard ${condition.type}`);
+    hazardTypes.add(condition.type);
+  }
+
+  const ringIds = new Set();
+  for (const hoop of level.rings ?? EMPTY_LIST) {
+    if (!hoop.id || ringIds.has(hoop.id)) fail('ring IDs must be present and unique per level');
+    ringIds.add(hoop.id);
+    if (!inRange(hoop.x, -1, 1) || !inRange(hoop.y, 0, 1) || !inRange(hoop.z, 0.05, 0.95)) fail(`ring ${hoop.id} coordinates must be normalized`);
+    if (!(hoop.radius > 0)) fail(`ring ${hoop.id} radius must be positive`);
+  }
+  if (level.objective?.ringsRequired > (level.rings?.length ?? 0)) fail('ringsRequired cannot exceed authored rings');
+  if (level.objective?.type === 'reverse-target' && level.target?.number !== level.objective.requiredZone) {
+    fail('reverse-target objective must match the numbered target');
+  }
+  if (level.objective?.type === 'bank-shot' && level.objective.requiredContact !== 'frame') {
+    fail('bank-shot must require a frame contact');
+  }
+  if (level.objective?.type === 'limited-power' && level.objective.maximumPower !== level.shotRules?.maxPower) {
+    fail('limited-power objective and shotRules must use the same cap');
+  }
+
+  if (level.keeperConfig && !KEEPER_TYPES.has(level.keeperConfig.type)) fail(`unknown keeper type ${level.keeperConfig.type}`);
+  return errors;
+}
+
+/** Validate IDs and every level payload; returns messages instead of throwing. */
+export function validateLevelSet(levels = LEVELS) {
+  const errors = [];
+  const ids = new Set();
+  for (const level of levels) {
+    if (ids.has(level?.id)) errors.push(`${level.id}: duplicate level id`);
+    ids.add(level?.id);
+    errors.push(...validateLevelDefinition(level));
+  }
+  return errors;
+}
 
 // Populate immutable cup metadata after the level list is known.
 for (const cup of CUPS) {

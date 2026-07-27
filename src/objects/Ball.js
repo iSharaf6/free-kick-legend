@@ -10,6 +10,13 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function goalDimension(value, fallback) {
+  if (!Number.isFinite(value) || value <= 0) return fallback;
+  // Keep at least one ball diameter inside the frame so the containment
+  // planes cannot invert when authored level data is overly aggressive.
+  return Math.max(value, BALL_R * 2);
+}
+
 function windVector(value = PHYS.wind) {
   return {
     x: finite(value?.x),
@@ -24,6 +31,13 @@ function windVector(value = PHYS.wind) {
 export class Ball {
   constructor(options = {}) {
     this.wind = windVector(options.wind);
+    this.goalWidth = GOAL_W;
+    this.goalHeight = GOAL_H;
+    const goalBounds = options.goalBounds ?? options;
+    this.setGoalBounds(
+      goalBounds.width ?? goalBounds.goalWidth ?? GOAL_W,
+      goalBounds.height ?? goalBounds.goalHeight ?? GOAL_H
+    );
     this.prev = null;
     this.reset(options.x ?? 0);
   }
@@ -62,9 +76,42 @@ export class Ball {
     return this;
   }
 
+  // Configure the current level's goal frame. These dimensions deliberately
+  // survive reset() so retries keep the same net; call resetGoalBounds() when
+  // returning to the regulation-size default.
+  setGoalBounds(value = GOAL_W, height = GOAL_H) {
+    const bounds = typeof value === 'object' && value !== null
+      ? value
+      : { width: value, height };
+    const currentWidth = Number.isFinite(this.goalWidth) ? this.goalWidth : GOAL_W;
+    const currentHeight = Number.isFinite(this.goalHeight) ? this.goalHeight : GOAL_H;
+
+    this.goalWidth = goalDimension(
+      bounds.width ?? bounds.goalWidth,
+      currentWidth
+    );
+    this.goalHeight = goalDimension(
+      bounds.height ?? bounds.goalHeight,
+      currentHeight
+    );
+    return this;
+  }
+
+  resetGoalBounds() {
+    this.goalWidth = GOAL_W;
+    this.goalHeight = GOAL_H;
+    return this;
+  }
+
+  getGoalBounds() {
+    return { width: this.goalWidth, height: this.goalHeight };
+  }
+
   // Call after a valid goal. When backZ is supplied, the ball also rebounds
   // softly from the back net rather than travelling through the stadium.
-  enterNet(backZ = null) {
+  // Passing bounds here is equivalent to setGoalBounds(bounds) first.
+  enterNet(backZ = null, bounds = null) {
+    if (bounds !== null && bounds !== undefined) this.setGoalBounds(bounds);
     this.inNet = true;
     this.netBackZ = Number.isFinite(backZ) ? backZ : null;
     return this;
@@ -122,7 +169,7 @@ export class Ball {
   }
 
   _resolveNetBounds() {
-    const maxX = GOAL_W / 2 - BALL_R;
+    const maxX = this.goalWidth / 2 - BALL_R;
     if (Math.abs(this.x) > maxX) {
       const side = Math.sign(this.x) || 1;
       this.x = side * maxX;
@@ -131,7 +178,7 @@ export class Ball {
       this.spin *= 0.55;
     }
 
-    const roofY = GOAL_H - BALL_R;
+    const roofY = this.goalHeight - BALL_R;
     if (this.y > roofY) {
       this.y = roofY;
       if (this.vy > 0) this.vy *= -PHYS.netBounce;
@@ -299,6 +346,8 @@ export class Ball {
     sim.grounded = this.grounded;
     sim.inNet = this.inNet;
     sim.netBackZ = this.netBackZ;
+    sim.goalWidth = this.goalWidth;
+    sim.goalHeight = this.goalHeight;
     sim.prev = null;
     return sim;
   }

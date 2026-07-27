@@ -6,21 +6,24 @@ A polished, portal-ready pixel football game built with Phaser 3 and Vite. Draw 
 
 ## What is included
 
-- 50 career matches across five cups, with targets, crosswinds, curve challenges, multi-goal finals, and stable-ID progression.
+- 50 authored career matches across five cups, with stable-ID progression and escalating objectives: corner-only finishes, bank shots, ring threading, limited-power strikes, blind shots, numbered zones, and combo challenges.
+- Match hazards and defensive twists including rotating wind, fog, snow, glare, slippery run-ups, crowd pressure, moving/rushing/split/double walls, deflectors, compact goals, sweeper keepers, and two-keeper finals.
 - Fixed-step pseudo-3D ball physics at 120 Hz: full-velocity drag, Magnus curl, wind, grounded rolling, bounce, glancing post/crossbar rebounds, net damping, and frame-rate-invariant outcomes.
-- A gameplay-routed set of 28 practical goalkeeper actions: full/low/mid dives, fingertip tips, upper/low parries, low/mid catches, high claims, jump catches, front/side smothers, the spread and foot saves, secure side holds, and a centre get-up. The wider 55-clip production library remains available without interrupting save play.
+- A gameplay-routed set of 28 practical goalkeeper actions: full/low/mid dives, fingertip tips, upper/low parries, low/mid catches, high claims, jump catches, front/side smothers, the spread and foot saves, secure side holds, and a centre get-up. The striker uses contact-timed run-up, strike, follow-through, recovery, and celebration animations.
 - Robust mouse/touch swipes with pointer isolation, smoothing, resampling, invalid-gesture feedback, and live power/curl presentation.
 - Score, combo, shot grades, top-corner/target bonuses, three-star mastery, first-clear rewards, and Time Attack.
 - A deterministic five-shot Daily Kick, moving bonus target, seven-day reward cycle, three rotating missions, 12 achievements, claimable coins, and replay-safe rewards.
 - A functional Locker with six kits, six balls, six trails, earned coins, progression gates, and no pay-to-win upgrades.
 - Versioned saves with v1 migration, validation, settings, lifetime stats, daily streaks/claims, achievements, and CrazyGames Data fallback.
 - CrazyGames SDK v3 lifecycle, cloud-data, completion, happy-time, and natural-break ad hooks; the bridge remains safe when the SDK is disabled or unavailable.
-- True 1920×1080 Full-HD rendering over stable logical coordinates, 4× text rasterization, high-density original striker/keeper/defender sprites, responsive safe areas, and layered synthesized stadium audio.
+- True 1920×1080 Full-HD rendering over stable logical coordinates, 4× text rasterization, high-density original striker/keeper/defender sprites, proportioned panoramic crowds, a purpose-built pixel pitch, responsive safe areas, and layered synthesized stadium audio.
 
 ## Run and verify
 
+Requires Node.js 20.19 or newer.
+
 ```bash
-npm install
+npm ci
 npm run dev       # http://localhost:5173
 npm test          # physics, input, save, progression, cosmetics, platform
 npm run build     # production output in dist/
@@ -33,6 +36,9 @@ npm run preview   # http://localhost:4173
 - Swipe farther upward for loft; release faster for power.
 - Bow the gesture left or right and the ball follows that curve.
 - Low shots can pass beneath a jumping wall; precise high finishes earn larger scores.
+- Press `Tab` during a match to pause and open the match menu.
+- Press `R` during a match or from the pause menu to restart the current level.
+- Press `Esc` in the pause menu to return to the main menu.
 
 ## Project map
 
@@ -48,6 +54,7 @@ src/
 │   └── cosmetics.js            visual-only kit, ball, and trail catalog
 ├── systems/
 │   ├── SwipeInput.js           gesture capture, smoothing, shot mapping
+│   ├── LevelMechanics.js       hazards, goals, rings, walls and objective rules
 │   ├── ShotScoring.js          grades, combo and mastery scoring
 │   ├── GoalFramePhysics.js     shared post/crossbar collision and rebound geometry
 │   ├── SaveManager.js          v2 persistence, migration, currency, loadout, stats
@@ -56,8 +63,8 @@ src/
 ├── objects/
 │   ├── Ball.js                 fixed-step pseudo-3D solver
 │   ├── Goalkeeper.js           deterministic keeper state machine/contact
-│   ├── Wall.js                 jumping defenders and volume-aware blocks
-│   └── Kicker.js               striker pose/celebration presentation
+│   ├── Wall.js                 moving, rushing, split and staggered formations
+│   └── Kicker.js               contact-timed strike and celebration animation
 └── scenes/
     ├── BootScene.js            SDK init and generated texture atlas
     ├── MenuScene.js            continue, career, daily, arcade, locker
@@ -70,7 +77,7 @@ src/
 ## Portal release
 
 1. Run `npm test` and `npm run build`.
-2. Zip the contents of `dist/` with `index.html` at the archive root. The repository's `free-kick-legend.zip` is the current ready-to-upload build.
+2. Zip the contents of the freshly generated `dist/` directory with `index.html` at the archive root. Do not wrap the files in another folder.
 3. Upload to the CrazyGames Developer Portal and test it in their preview environment.
 4. The official SDK v3 script is already included in `index.html`. `BootScene` waits for initialization, `PlatformService` uses CrazyGames Data when available, and `GameScene` reports gameplay start/stop and career completion.
 5. Midgame ads are requested only after a completed level or finished Time Attack run. Gameplay is already stopped, input is blocked while the request resolves, audio mutes only after `adStarted`, and `adError` safely restores the UI. Daily Kick also offers one optional rewarded video to double the first-completion coin reward; failure or unavailability never removes the earned base reward.
@@ -79,7 +86,7 @@ For other portals, the bridge falls back to local storage and no-op lifecycle/ad
 
 Useful official references: [SDK setup](https://docs.crazygames.com/sdk/intro/), [game lifecycle](https://docs.crazygames.com/sdk/game/), [data storage](https://docs.crazygames.com/sdk/data/), and [advertisement requirements](https://docs.crazygames.com/requirements/ads/).
 
-The generated HD art sources are preserved in `assets/source/`; optimized transparent runtime frames live in `public/assets/hd/` and can be rebuilt with `scripts/build_hd_sprites.py`. The practical save generation and packing contract is documented in `assets/source/KEEPER-PRACTICAL-SAVES-V2-PROMPT.md`; the wider situational/distribution/reaction source contract remains in `assets/source/KEEPER-COMPLETE-MOVESET-V1-PROMPT.md`.
+The keeper, kicker, ball, and defender HD sources are preserved in `assets/source/`; their optimized transparent runtime frames live in `public/assets/hd/` and can be rebuilt with `scripts/build_hd_sprites.py`. The checked-in pitch and crowd panorama are separate generated release assets and are not rebuilt by that script. The practical save generation and packing contract is documented in `assets/source/KEEPER-PRACTICAL-SAVES-V2-PROMPT.md`; the wider situational/distribution/reaction source contract remains in `assets/source/KEEPER-COMPLETE-MOVESET-V1-PROMPT.md`.
 
 ## Tuning
 

@@ -16,17 +16,32 @@ import { Audio } from '../systems/AudioSynth.js';
 import { careerStars, isTopCorner, scoreShot, targetGeometry } from '../systems/ShotScoring.js';
 import { classifyGoalPlane, reboundFromGoalFrame, sweepGoalFrame } from '../systems/GoalFramePhysics.js';
 import { GoalNetPhysics } from '../systems/GoalNetPhysics.js';
+import { sweepMovingZPlane } from '../systems/SweptCollision.js';
+import {
+  createRingProgress,
+  evaluateAdvancedObjective,
+  getEffectiveGoalDimensions,
+  getHazard,
+  getJitteredPower,
+  getRingWorldGeometry,
+  getWindVectorAt,
+  normalizeHazards,
+  normalizeKeeperConfig,
+  normalizeWallConfig,
+  updateRingProgress
+} from '../systems/LevelMechanics.js';
 import {
   makeButton, makeIconButton, makeStatChip, titleText, bodyText,
   drawPanel, addScanlines, configureHdCamera, crispText, FONT
 } from '../ui.js';
 import { PAL } from '../pixelart.js';
-import { CROWD_ANIMATION } from '../data/crowdAnimation.js';
 
 const ATTEMPTS = 3;
 const ARCADE_TIME = 60;
 const FIXED_STEP = PHYS.fixedStep;
 const MAX_STEPS = PHYS.maxSubsteps + 2;
+const AD_TIMEOUT_MS = 15000;
+const PAUSABLE_STATES = new Set(['AIMING', 'WINDUP', 'FLIGHT', 'RESULT']);
 const CUP_TINTS = Object.freeze({
   academy: 0xe8f5e9,
   curve: 0xe6f1ff,
@@ -58,6 +73,48 @@ export class GameScene extends Phaser.Scene {
   }
 
   init(data = {}) {
+    // Phaser reuses this Scene instance across start/restart calls. Anything
+    // optional must therefore be reset here, not left pointing at a Game
+    // Object that the previous shutdown already destroyed. This was most
+    // visible when academy level 8 (multi-goal progress text) restarted into
+    // level 9 (no progress text): the next result called setText on the dead
+    // level-8 Text object and crashed the match.
+    this.sessionToken = (this.sessionToken || 0) + 1;
+    this.sessionAlive = true;
+    this.sessionShutdown = false;
+    this.transitioning = false;
+    this.scheduledCalls = new Set();
+    this.pendingAsyncCancels = new Set();
+    this.activeAdCleanup = null;
+    this.adRequestActive = false;
+    this.pauseReturnState = null;
+    this.pauseOverlayObjects = [];
+    this.terminalOverlayObjects = [];
+    this.terminalOverlayShown = false;
+    this.wall = null;
+    this.walls = [];
+    this.keeper = null;
+    this.keepers = [];
+    this.hint = null;
+    this.objectiveUi = null;
+    this.objectiveProgressTxt = null;
+    this.attemptIcons = null;
+    this.scoreTxt = null;
+    this.comboTxt = null;
+    this.timerTxt = null;
+    this.dailyShotsTxt = null;
+    this.targetGfx = null;
+    this.targetAnchorScreenX = null;
+    this.nearCrowd = [];
+    this.nearCrowdBackdrop = null;
+    this.ballGhosts = [];
+    this.ringVisuals = new Map();
+    this.hazardVisuals = [];
+    this.snowEmitter = null;
+    this.windTxt = null;
+    this.pressureMeterGfx = null;
+    this.frameContacts = new Set();
+
     this.mode = data.mode || 'career';
     this.levelIndex = data.levelIndex ?? 0;
     this.dailyDate = data.dailyDate || utcDateKey();
@@ -82,6 +139,16 @@ export class GameScene extends Phaser.Scene {
     CAM.x = this.level.offsetX * 0.85;
     this.zGoal = CAM.ballDist + this.level.distance;
     this.zWall = CAM.ballDist + Math.min(WALL_DIST, this.level.distance * 0.55);
+    this.goalDimensions = getEffectiveGoalDimensions(this.level, { width: GOAL_W, height: GOAL_H });
+    this.goalWidth = this.goalDimensions.width;
+    this.goalHeight = this.goalDimensions.height;
+    this.hazards = normalizeHazards(this.level.hazards);
+    this.hazardMap = new Map(this.hazards.map((hazard) => [hazard.type, hazard]));
+    this.wallConfig = normalizeWallConfig(this.level.wallConfig, this.level.wall);
+    this.keeperConfig = normalizeKeeperConfig(this.level.keeperConfig, {
+      baseSkill: this.level.keeper,
+      goalWidth: this.goalWidth
+    });
 
     this.state = 'AIMING';
     this.attempt = 1;
@@ -100,10 +167,11 @@ export class GameScene extends Phaser.Scene {
     this.slowmoUsed = false;
     this.over = false;
     this.ballCaught = false;
-    this.keeperContactChecked = false;
+    this.keeperContactChecked = new Set();
     this.netTouched = false;
     this.netSideRippled = false;
     this.frameTouched = false;
+    this.frameContacts = new Set();
     this.frameImpactT = null;
     this.frameCollisionCooldown = 0;
     this.lastTickSecond = -1;
@@ -118,22 +186,22 @@ export class GameScene extends Phaser.Scene {
       .setBlendMode('ADD');
     this.drawPitch();
     this.buildNearCrowd(atmosphereTint);
-    // Floodlight beams angled onto the penalty area sell the night-match
-    // lighting; the vignette pulls focus toward the goalmouth.
-    const beams = this.add.graphics().setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
-    beams.fillStyle(PAL.flood, 0.05);
-    beams.fillTriangle(48, 14, 82, 14, 262, 236);
-    beams.fillTriangle(398, 14, 432, 14, 218, 236);
-    beams.fillStyle(PAL.flood, 0.035);
-    beams.fillTriangle(128, 14, 154, 14, 248, 208);
-    beams.fillTriangle(326, 14, 352, 14, 232, 208);
+    // A quiet floodlight wash keeps the night-match atmosphere without the
+    // hard triangles that previously read as stray pitch markings.
+    this.add.rectangle(GAME_W / 2, CAM.horizonY + (GAME_H - CAM.horizonY) / 2,
+      GAME_W, GAME_H - CAM.horizonY, PAL.flood, 0.018)
+      .setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
     this.add.image(0, 0, 'vignette').setOrigin(0, 0).setDepth(1950);
     this.drawGoal();
     this.drawTargetZone();
+    this.drawRings();
+    this.buildHazardVisuals();
 
     this.ball = new Ball();
     this.ball.reset(this.level.offsetX);
-    this.ball.setWind(this.level.wind || 0);
+    this.ball.setGoalBounds(this.goalWidth, this.goalHeight);
+    this.currentWind = getWindVectorAt(this.level.wind, this.simTime);
+    this.ball.setWind(this.currentWind);
     const savedLoadout = SaveManager.getEquippedCosmetics?.() || SaveManager.load?.().equipped || {};
     this.loadout = {
       kit: savedLoadout.kit || 'kit-home',
@@ -170,12 +238,14 @@ export class GameScene extends Phaser.Scene {
       reducedMotion: this.settings.reducedMotion
     });
 
-    this.keeper = new Goalkeeper(this, this.level.keeper, this.zGoal, {
-      reducedMotion: this.settings.reducedMotion,
-      style: this.level.style
-    });
+    this.buildKeepers();
     this.buildWall();
-    if (this.wall) this.keeper.organiseWall();
+    if (this.wall) this.keepers.forEach((keeper) => keeper.organiseWall());
+
+    this.ringProgress = createRingProgress(
+      this.level.rings,
+      this.level.objective?.ringsRequired ?? this.level.rings?.length
+    );
 
     this.trailPts = [];
     this.trailGfx = this.add.graphics();
@@ -215,58 +285,246 @@ export class GameScene extends Phaser.Scene {
     );
     this.swipe.enabled = true;
 
+    this.installKeyboardControls();
+
     Audio.whistle();
 
     // Debug hook for automated testing (window.__fkl.shootDebug(vx, vy, vz, spin));
     // dev-server only, stripped from production builds.
-    if (import.meta.env.DEV) window.__fkl = this;
-    this.onVisibilityChange = () => {
-      if (document.hidden) PlatformService.gameplayStop();
-      else if (this.state === 'AIMING' || this.state === 'WINDUP' || this.state === 'FLIGHT') PlatformService.gameplayStart();
-    };
-    document.addEventListener('visibilitychange', this.onVisibilityChange);
+    if (import.meta.env?.DEV && globalThis.window) globalThis.window.__fkl = this;
+    this.events.once('shutdown', this.shutdownSession, this);
+  }
 
-    this.events.once('shutdown', () => {
-      if (import.meta.env.DEV && window.__fkl === this) window.__fkl = null;
-      document.removeEventListener('visibilitychange', this.onVisibilityChange);
-      PlatformService.gameplayStop();
+  // ---------------------------------------------------------- session flow
+
+  isSessionActive(token = this.sessionToken) {
+    return Boolean(
+      this.sessionAlive &&
+      !this.transitioning &&
+      token === this.sessionToken &&
+      this.sys?.isActive?.()
+    );
+  }
+
+  schedule(delay, callback) {
+    if (!this.sessionAlive || this.transitioning) return null;
+    const token = this.sessionToken;
+    let timer = null;
+    timer = this.time.delayedCall(delay, () => {
+      this.scheduledCalls.delete(timer);
+      if (!this.isSessionActive(token)) return;
+      callback();
     });
+    this.scheduledCalls.add(timer);
+    return timer;
+  }
+
+  cancelScheduledCalls() {
+    if (this.scheduledCalls?.size) {
+      this.time?.removeEvent?.([...this.scheduledCalls]);
+      this.scheduledCalls.clear();
+    }
+  }
+
+  // Portal SDK callbacks are external to Phaser's Clock, so scene shutdown
+  // cannot cancel them for us. Resolve the local waiter on timeout/shutdown;
+  // late SDK callbacks then become harmless no-ops guarded by sessionToken.
+  awaitSessionTask(task, timeoutMs = AD_TIMEOUT_MS) {
+    return new Promise((resolve) => {
+      let settled = false;
+      let timeoutId = null;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId !== null) globalThis.clearTimeout(timeoutId);
+        this.pendingAsyncCancels?.delete(cancel);
+        resolve(value);
+      };
+      const cancel = () => finish(false);
+      this.pendingAsyncCancels.add(cancel);
+      timeoutId = globalThis.setTimeout(cancel, timeoutMs);
+      Promise.resolve(task).then(finish, cancel);
+    });
+  }
+
+  installKeyboardControls() {
+    const keyboard = this.input.keyboard;
+    if (!keyboard) return;
+
+    keyboard.addCapture('TAB');
+    this.onTabKey = (event) => {
+      event?.preventDefault?.();
+      if (event) event.cancelled = 1;
+      if (event?.repeat || this.adRequestActive) return;
+      this.togglePauseMenu();
+    };
+    this.onRestartKey = (event) => {
+      if (event?.repeat || this.adRequestActive) return;
+      this.restartCurrentLevel();
+    };
+    this.onEscapeKey = (event) => {
+      if (event?.repeat || this.adRequestActive || this.state !== 'PAUSED') return;
+      this.startScene('Menu');
+    };
+    keyboard.on('keydown-TAB', this.onTabKey);
+    keyboard.on('keydown-R', this.onRestartKey);
+    keyboard.on('keydown-ESC', this.onEscapeKey);
+  }
+
+  currentRestartData() {
+    if (this.mode === 'career') return { mode: 'career', levelIndex: this.levelIndex };
+    if (this.mode === 'daily') return { mode: 'daily', dailyDate: this.dailyDate };
+    return { mode: 'arcade' };
+  }
+
+  restartCurrentLevel(data = this.currentRestartData()) {
+    return this.beginSceneTransition('restart', null, data);
+  }
+
+  startScene(key, data = undefined) {
+    return this.beginSceneTransition('start', key, data);
+  }
+
+  beginSceneTransition(operation, key, data) {
+    if (!this.sessionAlive || this.transitioning) return false;
+    this.transitioning = true;
+    this.sessionAlive = false;
+    this.state = 'TRANSITIONING';
+    this.swipe.enabled = false;
+    this.swipe.cancel();
+    this.destroyPauseOverlay();
+    // Clock/Tween paused flags persist on Phaser's reusable Scene plugins.
+    // Always restore them before shutdown so the next start cannot inherit a
+    // frozen clock, then remove every callback owned by the retiring scene.
+    this.time.paused = false;
+    this.tweens.resumeAll();
+    this.kicker?.cancelSequence?.();
+    this.cancelScheduledCalls();
+    this.time.removeAllEvents();
+    this.time.clearPendingEvents();
+    this.tweens.killAll();
+    PlatformService.gameplayStop();
+
+    if (operation === 'restart') this.scene.restart(data);
+    else this.scene.start(key, data);
+    return true;
+  }
+
+  togglePauseMenu() {
+    if (this.state === 'PAUSED') {
+      this.closePauseMenu();
+      return;
+    }
+    if (!PAUSABLE_STATES.has(this.state) || this.transitioning || this.terminalOverlayShown) return;
+    this.openPauseMenu();
+  }
+
+  openPauseMenu() {
+    if (!PAUSABLE_STATES.has(this.state) || this.pauseOverlayObjects.length) return;
+    this.pauseReturnState = this.state;
+    this.state = 'PAUSED';
+    this.swipe.cancel();
+    this.swipe.enabled = false;
+    this.aimGfx?.clear();
+    this.meterUi?.forEach((label) => label.setVisible(false));
+    this.time.paused = true;
+    this.tweens.pauseAll();
+    PlatformService.gameplayStop();
+
+    const objects = this.pauseOverlayObjects;
+    objects.push(
+      this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, PAL.ink, 0.72)
+        .setDepth(3499).setInteractive()
+    );
+    const panel = this.add.graphics().setDepth(3500);
+    drawPanel(panel, 90, 55, 300, 160, {
+      fill: PAL.panel, border: PAL.goldDark, corner: PAL.gold
+    });
+    objects.push(panel);
+    objects.push(titleText(this, GAME_W / 2, 80, 'MATCH PAUSED', '15px', '#f3c449').setDepth(3501));
+    objects.push(bodyText(this, GAME_W / 2, 111, 'Take a breath. Your shot is frozen exactly where you left it.', {
+      originX: 0.5, originY: 0.5, align: 'center', fontSize: '7px', color: '#cfe8ff',
+      wordWrap: { width: 250, useAdvancedWrap: true }
+    }).setDepth(3501));
+
+    const actions = [
+      { label: 'RESUME', color: PAL.blue, hover: PAL.blueHi, cb: () => this.closePauseMenu() },
+      { label: 'RESTART', color: PAL.goldDark, hover: PAL.gold, cb: () => this.restartCurrentLevel() },
+      { label: 'MAIN MENU', color: PAL.panelHi, hover: PAL.border, cb: () => this.startScene('Menu') }
+    ];
+    actions.forEach((action, index) => {
+      objects.push(makeButton(this, 154 + index * 86, 162, 78, 27, action.label, action.cb, {
+        color: action.color, hover: action.hover, border: index === 0 ? PAL.goldDark : PAL.borderDark,
+        fontSize: action.label === 'MAIN MENU' ? '6px' : '7px', hitHeight: 32
+      }).setDepth(3501));
+    });
+    objects.push(bodyText(this, GAME_W / 2, 198, 'TAB  RESUME    ·    R  RESTART    ·    ESC  MAIN MENU', {
+      originX: 0.5, originY: 0.5, align: 'center', fontSize: '6px', color: '#8fa2ab'
+    }).setDepth(3501));
+  }
+
+  closePauseMenu() {
+    if (this.state !== 'PAUSED' || this.transitioning) return false;
+    const returnState = this.pauseReturnState || 'AIMING';
+    this.destroyPauseOverlay();
+    this.time.paused = false;
+    this.tweens.resumeAll();
+    this.state = returnState;
+    this.pauseReturnState = null;
+    this.swipe.enabled = returnState === 'AIMING';
+    if (!globalThis.document?.hidden && (returnState === 'AIMING' || returnState === 'WINDUP' || returnState === 'FLIGHT')) {
+      PlatformService.gameplayStart();
+    }
+    return true;
+  }
+
+  destroyPauseOverlay() {
+    this.pauseOverlayObjects?.forEach((object) => {
+      if (object?.active) object.destroy();
+    });
+    this.pauseOverlayObjects = [];
+  }
+
+  shutdownSession() {
+    if (this.sessionShutdown) return;
+    this.sessionShutdown = true;
+    this.sessionAlive = false;
+    this.pendingAsyncCancels?.forEach((cancel) => cancel());
+    this.pendingAsyncCancels?.clear();
+    this.activeAdCleanup?.();
+    this.activeAdCleanup = null;
+    this.cancelScheduledCalls();
+    this.time.paused = false;
+    this.tweens.resumeAll();
+    this.destroyPauseOverlay();
+
+    const keyboard = this.input.keyboard;
+    keyboard?.off?.('keydown-TAB', this.onTabKey);
+    keyboard?.off?.('keydown-R', this.onRestartKey);
+    keyboard?.off?.('keydown-ESC', this.onEscapeKey);
+    keyboard?.removeCapture?.('TAB');
+    if (import.meta.env.DEV && globalThis.window?.__fkl === this) globalThis.window.__fkl = null;
+    PlatformService.gameplayStop();
+
+    // Drop references to objects the DisplayList destroyed during shutdown.
+    this.nearCrowd = [];
+    this.ballGhosts = [];
+    this.objectiveUi = null;
+    this.attemptIcons = null;
+    this.terminalOverlayObjects = [];
   }
 
   // ---------------------------------------------------------------- visuals
 
   buildNearCrowd(atmosphereTint = null) {
     this.nearCrowd = [];
-    if (!this.textures.exists(CROWD_ANIMATION.textureKey)) return;
-
-    if (!this.anims.exists(CROWD_ANIMATION.ambientKey)) {
-      this.anims.create({
-        key: CROWD_ANIMATION.ambientKey,
-        frames: CROWD_ANIMATION.ambientFrames.map((frame) => ({
-          key: CROWD_ANIMATION.textureKey,
-          frame
-        })),
-        frameRate: CROWD_ANIMATION.ambientFrameRate,
-        repeat: -1
-      });
-    }
-    if (!this.anims.exists(CROWD_ANIMATION.goalKey)) {
-      this.anims.create({
-        key: CROWD_ANIMATION.goalKey,
-        frames: CROWD_ANIMATION.goalFrames.map((frame) => ({
-          key: CROWD_ANIMATION.textureKey,
-          frame
-        })),
-        frameRate: CROWD_ANIMATION.goalFrameRate,
-        repeat: 2,
-        repeatDelay: 45
-      });
-    }
+    const textureKey = 'crowd-panorama-hd-v3';
+    if (!this.textures.exists(textureKey)) return;
 
     // The lower stand now finishes only a few pixels behind the goal line.
     // This removes the empty strip of pitch that made the crowd feel remote.
     const railY = Math.round(project(0, 0, this.zGoal + 3.2).y);
-    const standTop = CAM.horizonY - 2;
+    const standTop = CAM.horizonY - 36;
     this.nearCrowdBackdrop = this.add.rectangle(
       GAME_W / 2,
       standTop + (railY - standTop) / 2,
@@ -276,52 +534,44 @@ export class GameScene extends Phaser.Scene {
       0.94
     ).setDepth(1.18);
 
-    const sectionWidth = CROWD_ANIMATION.frameWidth * CROWD_ANIMATION.sectionScale;
-    const coverageWidth = sectionWidth * CROWD_ANIMATION.sectionCount;
-    const startX = (GAME_W - coverageWidth) / 2 + sectionWidth / 2;
-    for (let index = 0; index < CROWD_ANIMATION.sectionCount; index++) {
-      const section = this.add.sprite(
-        startX + index * sectionWidth,
-        railY,
-        CROWD_ANIMATION.textureKey,
-        CROWD_ANIMATION.ambientFrames[index % CROWD_ANIMATION.ambientFrames.length]
-      )
-        .setOrigin(0.5, 1)
-        .setScale(CROWD_ANIMATION.sectionScale)
-        .setFlipX(index % 2 === 1)
-        .setDepth(1.3);
-      if (atmosphereTint) section.setTint(atmosphereTint);
-      if (!this.settings.reducedMotion) {
-        section.play({
-          key: CROWD_ANIMATION.ambientKey,
-          startFrame: index % CROWD_ANIMATION.ambientFrames.length
-        });
-      }
-      this.nearCrowd.push(section);
-    }
+    // One authored panorama gives the stand real variation and consistent
+    // perspective. The old six tiled sections repeated the same giant faces,
+    // making spectators look taller than the keeper.
+    const source = this.textures.get(textureKey).getSourceImage();
+    const scale = GAME_W / Math.max(source?.width || GAME_W, 1);
+    const crowd = this.add.image(GAME_W / 2, railY, textureKey)
+      .setOrigin(0.5, 1)
+      .setScale(scale)
+      .setDepth(1.3);
+    if (atmosphereTint) crowd.setTint(atmosphereTint);
+    crowd.fklBaseY = railY;
+    crowd.fklBaseScale = scale;
+    this.nearCrowd.push(crowd);
   }
 
   playCrowdGoal() {
-    this.nearCrowd?.forEach((section, index) => {
-      section.anims.stop();
+    this.nearCrowd?.forEach((section) => {
+      if (!section?.active) return;
+      this.tweens.killTweensOf(section);
+      const baseY = section.fklBaseY ?? section.y;
+      const baseScale = section.fklBaseScale ?? section.scaleX;
       if (this.settings.reducedMotion) {
-        section.setFrame(CROWD_ANIMATION.goalFrames[1]);
-        this.time.delayedCall(520, () => {
-          if (section.active) section.setFrame(CROWD_ANIMATION.ambientFrames[index % 6]);
-        });
+        section.setAlpha(0.82);
+        this.schedule(180, () => section.active && section.setAlpha(1));
         return;
       }
-
-      section.once('animationcomplete', (animation) => {
-        if (animation.key !== CROWD_ANIMATION.goalKey || !section.active) return;
-        section.play({
-          key: CROWD_ANIMATION.ambientKey,
-          startFrame: (index * 2) % CROWD_ANIMATION.ambientFrames.length
-        });
-      });
-      section.play({
-        key: CROWD_ANIMATION.goalKey,
-        delay: (index % 3) * 32
+      section.setPosition(GAME_W / 2, baseY).setScale(baseScale);
+      this.tweens.add({
+        targets: section,
+        y: baseY - 2.2,
+        scaleY: baseScale * 1.035,
+        duration: 95,
+        ease: 'Sine.easeOut',
+        yoyo: true,
+        repeat: 2,
+        onComplete: () => {
+          if (section.active) section.setPosition(GAME_W / 2, baseY).setScale(baseScale);
+        }
       });
     });
   }
@@ -345,31 +595,21 @@ export class GameScene extends Phaser.Scene {
   }
 
   drawPitch() {
-    const g = this.add.graphics().setDepth(1);
-    const greens = [PAL.grass, PAL.grassDark];
-    let z0 = 3.0;
-    let i = 0;
-    // perspective mowing stripes
-    while (true) {
-      const z1 = z0 * 1.25;
-      const y0 = Math.min(project(0, 0, z0).y, GAME_H);
-      const y1 = Math.max(project(0, 0, z1).y, CAM.horizonY);
-      if (y0 <= CAM.horizonY + 1) break;
-      g.fillStyle(greens[i % 2], 1);
-      g.fillRect(0, y1, GAME_W, y0 - y1 + 1);
-      z0 = z1;
-      i++;
-      if (i > 40) break;
+    if (this.textures.exists('pitch-grass-hd-v2')) {
+      this.pitchImage = this.add.image(0, CAM.horizonY, 'pitch-grass-hd-v2')
+        .setOrigin(0, 0)
+        .setDisplaySize(GAME_W, GAME_H - CAM.horizonY)
+        .setDepth(1);
+    } else {
+      this.add.rectangle(GAME_W / 2, CAM.horizonY + (GAME_H - CAM.horizonY) / 2,
+        GAME_W, GAME_H - CAM.horizonY, PAL.grass)
+        .setDepth(1);
     }
-    g.fillStyle(greens[0], 1);
-    g.fillRect(0, CAM.horizonY, GAME_W, 2);
 
-    // dithered grass texture
-    this.add.image(0, CAM.horizonY, 'grass-noise').setOrigin(0, 0).setDepth(1).setAlpha(0.5);
-
-    // pitch markings
+    // Only regulation markings remain. All decorative diagonal light polygons
+    // were removed because they looked like broken geometry on the turf.
     const m = this.add.graphics().setDepth(1);
-    m.lineStyle(1, PAL.line, 0.7);
+    m.lineStyle(0.75, PAL.line, 0.54);
     const line = (x1, z1, x2, z2) => {
       const a = project(x1, 0, z1);
       const b = project(x2, 0, z2);
@@ -393,14 +633,15 @@ export class GameScene extends Phaser.Scene {
   drawGoal() {
     const z = this.zGoal;
     const zb = z + 2.2;
-    const HW = GOAL_W / 2;
+    const HW = this.goalWidth / 2;
+    const height = this.goalHeight;
 
     // Spring membrane renders behind the keeper and deforms at the exact goal
     // crossing point instead of behaving like a painted background.
     this.netBack = this.add.graphics().setDepth(2);
     this.netPhysics = new GoalNetPhysics({
-      goalWidth: GOAL_W,
-      goalHeight: GOAL_H,
+      goalWidth: this.goalWidth,
+      goalHeight: height,
       goalZ: z,
       depth: zb - z
     });
@@ -411,8 +652,8 @@ export class GameScene extends Phaser.Scene {
     const s = project(0, 0, z).s;
     const lw = Math.max(Math.round(POST_R * 2 * s), 2);
     const bl = project(-HW, 0, z);
-    const tl = project(-HW, GOAL_H, z);
-    const tr = project(HW, GOAL_H, z);
+    const tl = project(-HW, height, z);
+    const tr = project(HW, height, z);
     const br = project(HW, 0, z);
     // dark under-stroke so the white frame pops off the crowd
     frame.lineStyle(lw + 2, 0x131b25, 0.9);
@@ -430,8 +671,8 @@ export class GameScene extends Phaser.Scene {
     frame.lineTo(br.x, br.y);
     frame.strokePath();
     // back stanchions give the frame its 3D structure
-    const tlb = project(-HW, GOAL_H * 0.92, zb);
-    const trb = project(HW, GOAL_H * 0.92, zb);
+    const tlb = project(-HW, height * 0.92, zb);
+    const trb = project(HW, height * 0.92, zb);
     frame.lineStyle(1, 0xb9c2cc, 0.75);
     frame.lineBetween(tl.x, tl.y, tlb.x, tlb.y);
     frame.lineBetween(tr.x, tr.y, trb.x, trb.y);
@@ -444,11 +685,11 @@ export class GameScene extends Phaser.Scene {
     this.netFront = this.add.graphics().setDepth(1000 - z * 10 + 1).setVisible(false);
     this.netFront.lineStyle(1, 0xf4f7f6, 0.2);
     for (let x = -HW; x <= HW + 0.01; x += 0.6) {
-      const t = project(x, GOAL_H * 0.92, zb);
+      const t = project(x, height * 0.92, zb);
       const b = project(x, 0, zb);
       this.netFront.lineBetween(t.x, t.y, b.x, b.y);
     }
-    for (let y = 0; y <= GOAL_H * 0.92 + 0.01; y += 0.45) {
+    for (let y = 0; y <= height * 0.92 + 0.01; y += 0.45) {
       const l = project(-HW, y, zb);
       const r = project(HW, y, zb);
       this.netFront.lineBetween(l.x, l.y, r.x, r.y);
@@ -458,7 +699,7 @@ export class GameScene extends Phaser.Scene {
   drawTargetZone() {
     const target = this.activeTarget;
     if (!target || typeof target !== 'object') return;
-    const geometry = targetGeometry(target, GOAL_W, GOAL_H);
+    const geometry = targetGeometry(target, this.goalWidth, this.goalHeight);
     const worldX = geometry.x;
     const worldY = geometry.y;
     const centre = project(worldX, worldY, this.zGoal + 0.08);
@@ -483,31 +724,219 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  updateConditions() {
-    const moving = this.level.movingTarget;
-    if (moving && this.activeTarget && this.baseTarget) {
-      const offset = Math.sin(this.simTime * moving.speed + moving.phase) * moving.range;
-      this.activeTarget.x = Phaser.Math.Clamp(this.baseTarget.x + offset, -0.78, 0.78);
-      const geometry = targetGeometry(this.activeTarget, GOAL_W, GOAL_H);
-      const centre = project(geometry.x, geometry.y, this.zGoal + 0.08);
-      this.targetGfx?.setX(centre.x - this.targetAnchorScreenX);
-    }
-
-    const wind = this.level.wind;
-    if (wind && typeof wind === 'object' && this.ball) {
-      const gust = Number(wind.gust || 0);
-      const gustX = gust > 0 ? Math.sin(this.simTime * 2.15 + this.level.distance) * gust : 0;
-      this.ball.setWind({
-        x: Number(wind.x || 0) + gustX,
-        y: Number(wind.y || 0),
-        z: Number(wind.z || 0)
+  drawRings() {
+    this.ringVisuals = new Map();
+    for (const [index, ring] of (this.level.rings || []).entries()) {
+      const geometry = getRingWorldGeometry(ring, {
+        startZ: CAM.ballDist,
+        goalZ: this.zGoal,
+        goalWidth: this.goalWidth,
+        goalHeight: this.goalHeight
+      });
+      const centre = project(geometry.x, geometry.y, geometry.z);
+      const edgeX = project(geometry.x + geometry.radius, geometry.y, geometry.z);
+      const edgeY = project(geometry.x, geometry.y + geometry.radius, geometry.z);
+      const radiusX = Math.max(Math.abs(edgeX.x - centre.x), 5);
+      const radiusY = Math.max(Math.abs(edgeY.y - centre.y), 5);
+      const gfx = this.add.graphics().setDepth(999 - geometry.z * 10);
+      gfx.fillStyle(PAL.gold, 0.13);
+      gfx.fillEllipse(centre.x, centre.y, radiusX * 2, radiusY * 2);
+      gfx.lineStyle(3, 0x071018, 0.76);
+      gfx.strokeEllipse(centre.x, centre.y, radiusX * 2, radiusY * 2);
+      gfx.lineStyle(1.5, PAL.gold, 0.96);
+      gfx.strokeEllipse(centre.x, centre.y, radiusX * 2, radiusY * 2);
+      const label = bodyText(this, centre.x, centre.y, String(index + 1), {
+        originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '6px', color: '#f3e7c3',
+        stroke: '#071018', strokeThickness: 2
+      }).setDepth(gfx.depth + 1);
+      this.ringVisuals.set(geometry.id || `ring-${index + 1}`, {
+        gfx, label, centre, radiusX, radiusY, resolved: false
       });
     }
   }
 
+  refreshRingVisuals() {
+    const crossed = new Set(this.ringProgress?.crossedIds || []);
+    const missed = new Set(this.ringProgress?.missedIds || []);
+    this.ringVisuals?.forEach((visual, id) => {
+      if (visual.resolved || (!crossed.has(id) && !missed.has(id))) return;
+      visual.resolved = true;
+      const success = crossed.has(id);
+      visual.gfx.clear();
+      visual.gfx.fillStyle(success ? PAL.green : 0x8b2c2c, success ? 0.22 : 0.16);
+      visual.gfx.fillEllipse(visual.centre.x, visual.centre.y, visual.radiusX * 2, visual.radiusY * 2);
+      visual.gfx.lineStyle(2, success ? 0x69f0ae : 0xff8a65, 0.95);
+      visual.gfx.strokeEllipse(visual.centre.x, visual.centre.y, visual.radiusX * 2, visual.radiusY * 2);
+      visual.label.setText(success ? 'OK' : 'X').setColor(success ? '#69f0ae' : '#ff8a65');
+      if (!this.settings.reducedMotion) {
+        this.tweens.add({
+          targets: visual.gfx,
+          alpha: success ? 0.62 : 0.42,
+          duration: 150,
+          yoyo: true,
+          ease: 'Cubic.easeOut'
+        });
+        this.tweens.add({
+          targets: visual.label,
+          scaleX: 1.12,
+          scaleY: 1.12,
+          duration: 150,
+          yoyo: true,
+          ease: 'Cubic.easeOut'
+        });
+      }
+    });
+  }
+
+  buildHazardVisuals() {
+    this.hazardVisuals = [];
+    const fog = getHazard(this.hazards, 'fog');
+    if (fog) {
+      const fogBands = [
+        this.add.ellipse(GAME_W * 0.26, CAM.horizonY + 28, GAME_W * 0.82, 72, 0xdde8e5, fog.density * 0.2),
+        this.add.ellipse(GAME_W * 0.74, CAM.horizonY + 48, GAME_W * 0.92, 96, 0xc8d9d8, fog.density * 0.18),
+        this.add.rectangle(GAME_W / 2, CAM.horizonY + 26, GAME_W, 64, 0xd5e1df, fog.density * 0.1)
+      ];
+      fogBands.forEach((band, index) => {
+        band.setDepth(1180 + index).setBlendMode(Phaser.BlendModes.SCREEN);
+        this.hazardVisuals.push(band);
+        if (!this.settings.reducedMotion && index < 2) {
+          this.tweens.add({
+            targets: band,
+            x: band.x + (index ? -18 : 18),
+            duration: 5200 + index * 900,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+          });
+        }
+      });
+    }
+
+    const glare = getHazard(this.hazards, 'glare');
+    if (glare) {
+      const left = glare.corner.includes('left');
+      const top = glare.corner.includes('top');
+      const world = project(
+        (left ? -1 : 1) * this.goalWidth * 0.42,
+        top ? this.goalHeight * 0.9 : this.goalHeight * 0.18,
+        this.zGoal
+      );
+      const radius = 18 + glare.radius * 48;
+      [1, 0.64, 0.32].forEach((factor, index) => {
+        const glow = this.add.circle(world.x, world.y, radius * factor, 0xfff2b3,
+          glare.strength * (0.035 + index * 0.04))
+          .setDepth(1340 + index)
+          .setBlendMode(Phaser.BlendModes.ADD);
+        this.hazardVisuals.push(glow);
+      });
+    }
+
+    const snow = getHazard(this.hazards, 'snow');
+    if (snow && this.textures.exists('spark')) {
+      this.snowEmitter = this.add.particles(0, 0, 'spark', {
+        x: { min: 0, max: GAME_W },
+        y: { min: CAM.horizonY - 16, max: CAM.horizonY + 4 },
+        speedX: { min: -7, max: 4 },
+        speedY: { min: 18, max: 34 },
+        lifespan: { min: 4200, max: 6800 },
+        scale: { start: 0.72, end: 0.24 },
+        alpha: { start: 0.9, end: 0.24 },
+        tint: [0xffffff, 0xd9efff],
+        quantity: 1,
+        frequency: Math.round(125 - snow.density * 62),
+        advance: 1800,
+        maxParticles: 112,
+        maxAliveParticles: 92,
+        reserve: 92
+      }).setDepth(1420);
+      this.hazardVisuals.push(this.snowEmitter);
+    }
+
+    const pressure = this.hazardMap.get('crowd-pressure');
+    if (pressure) {
+      this.pressureMeterGfx = this.add.graphics().setDepth(2001);
+      const label = bodyText(this, 9, GAME_H - 53, 'CROWD PRESSURE', {
+        fontFamily: FONT, fontSize: '5px', color: '#ffcf8a', letterSpacing: 0.25
+      }).setDepth(2002);
+      this.hazardVisuals.push(this.pressureMeterGfx, label);
+    }
+  }
+
+  buildKeepers() {
+    this.keepers?.forEach((keeper) => keeper.destroy?.());
+    this.keepers = this.keeperConfig.instances.map((instance, index) => {
+      const bossBoost = this.keeperConfig.type === 'boss'
+        ? Math.min((this.attempt - 1) * this.keeperConfig.adaptation, 0.18)
+        : 0;
+      const keeper = new Goalkeeper(this, Math.min(instance.skill + bossBoost, 0.96), this.zGoal, {
+        reducedMotion: this.settings.reducedMotion,
+        style: this.level.style,
+        homeX: instance.offsetX,
+        goalWidth: this.goalWidth,
+        goalHeight: this.goalHeight,
+        seed: (((this.levelIndex + 1) * 2654435761) + index * 1013904223) >>> 0
+      });
+      keeper.fklBaseSkill = instance.skill;
+      keeper.fklBaseZ = keeper.z;
+      keeper.fklTargetZ = keeper.z - (this.keeperConfig.type === 'sweeper' ? this.keeperConfig.rushDistance : 0);
+      keeper.fklPrevZ = keeper.z;
+      keeper.draw();
+      return keeper;
+    });
+    this.keeper = this.keepers[0] || null;
+  }
+
+  updateConditions(dt = FIXED_STEP) {
+    // Preserve the start-of-step keeper plane before a sweeper advances. The
+    // collision pass can then solve ball/keeper motion relative to each other.
+    for (const keeper of this.keepers || []) keeper.fklPrevZ = keeper.z;
+
+    const moving = this.level.movingTarget;
+    if (moving && this.activeTarget && this.baseTarget) {
+      const offset = Math.sin(this.simTime * moving.speed + moving.phase) * moving.range;
+      this.activeTarget.x = Phaser.Math.Clamp(this.baseTarget.x + offset, -0.78, 0.78);
+      const geometry = targetGeometry(this.activeTarget, this.goalWidth, this.goalHeight);
+      const centre = project(geometry.x, geometry.y, this.zGoal + 0.08);
+      this.targetGfx?.setX(centre.x - this.targetAnchorScreenX);
+    }
+
+    if (this.ball) {
+      this.currentWind = getWindVectorAt(this.level.wind, this.simTime, {
+        gustPhase: this.level.distance
+      });
+      this.ball.setWind(this.currentWind);
+      if (this.windTxt) {
+        const horizontal = this.currentWind.x;
+        const vertical = this.currentWind.y;
+        const arrow = Math.abs(horizontal) < 0.06 ? (vertical >= 0 ? '^' : 'v') : horizontal > 0 ? '>' : '<';
+        this.windTxt.setText(`WIND ${this.currentWind.magnitude.toFixed(1)} ${arrow}`);
+      }
+    }
+
+    if (this.keeperConfig.type === 'sweeper' && this.state === 'FLIGHT' &&
+        this.flightT >= this.keeperConfig.triggerFlightTime) {
+      for (const keeper of this.keepers) {
+        keeper.z = Math.max(keeper.fklTargetZ, keeper.z - this.keeperConfig.rushSpeed * dt);
+      }
+    }
+
+    const pressure = this.hazardMap.get('crowd-pressure');
+    if (pressure && this.pressureMeterGfx) {
+      const pulse = 0.5 + 0.5 * Math.sin(this.simTime * pressure.pulseSpeed * Math.PI * 2);
+      const amount = Phaser.Math.Clamp(pressure.intensity * (0.72 + pulse * 0.28), 0, 1);
+      this.pressureMeterGfx.clear();
+      this.pressureMeterGfx.fillStyle(0x071018, 0.78).fillRect(9, GAME_H - 45, 72, 6);
+      this.pressureMeterGfx.fillStyle(amount > 0.66 ? 0xff8a65 : PAL.gold, 0.95)
+        .fillRect(10, GAME_H - 44, 70 * amount, 4);
+    }
+  }
+
   buildWall() {
-    if (this.wall) this.wall.destroy();
-    if (this.level.wall <= 0) {
+    this.walls?.forEach((wall) => wall.destroy());
+    this.walls = [];
+    this.wallPlanesChecked = new Set();
+    if (this.wallConfig.count <= 0) {
       this.wall = null;
       return;
     }
@@ -515,7 +944,8 @@ export class GameScene extends Phaser.Scene {
     // toward the near post - the far-post curler is always a real option.
     const t = (this.zWall - CAM.ballDist) / (this.zGoal - CAM.ballDist);
     const lineX = this.level.offsetX * (1 - t) + Math.sign(this.level.offsetX) * 0.3;
-    this.wall = new Wall(this, this.level.wall, this.zWall, lineX);
+    this.wall = new Wall(this, this.wallConfig, this.zWall, lineX);
+    this.walls = [this.wall];
   }
 
   buildHud() {
@@ -527,7 +957,7 @@ export class GameScene extends Phaser.Scene {
     });
 
     makeButton(this, 34, 18, 54, 23, 'EXIT', () => {
-      this.scene.start(this.mode === 'career' ? 'LevelSelect' : 'Menu');
+      this.startScene(this.mode === 'career' ? 'LevelSelect' : 'Menu');
     }, {
       color: PAL.panelHi, hover: PAL.blue, border: PAL.borderDark,
       icon: 'icon-back', iconScale: 0.62, iconX: 12,
@@ -582,13 +1012,20 @@ export class GameScene extends Phaser.Scene {
           .setScale(11 / iconTexW).setDepth(2000);
         this.attemptIcons.push(icon);
       }
-      const windX = typeof this.level.wind === 'object' ? Number(this.level.wind.x || 0) : Number(this.level.wind || 0);
-      if (Math.abs(windX) >= 0.1) {
-        bodyText(this, GAME_W - 64, 28, `WIND ${Math.abs(windX).toFixed(1)} ${windX > 0 ? '>' : '<'}`, {
+      const wind = getWindVectorAt(this.level.wind, this.simTime);
+      if (wind.magnitude >= 0.1 || this.level.wind?.rotation) {
+        const arrow = Math.abs(wind.x) < 0.06 ? (wind.y >= 0 ? '^' : 'v') : wind.x > 0 ? '>' : '<';
+        this.windTxt = bodyText(this, GAME_W - 64, 28, `WIND ${wind.magnitude.toFixed(1)} ${arrow}`, {
           originX: 0.5, fontSize: '6px', color: '#f3c449'
         }).setDepth(2000);
       }
-      const techniqueHint = this.level.objective?.type === 'dip' || this.level.objective?.type === 'loft'
+      const techniqueHint = this.level.rings?.length
+        ? 'THREAD EVERY HOOP  ·  THEN FINISH THE SHOT'
+        : this.level.objective?.type === 'blind-shot'
+          ? 'COMMIT YOUR LINE  ·  THE GUIDE VANISHES ON RUN-UP'
+          : this.level.objective?.type === 'bank-shot'
+            ? 'BANK IT IN  ·  POST OR CROSSBAR CONTACT REQUIRED'
+            : this.level.objective?.type === 'dip' || this.level.objective?.type === 'loft'
         ? 'START AT THE BALL  ·  STEEPER SWIPE = MORE LOFT'
         : this.level.objective?.type === 'low-shot'
           ? 'START AT THE BALL  ·  SHORT FLAT SWIPE UNDER THE JUMP'
@@ -749,8 +1186,56 @@ export class GameScene extends Phaser.Scene {
 
   // ---------------------------------------------------------------- shooting
 
-  takeShot(shot) {
+  prepareShot(input = {}) {
+    const shot = {
+      ...input,
+      vx: Number(input.vx) || 0,
+      vy: Number(input.vy) || 0,
+      vz: Number(input.vz) || 0,
+      spin: Number(input.spin) || 0
+    };
+    const authoredPower = Phaser.Math.Clamp(
+      Number.isFinite(input.power) ? input.power : 0.82,
+      0,
+      1
+    );
+    const maxPower = Phaser.Math.Clamp(this.level.shotRules?.maxPower ?? 1, 0.45, 1);
+    let effectivePower = Math.min(authoredPower, maxPower);
+    let velocityScale = authoredPower > 1e-6 ? effectivePower / authoredPower : 1;
+
+    const slippery = this.hazardMap.get('slippery');
+    const jitterAmount = Math.max(
+      Number(this.level.shotRules?.powerJitter || 0),
+      Number(slippery?.powerJitter || 0)
+    );
+    if (jitterAmount > 0) {
+      const jitter = getJitteredPower(effectivePower, {
+        amount: jitterAmount,
+        frequency: slippery?.frequency,
+        elapsedSeconds: this.simTime,
+        seed: `${this.level.id}:${this.attempt}`,
+        maxPower
+      });
+      velocityScale *= effectivePower > 1e-6 ? jitter.power / effectivePower : 1;
+      effectivePower = jitter.power;
+      shot.powerJitter = jitter.delta;
+    }
+
+    shot.vx *= velocityScale;
+    shot.vy *= velocityScale;
+    shot.vz *= velocityScale;
+    shot.power = effectivePower;
+    shot.authoredPower = authoredPower;
+    shot.powerCapped = authoredPower > maxPower + 1e-6;
+    const guideMode = this.level.shotRules?.aimGuide || this.level.objective?.guideMode || 'always';
+    shot.aimGuideHidden = guideMode === 'hide-on-run-up' || guideMode === 'commit';
+    shot.guideCommitted = shot.aimGuideHidden;
+    return shot;
+  }
+
+  takeShot(inputShot) {
     if (this.state !== 'AIMING' || this.over) return;
+    const shot = this.prepareShot(inputShot);
     this.state = 'WINDUP';
     this.flightT = 0;
     this.slowmoUsed = false;
@@ -764,6 +1249,7 @@ export class GameScene extends Phaser.Scene {
       this.tweens.add({ targets: this.objectiveUi, alpha: 0, duration: 240, ease: 'Sine.easeOut' });
     }
     this.lastShot = shot;
+    this.aimGuideHidden = shot.aimGuideHidden;
     this.wallClearanceY = null;
     Audio.prepare();
     this.kicker?.playKick({
@@ -778,7 +1264,18 @@ export class GameScene extends Phaser.Scene {
     Audio.kick(shot.power);
     if (Math.abs(shot.spin) > 0.45) Audio.whoosh(Math.abs(shot.spin));
     this.ball.kick(shot.vx, shot.vy, shot.vz, shot.spin);
-    this.keeper.onShot(this.ball, this.zGoal);
+    const wallContext = {
+      seed: `${this.level.id}:${this.attempt}`,
+      attempt: this.attempt,
+      levelId: this.level.id,
+      vx: shot.vx,
+      targetX: this.ball.predictAt(this.zWall)?.x,
+      ball: this.ball,
+      inFlight: true
+    };
+    this.wall?.onStrike(wallContext);
+    this.wall?.onFlightStart(wallContext);
+    this.keepers.forEach((keeper) => keeper.onShot(this.ball, this.zGoal));
   }
 
   shootDebug(vx, vy, vz, spin) {
@@ -794,6 +1291,9 @@ export class GameScene extends Phaser.Scene {
     if (this.cameras.main.zoom !== RENDER_SCALE) {
       this.cameras.main.setZoom(RENDER_SCALE).centerOn(GAME_W / 2, GAME_H / 2);
     }
+    // Pause and terminal cards intentionally freeze the simulated match. The
+    // Scene remains active so keyboard/pointer UI and overlay tweens still work.
+    if (this.state === 'PAUSED' || this.state === 'OVERLAY' || this.state === 'TRANSITIONING') return;
     // Physics runs at a fixed cadence so the same gesture produces the same
     // shot at 30, 60, 120 Hz and after small browser stalls. The mode clock is
     // real-time based and intentionally pauses during result cards.
@@ -838,8 +1338,8 @@ export class GameScene extends Phaser.Scene {
     // Very high-refresh displays can produce frames shorter than one fixed
     // step. Presentation still updates while the world waits for the next tick.
     if (steps === 0 && this.state === 'AIMING') {
-      if (this.wall) this.wall.draw();
-      this.keeper.draw();
+      this.walls.forEach((wall) => wall.draw());
+      this.keepers.forEach((keeper) => keeper.draw());
     }
 
     this.drawBall();
@@ -848,10 +1348,13 @@ export class GameScene extends Phaser.Scene {
 
   simulate(dt, renderTime) {
     this.simTime += dt;
-    this.updateConditions();
+    this.updateConditions(dt);
     this.frameCollisionCooldown = Math.max(0, this.frameCollisionCooldown - dt);
-    if (this.wall) this.wall.update(dt);
-    this.keeper.update(dt, renderTime);
+    this.walls.forEach((wall) => wall.update(dt, this.simTime, {
+      inFlight: this.state === 'FLIGHT',
+      struck: this.state === 'FLIGHT' || this.state === 'RESULT'
+    }));
+    this.keepers.forEach((keeper) => keeper.update(dt, renderTime));
     if (this.netPhysics?.active) {
       this.netPhysics.update(dt);
       if (this.netPhysics.needsRedraw) this.netPhysics.draw(this.netBack, project, { alpha: 0.36 });
@@ -862,6 +1365,37 @@ export class GameScene extends Phaser.Scene {
       const vy = this.ball.vy;
       const vz = this.ball.vz;
       this.ball.update(dt);
+      const snow = this.hazardMap.get('snow');
+      if (snow && this.ball.flying) {
+        const damping = Math.exp(-snow.drag * dt);
+        this.ball.vx *= damping;
+        this.ball.vy *= damping;
+        this.ball.vz *= damping;
+      }
+      if (this.state === 'FLIGHT' && this.level.rings?.length) {
+        this.ringProgress = updateRingProgress(
+          this.ringProgress,
+          this.level.rings,
+          this.ball.prev,
+          this.ball,
+          {
+            startZ: CAM.ballDist,
+            goalZ: this.zGoal,
+            goalWidth: this.goalWidth,
+            goalHeight: this.goalHeight,
+            ballRadius: BALL_R,
+            forgiveness: 0.08
+          }
+        );
+        if (this.ringProgress.newlyCrossedIds.length || this.ringProgress.newlyMissedIds.length) {
+          this.refreshRingVisuals();
+          if (this.ringProgress.newlyCrossedIds.length) {
+            this.showSwipeHintMessage(
+              `HOOP ${this.ringProgress.count}/${this.ringProgress.required}  ·  x${this.ringProgress.multiplier.toFixed(2)}`
+            );
+          }
+        }
+      }
       if (this.ball.inNet) this.checkNetContact(vx, vy, vz);
     }
     if (this.state === 'FLIGHT') {
@@ -889,14 +1423,14 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (!this.netSideRippled) {
-      const sideLimit = GOAL_W / 2 - BALL_R;
+      const sideLimit = this.goalWidth / 2 - BALL_R;
       const hitSide = Math.abs(ball.x) >= sideLimit - 1e-6 && vx * Math.sign(ball.x) > 1.2;
-      const hitRoof = ball.y >= GOAL_H - BALL_R - 1e-6 && vy > 1.2;
+      const hitRoof = ball.y >= this.goalHeight - BALL_R - 1e-6 && vy > 1.2;
       if (hitSide || hitRoof) {
         this.netSideRippled = true;
         net.impact({
-          x: hitSide ? Math.sign(ball.x) * (GOAL_W / 2 - 0.5) : ball.x,
-          y: hitRoof ? GOAL_H * 0.9 : ball.y,
+          x: hitSide ? Math.sign(ball.x) * (this.goalWidth / 2 - 0.5) : ball.x,
+          y: hitRoof ? this.goalHeight * 0.9 : ball.y,
           speed: Math.abs(hitSide ? vx : vy) * 2,
           strength: 0.55,
           radius: 0.75
@@ -909,23 +1443,37 @@ export class GameScene extends Phaser.Scene {
   checkFlight() {
     const ball = this.ball;
 
-    // wall jumps just before the ball arrives
-    if (this.wall && !this.wall.jumped && ball.vz > 0.5) {
-      if ((this.zWall - ball.z) / ball.vz < 0.34) this.wall.jump();
-    }
-
-    if (this.wall && ball.crossed(this.zWall)) {
-      const pt = ball.pointAt(this.zWall);
-      this.wallClearanceY = pt.y;
-      const wallContact = this.wall.contact(pt);
-      if (wallContact) {
+    // Every authored wall row is its own physical plane. This is what makes a
+    // staggered double wall materially different instead of decorative clones.
+    if (this.wall) {
+      const planes = this.wall.getCollisionPlanes();
+      if (ball.vz > 0.5) {
+        for (const plane of planes) {
+          if ((plane.z - ball.z) / ball.vz < 0.34 && plane.z > ball.z) this.wall.jump(plane.z);
+        }
+      }
+      for (const plane of planes) {
+        const planeKey = `row-${plane.row}`;
+        if (this.wallPlanesChecked.has(planeKey)) continue;
+        const crossing = sweepMovingZPlane(
+          ball.prev,
+          ball,
+          Number.isFinite(plane.prevZ) ? plane.prevZ : plane.z,
+          plane.z
+        );
+        if (!crossing) continue;
+        this.wallPlanesChecked.add(planeKey);
+        const pt = { x: crossing.x, y: crossing.y };
+        if (this.wallClearanceY == null) this.wallClearanceY = pt.y;
+        const wallContact = this.wall.contactAtZ(pt, plane.z);
+        if (!wallContact) continue;
         this.wall.impact(wallContact, pt, ball);
         ball.vz *= -0.25;
         ball.vx = -ball.vx * 0.32 + Math.sign(pt.x - (this.wall.centerX || 0) || 1) * 0.9;
         ball.vy = Math.min(ball.vy * 0.4 + 1.5, 5);
         ball.spin = 0;
-        const spos = project(pt.x, pt.y, this.zWall);
-        this.impact.explode(8, spos.x, spos.y);
+        const spos = project(pt.x, pt.y, crossing.planeZ);
+        this.impact.explode(wallContact.part === 'leg' ? 11 : 8, spos.x, spos.y);
         this.playImpactShake(90, 0.72);
         Audio.save();
         this.resolve('WALL');
@@ -935,12 +1483,20 @@ export class GameScene extends Phaser.Scene {
 
     // Keeper contact is resolved at the keeper's actual depth and against the
     // current animated body/hands, not retroactively at the goal line.
-    if (!this.keeperContactChecked && ball.crossed(this.keeper.z)) {
-      this.keeperContactChecked = true;
-      const pt = ball.pointAt(this.keeper.z);
-      const contact = this.keeper.contact(pt, ball);
+    for (const keeper of this.keepers) {
+      if (this.keeperContactChecked.has(keeper)) continue;
+      const crossing = sweepMovingZPlane(
+        ball.prev,
+        ball,
+        Number.isFinite(keeper.fklPrevZ) ? keeper.fklPrevZ : keeper.z,
+        keeper.z
+      );
+      if (!crossing) continue;
+      this.keeperContactChecked.add(keeper);
+      const pt = { x: crossing.x, y: crossing.y };
+      const contact = keeper.contact(pt, ball);
       if (contact?.result === 'catch') {
-        this.keeper.catchBall(pt);
+        keeper.catchBall(pt);
         ball.flying = false;
         this.ballCaught = true;
         Audio.save();
@@ -948,12 +1504,12 @@ export class GameScene extends Phaser.Scene {
         return;
       }
       if (contact?.result === 'parry') {
-        this.keeper.impact(pt, ball);
-        ball.vz = -(6.5 + this.keeper.skill * 2);
-        ball.vx += Math.sign(pt.x - this.keeper.x || this.keeper.diveDir) * (3.2 + this.keeper.skill * 1.8);
+        keeper.impact(pt, ball);
+        ball.vz = -(6.5 + keeper.skill * 2);
+        ball.vx += Math.sign(pt.x - keeper.x || keeper.diveDir) * (3.2 + keeper.skill * 1.8);
         ball.vy = Math.max(ball.vy * 0.25, 2.8);
         ball.spin *= -0.25;
-        const spos = project(pt.x, pt.y, this.keeper.z);
+        const spos = project(pt.x, pt.y, crossing.planeZ);
         this.impact.explode(12, spos.x, spos.y);
         this.playImpactShake(80, 0.68);
         Audio.save();
@@ -967,11 +1523,11 @@ export class GameScene extends Phaser.Scene {
     // shots resolve at full speed so the retry loop stays fast.
     if (!this.settings.reducedMotion && !this.slowmoUsed && ball.z > this.zWall && ball.z < this.zGoal - 2) {
       const p = ball.predictAt(this.zGoal);
-      if (p.reached && Math.abs(p.x) < GOAL_W / 2 && p.y < GOAL_H) {
+      if (p.reached && Math.abs(p.x) < this.goalWidth / 2 && p.y < this.goalHeight) {
         this.slowmoUsed = true;
-        const nearPost = Math.abs(p.x) > GOAL_W / 2 - 0.9;
-        const underBar = p.y > GOAL_H - 0.55;
-        if (isTopCorner(p, GOAL_W, GOAL_H) || nearPost || underBar) {
+        const nearPost = Math.abs(p.x) > this.goalWidth / 2 - 0.9;
+        const underBar = p.y > this.goalHeight - 0.55;
+        if (isTopCorner(p, this.goalWidth, this.goalHeight) || nearPost || underBar) {
           this.slowmoT = 0.4;
           this.simSpeed = 0.45;
         }
@@ -979,8 +1535,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     const sweptFrame = sweepGoalFrame(ball, this.zGoal, {
-      goalWidth: GOAL_W,
-      goalHeight: GOAL_H,
+      goalWidth: this.goalWidth,
+      goalHeight: this.goalHeight,
       postRadius: POST_R,
       ballRadius: BALL_R
     });
@@ -992,8 +1548,8 @@ export class GameScene extends Phaser.Scene {
     if (ball.crossed(this.zGoal)) {
       const pt = ball.pointAt(this.zGoal);
       const contact = classifyGoalPlane(pt, {
-        goalWidth: GOAL_W,
-        goalHeight: GOAL_H,
+        goalWidth: this.goalWidth,
+        goalHeight: this.goalHeight,
         postRadius: POST_R,
         ballRadius: BALL_R
       });
@@ -1025,6 +1581,7 @@ export class GameScene extends Phaser.Scene {
 
   handleFrameImpact(contact, point) {
     this.frameTouched = true;
+    if (contact?.frame) this.frameContacts.add(contact.frame);
     this.frameImpactT = this.simTime;
     this.frameCollisionCooldown = 0.045;
     reboundFromGoalFrame(this.ball, point, contact, this.zGoal, 0.72);
@@ -1038,22 +1595,33 @@ export class GameScene extends Phaser.Scene {
     // A scene transition or duplicate collision must never finish an old shot.
     // Phaser text textures are already released during shutdown, so letting a
     // late result write into the retired HUD can freeze the next match.
-    if (this.state === 'RESULT' || this.state === 'OVERLAY' || !this.sys?.isActive?.()) return;
+    if (this.state === 'RESULT' || this.state === 'OVERLAY' || this.state === 'PAUSED' ||
+        this.state === 'TRANSITIONING' || !this.sys?.isActive?.()) return;
     this.state = 'RESULT';
     PlatformService.gameplayStop();
     this.simSpeed = 1;
     this.slowmoT = 0;
     this.swipe.enabled = false;
 
-    const shotRating = scoreShot({
+    let shotRating = scoreShot({
       outcome,
       point: pt,
       shot: this.lastShot,
       streak: outcome === 'GOAL' ? this.combo : 0,
       target: this.activeTarget,
-      goalWidth: GOAL_W,
-      goalHeight: GOAL_H
+      goalWidth: this.goalWidth,
+      goalHeight: this.goalHeight
     });
+    if (outcome === 'GOAL' && (this.ringProgress?.multiplier || 1) > 1) {
+      const points = Math.round(shotRating.points * this.ringProgress.multiplier);
+      shotRating = {
+        ...shotRating,
+        points,
+        grade: points >= 2350 ? 'S' : points >= 1850 ? 'A' : points >= 1450 ? 'B' : 'C',
+        label: `${shotRating.label} · hoops`,
+        ringMultiplier: this.ringProgress.multiplier
+      };
+    }
     this.lastShotRating = shotRating;
     let isTopCorner = shotRating.topCorner;
     switch (outcome) {
@@ -1061,10 +1629,13 @@ export class GameScene extends Phaser.Scene {
         this.netTouched = false;
         this.netSideRippled = false;
         this.netEntrySpeed = Math.hypot(this.ball.vx, this.ball.vy, this.ball.vz);
-        this.ball.enterNet(this.zGoal + 2.15);
+        this.ball.enterNet(this.zGoal + 2.15, {
+          width: this.goalWidth,
+          height: this.goalHeight
+        });
         this.netFront?.setVisible(true);
-        this.time.delayedCall(180, () => this.kicker?.celebrate(720));
-        this.time.delayedCall(150, () => this.keeper?.reactToGoal());
+        this.schedule(180, () => this.kicker?.celebrate(720));
+        this.schedule(150, () => this.keepers.forEach((keeper) => keeper.reactToGoal()));
         const spos = project(pt.x, pt.y, this.zGoal);
         this.confetti.explode(60, spos.x, spos.y);
         this.showBanner(isTopCorner ? 'TOP BINS' : shotRating.grade === 'S' ? 'WORLD CLASS' : 'GOAL', '#f2c832');
@@ -1116,9 +1687,9 @@ export class GameScene extends Phaser.Scene {
       }
       this.scoreTxt.setText(`SCORE ${this.score}`);
       this.comboTxt?.setText(this.combo > 1 ? `x${this.combo} COMBO` : `${this.goals} GOALS`);
-      this.time.delayedCall(this.resultResetDelay(outcome, 1150), () => {
+      this.schedule(this.resultResetDelay(outcome, 1150), () => {
         if (!this.over) {
-          this.scene.restart({
+          this.restartCurrentLevel({
             mode: 'arcade', score: this.score, goals: this.goals,
             combo: this.combo, timeLeft: this.timeLeft
           });
@@ -1168,19 +1739,19 @@ export class GameScene extends Phaser.Scene {
     this.dailyShotsTxt?.setText(`${this.attempt}/${this.maxAttempts}`);
 
     if (this.attempt >= this.maxAttempts) {
-      this.time.delayedCall(this.resultResetDelay(outcome, 1400), () => this.showDailyComplete());
+      this.schedule(this.resultResetDelay(outcome, 1400), () => this.showDailyComplete());
       return;
     }
 
     this.attempt++;
     const remaining = this.maxAttempts - this.attempt + 1;
     this.dailyShotsTxt?.setText(`${this.attempt}/${this.maxAttempts}`);
-    this.time.delayedCall(550, () => this.showSwipeHintMessage(
+    this.schedule(550, () => this.showSwipeHintMessage(
       outcome === 'GOAL'
         ? `${rating.label.toUpperCase()}  ·  ${remaining} SHOTS LEFT`
         : `${remaining} SHOTS LEFT  ·  BUILD THE SCORE`
     ));
-    this.time.delayedCall(this.resultResetDelay(outcome), () => this.resetAttempt());
+    this.schedule(this.resultResetDelay(outcome), () => this.resetAttempt());
   }
 
   objectiveCheck(outcome, point, rating) {
@@ -1195,6 +1766,32 @@ export class GameScene extends Phaser.Scene {
         MISS: 'OFF TARGET — FINISH THE SWIPE TOWARD GOAL'
       };
       return { qualifies: false, finish: null, reason: reasons[outcome] || 'SHOT DID NOT COUNT' };
+    }
+
+    const advanced = evaluateAdvancedObjective({
+      objective,
+      outcome,
+      point,
+      shot,
+      rating,
+      target: this.activeTarget,
+      targetHit: rating.targetHit,
+      frameTouched: this.frameTouched,
+      frameContacts: [...this.frameContacts],
+      ringProgress: this.ringProgress,
+      aimGuideHidden: this.aimGuideHidden,
+      zoneHit: rating.targetHit ? this.activeTarget?.number : null,
+      goalDimensions: this.goalDimensions
+    });
+    if (advanced.handled) {
+      const finish = rating.topCorner
+        ? 'top-corner'
+        : Math.abs(shot.spin || 0) >= 0.34
+          ? 'curve'
+          : (shot.power ?? 0) >= 0.86
+            ? 'power'
+            : point?.y < 0.95 ? 'low' : 'placed';
+      return { qualifies: advanced.qualifies, finish, reason: advanced.reason };
     }
 
     const curveAmount = Math.abs(shot.spin || 0);
@@ -1278,7 +1875,7 @@ export class GameScene extends Phaser.Scene {
       this.lastReward = Math.max(SaveManager.getCoins() - coinsBefore, 0);
       PlatformService.reportProgress(((this.levelIndex + 1) / LEVELS.length) * 100);
       if (this.levelIndex === LEVELS.length - 1) PlatformService.happyTime();
-      this.time.delayedCall(this.resultResetDelay(outcome, 1450), () => this.showLevelClear(stars));
+      this.schedule(this.resultResetDelay(outcome, 1450), () => this.showLevelClear(stars));
       return;
     }
 
@@ -1286,29 +1883,35 @@ export class GameScene extends Phaser.Scene {
     this.attempt++;
     const remaining = Math.max(this.maxAttempts - this.attempt + 1, 0);
     if (this.attempt > this.maxAttempts) {
-      this.time.delayedCall(this.resultResetDelay(outcome, 1350), () => this.showLevelFailed());
+      this.schedule(this.resultResetDelay(outcome, 1350), () => this.showLevelFailed());
     } else {
       const message = scored && !check.qualifies
         ? check.reason
         : scored ? `${this.goalsThisLevel}/${needed} DONE — ${remaining} SHOTS LEFT` : `${check.reason}  ·  ${remaining} LEFT`;
-      this.time.delayedCall(550, () => this.showSwipeHintMessage(message));
-      this.time.delayedCall(this.resultResetDelay(outcome), () => this.resetAttempt());
+      this.schedule(550, () => this.showSwipeHintMessage(message));
+      this.schedule(this.resultResetDelay(outcome), () => this.resetAttempt());
     }
   }
 
   resultResetDelay(outcome, minimum = 750) {
     if (outcome !== 'SAVE' && outcome !== 'CAUGHT') return minimum;
-    const keeperHold = this.keeper?.getResultHoldMs?.() || minimum;
+    const keeperHold = Math.max(
+      minimum,
+      ...this.keepers.map((keeper) => keeper.getResultHoldMs?.() || minimum)
+    );
     return Math.max(minimum, Math.min(keeperHold, 1350));
   }
 
   resetAttempt() {
     if (this.state === 'OVERLAY') return;
     this.ball.reset(this.level.offsetX);
-    this.ball.setWind(this.level.wind || 0);
+    this.ball.setGoalBounds(this.goalWidth, this.goalHeight);
+    this.currentWind = getWindVectorAt(this.level.wind, this.simTime);
+    this.ball.setWind(this.currentWind);
     this.ballCaught = false;
-    this.keeperContactChecked = false;
+    this.keeperContactChecked = new Set();
     this.frameTouched = false;
+    this.frameContacts = new Set();
     this.frameImpactT = null;
     this.frameCollisionCooldown = 0;
     this.netFront?.setVisible(false);
@@ -1318,15 +1921,36 @@ export class GameScene extends Phaser.Scene {
     if (this.netPhysics?.needsRedraw) this.netPhysics.draw(this.netBack, project, { alpha: 0.28 });
     this.ballSpr.setVisible(true);
     this.shadowSpr.setVisible(true);
-    this.keeper.reset();
+    this.keepers.forEach((keeper) => {
+      keeper.reset();
+      keeper.x = keeper.homeX;
+      keeper.z = keeper.fklBaseZ;
+      if (this.keeperConfig.type === 'boss') {
+        keeper.skill = Math.min(
+          (keeper.fklBaseSkill ?? keeper.skill) + (this.attempt - 1) * this.keeperConfig.adaptation,
+          0.96
+        );
+      }
+      keeper.draw();
+    });
     this.kicker?.cancelSequence().setPose('ready');
     this.buildWall();
+    this.ringVisuals?.forEach((visual) => {
+      visual.gfx?.destroy?.();
+      visual.label?.destroy?.();
+    });
+    this.drawRings();
+    this.ringProgress = createRingProgress(
+      this.level.rings,
+      this.level.objective?.ringsRequired ?? this.level.rings?.length
+    );
     this.trailPts = [];
     this.trailGfx.clear();
     this.prevBallScreen = null;
     this.ballGhosts?.forEach((ghost) => ghost.spr.setVisible(false));
     this.simSpeed = 1;
     this.slowmoT = 0;
+    this.aimGuideHidden = false;
     this.state = 'AIMING';
     this.swipe.enabled = true;
     if (this.objectiveUi) {
@@ -1351,10 +1975,10 @@ export class GameScene extends Phaser.Scene {
       `Goals: ${this.goals}  •  Best: ${SaveManager.getBestArcade()}`,
       `+${runReward} COINS`
     ], [
-      { label: 'RETRY', color: 0xb85818, hover: 0xd87828, cb: () => this.scene.restart({ mode: 'arcade' }) },
-      { label: 'MENU', color: 0x37474f, hover: 0x546e7a, cb: () => this.scene.start('Menu') }
+      { label: 'RETRY', color: 0xb85818, hover: 0xd87828, cb: () => this.restartCurrentLevel({ mode: 'arcade' }) },
+      { label: 'MENU', color: 0x37474f, hover: 0x546e7a, cb: () => this.startScene('Menu') }
     ]);
-    this.time.delayedCall(1150, () => this.requestNaturalBreakAd());
+    this.schedule(1150, () => this.requestNaturalBreakAd());
   }
 
   showDailyComplete() {
@@ -1374,16 +1998,16 @@ export class GameScene extends Phaser.Scene {
     } else {
       buttons.push({
         label: 'RETRY', color: PAL.blue, hover: PAL.blueHi,
-        cb: () => this.scene.restart({ mode: 'daily', dailyDate: this.dailyDate })
+        cb: () => this.restartCurrentLevel({ mode: 'daily', dailyDate: this.dailyDate })
       });
     }
     buttons.push({
       label: 'MISSIONS', color: PAL.goldDark, hover: PAL.gold,
-      cb: () => this.scene.start('Progress', { tab: 'daily' })
+      cb: () => this.startScene('Progress', { tab: 'daily' })
     });
     buttons.push({
       label: 'MENU', color: PAL.panelHi, hover: PAL.border,
-      cb: () => this.scene.start('Menu')
+      cb: () => this.startScene('Menu')
     });
 
     const rewardLine = result.reward > 0
@@ -1397,7 +2021,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   async requestDailyBonus(reward) {
-    if (this.adRequestActive || !PlatformService.supportsAds()) return;
+    if (this.adRequestActive || !this.isSessionActive() || !PlatformService.supportsAds()) return;
+    const token = this.sessionToken;
     this.adRequestActive = true;
     const wasMuted = Audio.muted;
     const blocker = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, PAL.ink, 0.28)
@@ -1405,17 +2030,28 @@ export class GameScene extends Phaser.Scene {
     const status = bodyText(this, GAME_W / 2, GAME_H - 18, 'REWARD VIDEO', {
       originX: 0.5, fontFamily: FONT, fontSize: '7px', color: '#f3c449', letterSpacing: 0.5
     }).setDepth(4001);
-    const shown = await PlatformService.requestRewardedAd({
-      onStarted: () => Audio.setMuted(true)
-    });
-    Audio.setMuted(Boolean(wasMuted || this.settings.muted));
-    blocker.destroy();
-    status.destroy();
-    this.adRequestActive = false;
-    if (!shown) return;
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      if (this.activeAdCleanup === cleanup) this.activeAdCleanup = null;
+      this.adRequestActive = false;
+      Audio.setMuted(Boolean(wasMuted || this.settings?.muted));
+      if (blocker.active) blocker.destroy();
+      if (status.active) status.destroy();
+    };
+    this.activeAdCleanup = cleanup;
+    const shown = await this.awaitSessionTask(PlatformService.requestRewardedAd({
+      onStarted: () => {
+        if (!cleaned && token === this.sessionToken) Audio.setMuted(true);
+      }
+    }));
+    const canContinue = this.isSessionActive(token) && this.state === 'OVERLAY';
+    cleanup();
+    if (!shown || !canContinue) return;
     const bonus = SaveManager.claimDailyBonus(this.dailyDate, reward);
     if (bonus.success) Audio.coin();
-    this.scene.start('Progress', { tab: 'daily' });
+    this.startScene('Progress', { tab: 'daily' });
   }
 
   showLevelClear(stars) {
@@ -1425,23 +2061,23 @@ export class GameScene extends Phaser.Scene {
     if (this.levelIndex + 1 < LEVELS.length) {
       buttons.push({
         label: 'NEXT >', color: 0x2e7d32, hover: 0x43a047,
-        cb: () => this.scene.restart({ mode: 'career', levelIndex: this.levelIndex + 1 })
+        cb: () => this.restartCurrentLevel({ mode: 'career', levelIndex: this.levelIndex + 1 })
       });
     }
     buttons.push({
       label: 'REPLAY', color: 0x1976d2, hover: 0x2196f3,
-      cb: () => this.scene.restart({ mode: 'career', levelIndex: this.levelIndex })
+      cb: () => this.restartCurrentLevel({ mode: 'career', levelIndex: this.levelIndex })
     });
     buttons.push({
       label: 'LEVELS', color: 0x37474f, hover: 0x546e7a,
-      cb: () => this.scene.start('LevelSelect')
+      cb: () => this.startScene('LevelSelect')
     });
     const lines = [
       `${this.lastShotRating?.label || 'Objective complete'}  •  ${this.bestShotScore} pts`,
       this.lastReward > 0 ? `+${this.lastReward} COINS EARNED` : 'BEST REWARD ALREADY CLAIMED'
     ];
     this.showOverlay('LEVEL CLEAR', lines, buttons, stars);
-    this.time.delayedCall(1150, () => this.requestNaturalBreakAd());
+    this.schedule(1150, () => this.requestNaturalBreakAd());
   }
 
   showLevelFailed() {
@@ -1453,24 +2089,32 @@ export class GameScene extends Phaser.Scene {
     ], [
       {
         label: 'RETRY', color: 0x1976d2, hover: 0x2196f3,
-        cb: () => this.scene.restart({ mode: 'career', levelIndex: this.levelIndex })
+        cb: () => this.restartCurrentLevel({ mode: 'career', levelIndex: this.levelIndex })
       },
-      { label: 'LEVELS', color: 0x37474f, hover: 0x546e7a, cb: () => this.scene.start('LevelSelect') }
+      { label: 'LEVELS', color: 0x37474f, hover: 0x546e7a, cb: () => this.startScene('LevelSelect') }
     ]);
   }
 
   showOverlay(title, lines, buttons, stars = -1) {
+    if (this.terminalOverlayShown || this.transitioning || !this.sessionAlive) return;
+    this.terminalOverlayShown = true;
+    this.over = true;
+    this.state = 'OVERLAY';
     this.swipe.enabled = false;
+    this.swipe.cancel();
+    this.cancelScheduledCalls();
+    const overlayObjects = this.terminalOverlayObjects;
     const dim = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, PAL.ink, 0.74)
       .setDepth(2999).setInteractive();
-    void dim;
+    overlayObjects.push(dim);
 
     const panel = this.add.graphics().setDepth(3000);
-    drawPanel(panel, GAME_W / 2 - 125, 47, 250, 178, {
+    drawPanel(panel, GAME_W / 2 - 145, 43, 290, 184, {
       fill: PAL.panel, border: PAL.goldDark, corner: PAL.gold
     });
+    overlayObjects.push(panel);
 
-    titleText(this, GAME_W / 2, 75, title, '18px', '#f3c449').setDepth(3001);
+    overlayObjects.push(titleText(this, GAME_W / 2, 73, title, '17px', '#f3c449').setDepth(3001));
 
     if (stars >= 0) {
       for (let i = 0; i < 3; i++) {
@@ -1479,6 +2123,7 @@ export class GameScene extends Phaser.Scene {
           112,
           i < stars ? 'icon-star' : 'icon-star-empty'
         ).setDepth(3001).setScale(this.settings.reducedMotion ? 1 : 0.94);
+        overlayObjects.push(star);
         if (!this.settings.reducedMotion) {
           this.tweens.add({
             targets: star,
@@ -1498,29 +2143,38 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    const lineY = stars >= 0 ? 147 : 108;
-    lines.forEach((line, i) => {
-      this.add.text(GAME_W / 2, lineY + i * 16, line, {
-        fontFamily: FONT, fontSize: '11px', color: '#cfe8ff'
-      }).setOrigin(0.5).setDepth(3001);
-    });
+    // One wrapped text block keeps failure explanations inside the card at
+    // every backing resolution. The former 11px unwrapped lines were wider
+    // than the 250px panel and produced the broken Try Again screenshot.
+    overlayObjects.push(bodyText(this, GAME_W / 2, stars >= 0 ? 150 : 123, lines.join('\n'), {
+      originX: 0.5,
+      originY: 0.5,
+      align: 'center',
+      fontSize: '7px',
+      color: '#cfe8ff',
+      lineSpacing: 5,
+      wordWrap: { width: 250, useAdvancedWrap: true }
+    }).setDepth(3001));
 
-    const buttonW = buttons.length >= 3 ? 72 : 94;
-    const gap = 7;
+    const buttonW = buttons.length >= 3 ? 82 : 112;
+    const gap = 8;
     const totalW = buttons.length * buttonW + (buttons.length - 1) * gap;
     buttons.forEach((b, i) => {
-      makeButton(this,
+      const button = makeButton(this,
         GAME_W / 2 - totalW / 2 + buttonW / 2 + i * (buttonW + gap), 203, buttonW, 26,
         b.label, b.cb, {
           color: b.color, hover: b.hover, border: i === 0 ? PAL.goldDark : PAL.borderDark,
           fontSize: '8px', hitHeight: 30
         }
       ).setDepth(3001);
+      overlayObjects.push(button);
     });
   }
 
-  requestNaturalBreakAd() {
-    if (this.state !== 'OVERLAY' || !PlatformService.supportsAds() || this.adRequestActive) return;
+  async requestNaturalBreakAd() {
+    if (this.state !== 'OVERLAY' || !this.isSessionActive() ||
+        !PlatformService.supportsAds() || this.adRequestActive) return;
+    const token = this.sessionToken;
     this.adRequestActive = true;
     const wasMuted = Audio.muted;
     const blocker = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, PAL.ink, 0.18)
@@ -1532,17 +2186,19 @@ export class GameScene extends Phaser.Scene {
     const cleanup = () => {
       if (cleaned) return;
       cleaned = true;
+      if (this.activeAdCleanup === cleanup) this.activeAdCleanup = null;
       this.adRequestActive = false;
-      Audio.setMuted(Boolean(wasMuted || this.settings.muted));
-      blocker.destroy();
-      status.destroy();
+      Audio.setMuted(Boolean(wasMuted || this.settings?.muted));
+      if (blocker.active) blocker.destroy();
+      if (status.active) status.destroy();
     };
-    PlatformService.requestMidgameAd({
-      onStarted: () => Audio.setMuted(true),
-      onFinished: cleanup,
-      onError: cleanup,
-      onUnavailable: cleanup
-    }).finally(cleanup);
+    this.activeAdCleanup = cleanup;
+    await this.awaitSessionTask(PlatformService.requestMidgameAd({
+      onStarted: () => {
+        if (!cleaned && token === this.sessionToken) Audio.setMuted(true);
+      }
+    }));
+    cleanup();
   }
 
   // ---------------------------------------------------------------- drawing
@@ -1558,7 +2214,9 @@ export class GameScene extends Phaser.Scene {
     const b = this.ball;
     const pos = project(b.x, b.y, b.z);
     const depth = 1000 - b.z * 10;
-    const ballScale = (pos.s * BALL_R * 2) / (this.ballSpr.texture.source[0]?.width || 12);
+    // Gameplay keeps a modest readability boost, but no longer renders a
+    // football almost half the player's height at the run-up.
+    const ballScale = ((pos.s * BALL_R * 2) / (this.ballSpr.texture.source[0]?.width || 12)) * 0.58;
     this.ballSpr
       .setPosition(pos.x, pos.y)
       .setScale(ballScale)
@@ -1592,15 +2250,16 @@ export class GameScene extends Phaser.Scene {
     const k = Phaser.Math.Clamp(1 - b.y * 0.1, 0.3, 1);
     this.shadowSpr
       .setPosition(sh.x, sh.y)
-      .setScale((sh.s * BALL_R * 2 * 1.7 * k) / 10)
+      .setScale((sh.s * BALL_R * 2 * 1.25 * k) / 10)
       .setAlpha(0.5 * k)
       .setDepth(depth - 1);
 
     // trail: fading pixel squares
     if (this.state === 'FLIGHT' || this.state === 'RESULT') {
+      const snowTrail = Boolean(this.hazardMap.get('snow')?.trail);
       if (b.flying) {
         this.trailPts.push({ x: pos.x, y: pos.y, r: Math.max(pos.s * BALL_R, 1) });
-        const maxTrail = this.trailStyle.enabled ? 24 : 10;
+        const maxTrail = this.trailStyle.enabled || snowTrail ? 24 : 10;
         if (this.trailPts.length > maxTrail) this.trailPts.shift();
       }
       this.trailGfx.clear().setDepth(depth - 2);
@@ -1608,17 +2267,20 @@ export class GameScene extends Phaser.Scene {
       for (let i = 0; i < n; i++) {
         const f = i / n;
         const sz = Math.max(this.trailPts[i].r * (0.4 + f * 0.8), 1);
-        const color = mixColor(this.trailStyle.end, this.trailStyle.start, f);
-        this.trailGfx.fillStyle(color, f * (this.trailStyle.enabled ? 0.52 : 0.14));
+        const color = snowTrail && !this.trailStyle.enabled
+          ? mixColor(0xb9d8ef, 0xffffff, f)
+          : mixColor(this.trailStyle.end, this.trailStyle.start, f);
+        this.trailGfx.fillStyle(color, f * (this.trailStyle.enabled || snowTrail ? 0.52 : 0.14));
         this.trailGfx.fillRect(this.trailPts[i].x - sz / 2, this.trailPts[i].y - sz / 2, sz, sz);
       }
     }
   }
 
   drawAim() {
-    this.aimGfx.clear();
+    this.aimGfx.clear().setAlpha(1);
     const pts = this.state === 'AIMING' ? this.swipe.activePath : [];
-    const preview = pts.length >= 2 ? computeShotFromPath(pts, { preview: true }).shot : null;
+    const rawPreview = pts.length >= 2 ? computeShotFromPath(pts, { preview: true }).shot : null;
+    const preview = rawPreview ? this.prepareShot(rawPreview) : null;
     this.meterUi?.forEach((label) => label.setVisible(Boolean(preview)));
     if (!preview) return;
 
@@ -1638,6 +2300,27 @@ export class GameScene extends Phaser.Scene {
       Math.round(curlAmount * 100)
     );
     const lineColor = Phaser.Display.Color.GetColor(mixedColor.r, mixedColor.g, mixedColor.b);
+
+    let guideAlpha = 1;
+    const pressure = this.hazardMap.get('crowd-pressure');
+    if (pressure) {
+      const cycle = 0.5 + 0.5 * Math.sin(this.simTime * pressure.pulseSpeed * Math.PI * 2);
+      const visibleWindow = cycle <= pressure.aimWindowScale;
+      guideAlpha *= visibleWindow ? 1 : 0.22;
+    }
+    const glare = this.hazardMap.get('glare');
+    const fadeCorner = this.level.shotRules?.aimFadeCorner || glare?.corner;
+    if (fadeCorner) {
+      const travelTime = Math.max((this.zGoal - CAM.ballDist) / Math.max(preview.vz, 0.1), 0);
+      const predictedX = this.level.offsetX + preview.vx * travelTime;
+      const targetSide = fadeCorner.includes('left') ? -1 : 1;
+      const horizontal = Math.abs(predictedX / Math.max(this.goalWidth / 2, 0.1) - targetSide);
+      const vertical = fadeCorner.includes('top') ? Math.abs(loft - 0.85) : Math.abs(loft - 0.18);
+      const proximity = Phaser.Math.Clamp(1 - Math.hypot(horizontal, vertical) / 0.78, 0, 1);
+      guideAlpha *= 1 - proximity * (glare?.strength ?? 0.62) * 0.88;
+    }
+    this.aimGfx.setAlpha(Phaser.Math.Clamp(guideAlpha, 0.12, 1));
+    this.meterUi?.forEach((label) => label.setAlpha(Phaser.Math.Clamp(guideAlpha + 0.18, 0.3, 1)));
 
     // Dark keyline and bright segmented gesture give the swipe a readable,
     // broadcast-graphics feel over both grass and crowd.
@@ -1673,6 +2356,12 @@ export class GameScene extends Phaser.Scene {
     this.aimGfx.fillRect(meterX, meterY, 94, 5);
     this.aimGfx.fillStyle(power > 0.88 ? 0xf3c449 : 0xf3e7c3, 1);
     this.aimGfx.fillRect(meterX, meterY, Math.round(94 * power), 5);
+    const maxPower = Phaser.Math.Clamp(this.level.shotRules?.maxPower ?? 1, 0.45, 1);
+    if (maxPower < 1) {
+      const capX = meterX + Math.round(94 * maxPower);
+      this.aimGfx.fillStyle(0xff8a65, 1);
+      this.aimGfx.fillRect(capX - 1, meterY - 2, 2, 9);
+    }
     // LOFT: vertical bar fed by the released vertical velocity
     this.aimGfx.fillStyle(0x213a52, 1);
     this.aimGfx.fillRect(meterX - 10, meterY - 6, 5, 18);

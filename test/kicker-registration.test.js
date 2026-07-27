@@ -43,8 +43,49 @@ function imageStub(x, y, key) {
   };
 }
 
-function sceneStub() {
-  return {
+function animatedSpriteStub(x, y, key) {
+  const sprite = imageStub(x, y, key);
+  const listeners = new Map();
+  const clips = new Map();
+  sprite.on = (event, callback) => {
+    const entries = listeners.get(event) || [];
+    entries.push(callback);
+    listeners.set(event, entries);
+    return sprite;
+  };
+  sprite.off = (event, callback) => {
+    listeners.set(event, (listeners.get(event) || []).filter((entry) => entry !== callback));
+    return sprite;
+  };
+  sprite.emit = (event, ...args) => {
+    for (const callback of listeners.get(event) || []) callback(...args);
+  };
+  sprite.anims = {
+    create(config) {
+      clips.set(config.key, config);
+      return config;
+    },
+    exists: (animationKey) => clips.has(animationKey),
+    remove: (animationKey) => clips.delete(animationKey),
+    play(animationKey) {
+      sprite.playedAnimation = animationKey;
+      return sprite;
+    },
+    stop() { sprite.stoppedAnimation = true; }
+  };
+  sprite.play = (animationKey) => sprite.anims.play(animationKey);
+  sprite.animationClips = clips;
+  sprite.advancePose = (pose) => {
+    const clip = clips.get('kicker-action');
+    const frame = clip.frames.find((entry) => entry.key.endsWith(`-${pose}`));
+    sprite.setTexture(frame.key);
+    sprite.emit('animationupdate', { key: 'kicker-action' }, { textureKey: frame.key });
+  };
+  return sprite;
+}
+
+function sceneStub({ animated = false } = {}) {
+  const scene = {
     textures: {
       exists: (key) => key === 'shadow' || key.startsWith('kicker-hd-kit-home-')
     },
@@ -52,6 +93,8 @@ function sceneStub() {
     time: { delayedCall: () => ({ remove() {} }) },
     sys: { isActive: () => true }
   };
+  if (animated) scene.add.sprite = (x, y, key) => animatedSpriteStub(x, y, key);
+  return scene;
 }
 
 // Phaser's TweenManager surface used by Kicker, recorded so the test can assert
@@ -186,4 +229,57 @@ test('a cancelled sequence resets the action offsets to neutral', () => {
     { lunge: 0, lift: 0, squashX: 1, squashY: 1 }
   );
   assert.equal(kicker.sprite.x, 120);
+});
+
+test('the Phaser sprite clip owns frame timing and never skips contact', () => {
+  const scene = withTweenManager(sceneStub({ animated: true }));
+  const kicker = new Kicker(scene, 120, 200, {
+    kitId: 'kit-home',
+    scale: 4.8,
+    ambient: false
+  });
+  const clip = kicker.sprite.animationClips.get('kicker-action');
+
+  assert.equal(clip.skipMissedFrames, false);
+  assert.deepEqual(
+    clip.frames.map(({ duration }) => duration),
+    [155, 90, 195, 120]
+  );
+
+  let contacts = 0;
+  let completes = 0;
+  kicker.playKick({
+    onContact: () => contacts++,
+    onComplete: () => completes++
+  });
+  assert.equal(kicker.sprite.playedAnimation, 'kicker-action');
+  assert.equal(kicker.sequenceTimers.length, 0, 'the Phaser path does not schedule parallel pose timers');
+
+  kicker.sprite.advancePose('strike');
+  kicker.sprite.advancePose('strike');
+  assert.equal(contacts, 1, 'repeated animationupdate events cannot double-kick the ball');
+  assert.equal(kicker.pose, 'strike');
+
+  kicker.sprite.advancePose('follow');
+  kicker.sprite.advancePose('ready');
+  kicker.sprite.emit('animationcomplete', { key: 'kicker-action' });
+  assert.equal(kicker.pose, 'ready');
+  assert.equal(completes, 1);
+  assert.equal(kicker.activeKick, null);
+  assert.equal(kicker.ambient, undefined, 'ambient:false remains disabled after recovery');
+});
+
+test('cancelling an active Phaser clip invalidates late frame events', () => {
+  const scene = withTweenManager(sceneStub({ animated: true }));
+  const kicker = new Kicker(scene, 120, 200, { ambient: false });
+  let contacts = 0;
+
+  kicker.playKick({ onContact: () => contacts++ });
+  kicker.cancelSequence();
+  kicker.sprite.advancePose('strike');
+  kicker.sprite.emit('animationcomplete', { key: 'kicker-action' });
+
+  assert.equal(contacts, 0);
+  assert.equal(kicker.activeKick, null);
+  assert.equal(kicker.sprite.stoppedAnimation, true);
 });

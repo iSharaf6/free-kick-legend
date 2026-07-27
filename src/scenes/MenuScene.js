@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME_W, GAME_H } from '../config.js';
+import { GAME_W, GAME_H, CAM } from '../config.js';
 import {
   makeButton, makeIconButton, makeStatChip, titleText, bodyText,
   drawPanel, addScanlines, sceneIntro, formatCompact, configureHdCamera, FONT
@@ -23,6 +23,17 @@ export class MenuScene extends Phaser.Scene {
   create() {
     configureHdCamera(this);
     this.add.image(0, 0, 'stadium-menu').setOrigin(0).setDepth(0);
+    this.add.image(0, CAM.horizonY, 'pitch-grass-hd-v2')
+      .setOrigin(0)
+      .setDisplaySize(GAME_W, GAME_H - CAM.horizonY)
+      .setDepth(1);
+    const crowd = this.add.image(0, CAM.horizonY, 'crowd-panorama-hd-v3')
+      .setOrigin(0, 1)
+      .setDepth(2);
+    // Preserve the panorama's authored aspect ratio. At 480 logical pixels
+    // wide this makes the 320px alpha-tight source about 84px tall, leaving
+    // the procedural roof cap visible while keeping spectators human-scale.
+    crowd.setScale(GAME_W / crowd.width);
     this.drawComposition();
 
     const settings = SaveManager.getSettings?.() || {};
@@ -84,22 +95,10 @@ export class MenuScene extends Phaser.Scene {
   }
 
   drawComposition() {
-    const shade = this.add.graphics().setDepth(10);
-    // Lighter global wash: stacked with the vignette and the scanlines the old
-    // 0.18 pass left the whole menu muddy. The panel behind the action column
-    // still carries most of the contrast, which is where it is actually needed.
-    shade.fillStyle(PAL.ink, 0.10);
-    shade.fillRect(0, 0, GAME_W, GAME_H);
-    shade.fillStyle(PAL.ink, 0.58);
-    shade.fillRect(210, 30, 270, 227);
-    shade.fillStyle(PAL.night, 0.72);
-    shade.fillTriangle(180, 30, 260, 30, 260, 257);
-
-    // Broadcast framing and a lit touchline behind the player.
-    shade.lineStyle(1, PAL.goldDark, 0.6);
-    shade.lineBetween(210, 32, 210, 256);
-    shade.fillStyle(PAL.flood, 0.12);
-    shade.fillTriangle(24, 30, 176, 30, 123, 235);
+    // A radial flood pool and long feathered action-side falloff provide the
+    // same focus as the former triangular wedges without reading as pitch
+    // markings or perspective geometry.
+    this.add.image(0, 0, 'menu-lighting').setOrigin(0).setDepth(10);
   }
 
   makeHeader(totalStars, coins, muted, readyClaims) {

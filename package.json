@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Free Kick Legend - swipe-to-shoot football game for web portals",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { Ball } from '../src/objects/Ball.js';
-import { BALL_R, CAM, PHYS } from '../src/config.js';
+import { BALL_R, CAM, GOAL_H, GOAL_W, PHYS } from '../src/config.js';
 
 function simulateAtFps(fps, seconds, setup) {
   const ball = new Ball();
@@ -130,4 +130,63 @@ test('side and roof netting contain scored balls', () => {
   roof.step(1 / 60);
   assert.ok(roof.y <= 3.1 - BALL_R);
   assert.ok(roof.vy <= 0, 'roof net must return an upward-moving ball');
+});
+
+test('custom goal bounds contain the ball inside a smaller net', () => {
+  const width = 5.2;
+  const height = 2.2;
+  const ball = new Ball();
+  assert.equal(ball.setGoalBounds(width, height), ball, 'configuration should be chainable');
+  assert.deepEqual(ball.getGoalBounds(), { width, height });
+
+  ball.kick(9, 7, 8, 0.4);
+  ball.enterNet(CAM.ballDist + 5);
+  ball.x = width / 2 - BALL_R - 0.01;
+  ball.y = height - BALL_R - 0.01;
+  ball.step(1 / 60);
+
+  assert.ok(ball.x <= width / 2 - BALL_R);
+  assert.ok(ball.y <= height - BALL_R);
+  assert.ok(ball.vx <= 0, 'custom side net must return an outward-moving ball');
+  assert.ok(ball.vy <= 0, 'custom roof net must return an upward-moving ball');
+});
+
+test('enterNet accepts per-level bounds and retries preserve them', () => {
+  const ball = new Ball();
+  ball.kick(0, 5, 9, 0);
+  assert.equal(
+    ball.enterNet(CAM.ballDist + 4, { width: 4.8, height: 2.4 }),
+    ball,
+    'enterNet should remain chainable'
+  );
+  assert.deepEqual(ball.getGoalBounds(), { width: 4.8, height: 2.4 });
+
+  ball.reset(1.25);
+  assert.deepEqual(
+    ball.getGoalBounds(),
+    { width: 4.8, height: 2.4 },
+    'an attempt reset must not silently restore the regulation goal'
+  );
+  assert.equal(ball.inNet, false);
+  assert.equal(ball.netBackZ, null);
+  assert.equal(ball.x, 1.25);
+});
+
+test('goal-bound configuration is safe for invalid and impossible dimensions', () => {
+  const ball = new Ball({ goalBounds: { width: 5, height: 2.5 } });
+  ball.setGoalBounds({ width: Number.NaN, height: -2 });
+  assert.deepEqual(
+    ball.getGoalBounds(),
+    { width: 5, height: 2.5 },
+    'invalid authoring data should retain the last valid bounds'
+  );
+
+  ball.setGoalBounds(0.1, 0.1);
+  assert.deepEqual(ball.getGoalBounds(), {
+    width: BALL_R * 2,
+    height: BALL_R * 2
+  });
+
+  assert.equal(ball.resetGoalBounds(), ball);
+  assert.deepEqual(ball.getGoalBounds(), { width: GOAL_W, height: GOAL_H });
 });

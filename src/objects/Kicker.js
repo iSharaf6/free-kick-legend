@@ -36,12 +36,19 @@ const KICK_TIMELINE = Object.freeze({
   plant: 55,     // weight drops onto the standing foot
   contact: 155,  // boot meets ball - authoritative impulse frame
   follow: 245,   // leg swings through
-  recover: 440   // back to the ready stance
+  recover: 440,  // back to the ready stance
+  complete: 560  // recovery transform and clip finish together
 });
+const KICK_ANIMATION_KEY = 'kicker-action';
 
 function anchorFor(pose, isHd) {
   if (!isHd) return FALLBACK_ANCHOR;
   return HD_POSE_ANCHOR[pose] || HD_POSE_ANCHOR.idle;
+}
+
+function poseFromTexture(textureKey) {
+  const key = String(textureKey || '');
+  return POSE_SEQUENCE.find((pose) => key.endsWith(`-${pose}`)) || null;
 }
 
 export class Kicker {
@@ -53,10 +60,14 @@ export class Kicker {
     this.pose = opts.pose || 'idle';
     this.scale = opts.scale ?? 3.6;
     this.reducedMotion = Boolean(opts.reducedMotion);
+    this.ambientEnabled = opts.ambient !== false;
     this.depth = opts.depth ?? 100;
     this.destroyed = false;
     this.sequenceToken = 0;
     this.sequenceTimers = [];
+    this.activeKick = null;
+    this.actionClipKit = null;
+    this.animationListenersBound = false;
 
     // Ambient breathing and the kick sequence own separate state objects, so
     // cancelling a kick can never destroy the idle loop and vice versa.
@@ -73,7 +84,15 @@ export class Kicker {
       .setAlpha(opts.shadowAlpha ?? 0.42)
       .setDepth(this.depth);
 
-    this.sprite = scene.add.image(x, y, texture).setDepth(this.depth + 1);
+    // The action poses are separate textures, but Phaser animations can span
+    // texture keys. A Sprite keeps those frames on Phaser's update list and
+    // lets the strike callback follow the actual animation frame instead of a
+    // free-running timer. Retain the Image fallback for light-weight test and
+    // embedding stubs that do not expose a Sprite factory.
+    const spriteFactory = typeof scene.add.sprite === 'function'
+      ? scene.add.sprite.bind(scene.add)
+      : scene.add.image.bind(scene.add);
+    this.sprite = spriteFactory(x, y, texture).setDepth(this.depth + 1);
 
     // Single-frame afterimage used to smear the strike. Created lazily so menu
     // and locker screens that never kick pay nothing for it.
@@ -81,8 +100,9 @@ export class Kicker {
 
     this.applyPoseTexture();
     this.applyTransform();
+    this.setupActionAnimation();
 
-    if (opts.ambient !== false && !this.reducedMotion) this.startAmbient();
+    if (this.ambientEnabled && !this.reducedMotion) this.startAmbient();
   }
 
   // ------------------------------------------------------------- appearance
@@ -112,6 +132,77 @@ export class Kicker {
     return this;
   }
 
+  adoptAnimatedPose(pose) {
+    if (this.destroyed || !this.sprite) return this;
+    this.pose = POSE_SEQUENCE.includes(pose) ? pose : 'idle';
+    const texture = this.sprite.texture?.key || this.textureFor(this.pose);
+    this.isHd = texture.startsWith('kicker-hd-');
+    this.visualScale = this.scale * (this.isHd ? HD_SCALE_RATIO : 1);
+    const anchor = anchorFor(this.pose, this.isHd);
+    this.sprite.setOrigin(anchor.originX, anchor.originY);
+    this.applyTransform();
+    return this;
+  }
+
+  setupActionAnimation() {
+    const anims = this.sprite?.anims;
+    if (!anims?.create || !this.sprite?.on) return false;
+
+    if (anims.exists?.(KICK_ANIMATION_KEY)) anims.remove?.(KICK_ANIMATION_KEY);
+    const frameSpecs = [
+      ['ready', KICK_TIMELINE.contact],
+      ['strike', KICK_TIMELINE.follow - KICK_TIMELINE.contact],
+      ['follow', KICK_TIMELINE.recover - KICK_TIMELINE.follow],
+      ['ready', KICK_TIMELINE.complete - KICK_TIMELINE.recover]
+    ];
+    const frames = frameSpecs.map(([pose, duration]) => ({
+      key: this.textureFor(pose),
+      frame: '__BASE',
+      // Phaser 3.90 treats an AnimationFrame duration as the full frame hold
+      // (Phaser 4 makes it additive). Explicit non-zero holds keep the contact
+      // timing exact on the version shipped by this game.
+      duration
+    }));
+    if (frames.some((frame) => frame.key === '__MISSING')) return false;
+
+    const clip = anims.create({
+      key: KICK_ANIMATION_KEY,
+      frames,
+      frameRate: 1000,
+      repeat: 0,
+      // Never jump over the strike frame after a browser hitch. It is the
+      // authoritative gameplay contact frame, so stretching by one render is
+      // preferable to launching the ball without showing the kick.
+      skipMissedFrames: false
+    });
+    if (!clip && !anims.exists?.(KICK_ANIMATION_KEY)) return false;
+
+    this.actionClipKit = this.kitId;
+    if (!this.animationListenersBound) {
+      this.onAnimationUpdate = (animation, frame) => {
+        if (animation?.key !== KICK_ANIMATION_KEY) return;
+        this.handleActionFrame(frame);
+      };
+      this.onAnimationComplete = (animation) => {
+        if (animation?.key !== KICK_ANIMATION_KEY) return;
+        this.finishActionAnimation();
+      };
+      this.sprite.on('animationupdate', this.onAnimationUpdate);
+      this.sprite.on('animationcomplete', this.onAnimationComplete);
+      this.animationListenersBound = true;
+    }
+    return true;
+  }
+
+  hasPlayableActionAnimation() {
+    if (this.actionClipKit !== this.kitId) this.setupActionAnimation();
+    return Boolean(
+      this.actionClipKit === this.kitId &&
+      this.sprite?.anims?.exists?.(KICK_ANIMATION_KEY) &&
+      (this.sprite?.play || this.sprite?.anims?.play)
+    );
+  }
+
   // The single writer for every sprite transform property.
   applyTransform() {
     if (this.destroyed || !this.sprite) return;
@@ -138,6 +229,7 @@ export class Kicker {
   setKit(kitId) {
     this.kitId = kitId || 'kit-home';
     this.applyPoseTexture();
+    this.setupActionAnimation();
     return this;
   }
 
@@ -165,7 +257,7 @@ export class Kicker {
   // ----------------------------------------------------------------- ambient
 
   startAmbient() {
-    if (this.destroyed || this.reducedMotion || this.ambient) return this;
+    if (this.destroyed || this.reducedMotion || !this.ambientEnabled || this.ambient) return this;
     this.ambient = this.scene.tweens.add({
       targets: this.idleState,
       bob: -1.1,
@@ -187,7 +279,7 @@ export class Kicker {
   }
 
   resumeAmbient() {
-    if (this.destroyed || this.reducedMotion) return this;
+    if (this.destroyed || this.reducedMotion || !this.ambientEnabled) return this;
     // A tween destroyed by a scene-wide sweep cannot be resumed; rebuild it.
     if (!this.ambient || this.ambient.state === undefined || !this.ambient.parent) {
       this.ambient = null;
@@ -204,6 +296,8 @@ export class Kicker {
     this.sequenceToken++;
     this.sequenceTimers.forEach((timer) => timer?.remove?.(false));
     this.sequenceTimers.length = 0;
+    this.activeKick = null;
+    this.sprite?.anims?.stop?.();
     if (!this.destroyed) {
       // Only the action state is swept. The ambient loop lives on its own
       // target and survives, which is what kept breaking after the first kick.
@@ -213,6 +307,10 @@ export class Kicker {
       this.actState.squashX = 1;
       this.actState.squashY = 1;
       this.sprite?.setRotation(0).setAlpha(1);
+      if (this.ghost) {
+        this.scene.tweens.killTweensOf(this.ghost);
+        this.ghost.setVisible(false);
+      }
       this.applyTransform();
     }
     return this;
@@ -220,7 +318,10 @@ export class Kicker {
 
   _after(delay, token, callback) {
     if (this.destroyed) return null;
-    const timer = this.scene.time.delayedCall(delay, () => {
+    let timer = null;
+    timer = this.scene.time.delayedCall(delay, () => {
+      const index = this.sequenceTimers.indexOf(timer);
+      if (index >= 0) this.sequenceTimers.splice(index, 1);
       if (token !== this.sequenceToken || this.destroyed) return;
       if (!this.scene?.sys?.isActive?.()) return;
       callback();
@@ -240,18 +341,36 @@ export class Kicker {
     });
   }
 
-  _spawnGhost() {
+  snapshotSprite() {
+    if (!this.sprite) return null;
+    return {
+      texture: this.sprite.texture?.key,
+      originX: this.sprite.originX,
+      originY: this.sprite.originY,
+      x: this.sprite.x,
+      y: this.sprite.y,
+      scaleX: this.sprite.scaleX,
+      scaleY: this.sprite.scaleY,
+      flipX: this.sprite.flipX
+    };
+  }
+
+  _spawnGhost(snapshot = null) {
     if (this.reducedMotion || this.destroyed || !this.scene.add?.image) return;
-    const anchor = anchorFor(this.pose, this.isHd);
+    const source = snapshot || this.snapshotSprite();
+    if (!source?.texture) return;
+    const anchor = snapshot
+      ? { originX: source.originX, originY: source.originY }
+      : anchorFor(this.pose, this.isHd);
     if (!this.ghost || !this.ghost.scene) {
-      this.ghost = this.scene.add.image(0, 0, this.sprite.texture.key);
+      this.ghost = this.scene.add.image(0, 0, source.texture);
     }
     this.ghost
-      .setTexture(this.sprite.texture.key)
+      .setTexture(source.texture)
       .setOrigin(anchor.originX, anchor.originY)
-      .setPosition(this.sprite.x, this.sprite.y)
-      .setScale(this.sprite.scaleX, this.sprite.scaleY)
-      .setFlipX(this.sprite.flipX)
+      .setPosition(source.x, source.y)
+      .setScale(source.scaleX, source.scaleY)
+      .setFlipX(source.flipX)
       .setAlpha(0.3)
       .setDepth(this.depth)
       .setVisible(true);
@@ -265,6 +384,92 @@ export class Kicker {
     });
   }
 
+  enterStrikeFrame(action) {
+    if (!action || action.phase !== 'ready') return;
+    action.phase = 'strike';
+    if (!action.reducedMotion) this._spawnGhost(action.previousVisual);
+    this.adoptAnimatedPose('strike');
+    this.actState.squashX = action.reducedMotion ? 1 : 1.12;
+    this.actState.squashY = action.reducedMotion ? 1 : 0.94;
+    this.actState.lunge = action.reducedMotion ? 0 : 0.6;
+    this.actState.lift = action.reducedMotion ? 0 : -0.4;
+    this.applyTransform();
+    if (!action.reducedMotion) {
+      this._tweenAct({
+        squashX: 1,
+        squashY: 1,
+        duration: 95,
+        ease: 'Quad.easeOut'
+      }, action.token);
+    }
+    if (!action.contactFired) {
+      action.contactFired = true;
+      action.onContact?.();
+    }
+    action.previousVisual = this.snapshotSprite();
+  }
+
+  enterFollowFrame(action) {
+    if (!action || action.phase !== 'strike') return;
+    action.phase = 'follow';
+    this.adoptAnimatedPose('follow');
+    if (!action.reducedMotion) {
+      this._tweenAct({
+        lunge: 2.6,
+        lift: 0,
+        duration: 150,
+        ease: 'Cubic.easeOut'
+      }, action.token);
+    }
+    action.previousVisual = this.snapshotSprite();
+  }
+
+  enterRecoveryFrame(action) {
+    if (!action || action.phase !== 'follow') return;
+    action.phase = 'recover';
+    this.adoptAnimatedPose('ready');
+    if (!action.reducedMotion) {
+      this._tweenAct({
+        lunge: 0,
+        lift: 0,
+        squashX: 1,
+        squashY: 1,
+        duration: KICK_TIMELINE.complete - KICK_TIMELINE.recover,
+        ease: 'Sine.easeOut'
+      }, action.token);
+    } else {
+      this.actState.lunge = 0;
+      this.actState.lift = 0;
+      this.applyTransform();
+    }
+    action.previousVisual = this.snapshotSprite();
+  }
+
+  handleActionFrame(frame) {
+    const action = this.activeKick;
+    if (!action || action.token !== this.sequenceToken || this.destroyed) return;
+    const pose = poseFromTexture(frame?.textureKey || frame?.frame?.texture?.key);
+    if (pose === 'strike') this.enterStrikeFrame(action);
+    else if (pose === 'follow') this.enterFollowFrame(action);
+    else if (pose === 'ready' && action.phase === 'follow') this.enterRecoveryFrame(action);
+  }
+
+  finishActionAnimation() {
+    const action = this.activeKick;
+    if (!action || action.token !== this.sequenceToken || this.destroyed) return;
+    if (!action.contactFired) this.enterStrikeFrame(action);
+    if (action.phase === 'strike') this.enterFollowFrame(action);
+    if (action.phase === 'follow') this.enterRecoveryFrame(action);
+    this.activeKick = null;
+    this.actState.lunge = 0;
+    this.actState.lift = 0;
+    this.actState.squashX = 1;
+    this.actState.squashY = 1;
+    this.applyTransform();
+    this.resumeAmbient();
+    action.onComplete?.();
+  }
+
   // The contact callback is the authoritative kick frame: GameScene applies the
   // ball impulse there, so boot and ball can never drift apart. Every stage
   // moves the same state object, so the run-up reads as one connected motion
@@ -275,17 +480,48 @@ export class Kicker {
     this.pauseAmbient();
     this.setPose('ready');
 
+    const action = {
+      token,
+      phase: 'ready',
+      reducedMotion: Boolean(reducedMotion),
+      contactFired: false,
+      onContact,
+      onComplete,
+      previousVisual: this.snapshotSprite()
+    };
+    this.activeKick = action;
+
+    if (this.hasPlayableActionAnimation()) {
+      if (!action.reducedMotion) {
+        this.actState.lunge = -2.2;
+        this.applyTransform();
+        action.previousVisual = this.snapshotSprite();
+        this._tweenAct({
+          lunge: -3.4,
+          lift: 0.8,
+          duration: KICK_TIMELINE.plant + 60,
+          ease: 'Quad.easeIn'
+        }, token);
+      }
+      if (this.sprite.play) this.sprite.play(KICK_ANIMATION_KEY);
+      else this.sprite.anims.play(KICK_ANIMATION_KEY);
+      return this;
+    }
+
     if (reducedMotion) {
       this._after(KICK_TIMELINE.contact, token, () => {
         this.setPose('strike');
-        onContact?.();
+        this.enterStrikeFrame(action);
       });
-      this._after(KICK_TIMELINE.follow, token, () => this.setPose('follow'));
+      this._after(KICK_TIMELINE.follow, token, () => {
+        this.setPose('follow');
+        this.enterFollowFrame(action);
+      });
       this._after(KICK_TIMELINE.recover, token, () => {
         this.setPose('ready');
-        this.resumeAmbient();
-        onComplete?.();
+        this.enterRecoveryFrame(action);
       });
+      this._after(KICK_TIMELINE.complete, token, () => this.finishActionAnimation());
       return this;
     }
 
@@ -300,50 +536,20 @@ export class Kicker {
     }, token);
 
     this._after(KICK_TIMELINE.contact, token, () => {
-      this._spawnGhost();
       this.setPose('strike');
-      // Stretch through contact, then settle. Because the strike pose is
-      // anchored on the shoulders, this reads as the body whipping through the
-      // ball rather than the whole character jumping sideways.
-      this.actState.squashX = 1.12;
-      this.actState.squashY = 0.94;
-      this.actState.lunge = 0.6;
-      this.actState.lift = -0.4;
-      this.applyTransform();
-      this._tweenAct({
-        squashX: 1,
-        squashY: 1,
-        duration: 95,
-        ease: 'Quad.easeOut'
-      }, token);
-      onContact?.();
+      this.enterStrikeFrame(action);
     });
 
     this._after(KICK_TIMELINE.follow, token, () => {
       this.setPose('follow');
-      this._tweenAct({
-        lunge: 2.6,
-        lift: 0,
-        duration: 150,
-        ease: 'Cubic.easeOut'
-      }, token);
+      this.enterFollowFrame(action);
     });
 
     this._after(KICK_TIMELINE.recover, token, () => {
       this.setPose('ready');
-      this._tweenAct({
-        lunge: 0,
-        lift: 0,
-        squashX: 1,
-        squashY: 1,
-        duration: 120,
-        ease: 'Sine.easeOut',
-        onComplete: () => {
-          if (token === this.sequenceToken) this.resumeAmbient();
-        }
-      }, token);
-      onComplete?.();
+      this.enterRecoveryFrame(action);
     });
+    this._after(KICK_TIMELINE.complete, token, () => this.finishActionAnimation());
     return this;
   }
 
@@ -409,6 +615,11 @@ export class Kicker {
       this.ghost.destroy();
       this.ghost = null;
     }
+    if (this.animationListenersBound && this.sprite?.off) {
+      this.sprite.off('animationupdate', this.onAnimationUpdate);
+      this.sprite.off('animationcomplete', this.onAnimationComplete);
+    }
+    this.animationListenersBound = false;
     this.sprite?.destroy();
     this.shadow?.destroy();
     this.sprite = null;
