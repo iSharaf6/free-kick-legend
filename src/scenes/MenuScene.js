@@ -85,7 +85,10 @@ export class MenuScene extends Phaser.Scene {
 
   drawComposition() {
     const shade = this.add.graphics().setDepth(10);
-    shade.fillStyle(PAL.ink, 0.18);
+    // Lighter global wash: stacked with the vignette and the scanlines the old
+    // 0.18 pass left the whole menu muddy. The panel behind the action column
+    // still carries most of the contrast, which is where it is actually needed.
+    shade.fillStyle(PAL.ink, 0.10);
     shade.fillRect(0, 0, GAME_W, GAME_H);
     shade.fillStyle(PAL.ink, 0.58);
     shade.fillRect(210, 30, 270, 227);
@@ -192,20 +195,24 @@ export class MenuScene extends Phaser.Scene {
     plate.fillStyle(PAL.gold, 1);
     plate.fillRect(102, 232, Math.floor(82 * progress), 4);
 
-    this.kicker = new Kicker(this, 111, 220, {
+    // The plate is drawn at depth 150 and the striker at 130, so his boots used
+    // to disappear behind it and he read as cropped off mid-shin. He now stands
+    // on the turf just above the plate, which also gives the shadow somewhere
+    // believable to fall.
+    this.kicker = new Kicker(this, 104, 202, {
       kitId: equippedKit,
-      scale: 4.8,
+      scale: 4.4,
       depth: 130
     });
     const ballKey = SaveManager.getEquippedCosmetic?.('ball') || 'ball-classic';
     const texture = ballKey === 'ball-classic' && this.textures.exists('ball-classic-hd')
       ? 'ball-classic-hd'
       : (this.textures.exists(ballKey) ? ballKey : 'ball');
-    const ball = this.add.image(174, 218, texture).setDepth(160);
-    ball.setScale(19 / (ball.texture.source[0]?.width || 12));
+    const ball = this.add.image(158, 196, texture).setDepth(160);
+    ball.setScale(17 / (ball.texture.source[0]?.width || 12));
     this.tweens.add({
       targets: ball,
-      y: 211,
+      y: 189,
       rotation: Math.PI * 2,
       duration: 1800,
       ease: 'Sine.easeInOut',
@@ -235,15 +242,20 @@ export class MenuScene extends Phaser.Scene {
     const actionX = 344;
     const actionW = 198;
     const actionH = 25;
+    // Left-aligned labels in a reserved column: the previous centred labels ran
+    // straight over the icon gutter once the copy got long ("DAILY KICK · NEW
+    // CHALLENGE" collided with its own star).
     const make = (y, label, icon, cb, color, hover) => makeButton(
       this, actionX, y, actionW, actionH, label, cb, {
         color,
         hover,
         icon,
         iconScale: 0.82,
-        iconX: 17,
+        iconX: 16,
+        labelAlign: 'left',
+        labelX: 31,
         fontSize: '9px',
-        letterSpacing: 0.45,
+        letterSpacing: 0.4,
         hitHeight: 28
       }
     ).setDepth(230);
