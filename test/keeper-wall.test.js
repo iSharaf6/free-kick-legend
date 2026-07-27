@@ -40,6 +40,82 @@ test('keeper shot reads are deterministic and ignore outcome RNG', () => {
   assert.equal(first.setT, second.setT);
 });
 
+test('double keepers preserve separate home positions through idle, return and reset', () => {
+  const goalZ = CAM.ballDist + 18;
+  const left = new Goalkeeper(sceneStub(), 0.62, goalZ, {
+    seed: 17,
+    homeX: -1.75,
+    goalWidth: 8
+  });
+  const right = new Goalkeeper(sceneStub(), 0.62, goalZ, {
+    seed: 23,
+    homeX: 1.75,
+    goalWidth: 8
+  });
+
+  for (let elapsed = 0; elapsed < 2; elapsed += PHYS.fixedStep) {
+    left.update(PHYS.fixedStep);
+    right.update(PHYS.fixedStep);
+  }
+  assert.equal(left.x, -1.75);
+  assert.equal(right.x, 1.75);
+
+  left.state = 'return';
+  left.pose = 'idle';
+  left.x = -0.35;
+  left.moveVx = 0;
+  right.state = 'return';
+  right.pose = 'idle';
+  right.x = 0.35;
+  right.moveVx = 0;
+  for (let elapsed = 0; elapsed < 2.5; elapsed += PHYS.fixedStep) {
+    left.update(PHYS.fixedStep);
+    right.update(PHYS.fixedStep);
+    if (left.state === 'idle' && right.state === 'idle') break;
+  }
+  assert.equal(left.x, left.homeX);
+  assert.equal(right.x, right.homeX);
+
+  left.x = 0;
+  right.x = 0;
+  left.reset();
+  right.reset();
+  assert.equal(left.x, -1.75);
+  assert.equal(right.x, 1.75);
+});
+
+test('keeper prediction and movement honor the active smaller goal dimensions', () => {
+  const goalZ = CAM.ballDist + 18;
+  const keeper = new Goalkeeper(sceneStub(), 1, goalZ, {
+    seed: 29,
+    homeX: 4,
+    goalWidth: 6,
+    goalHeight: 2.4
+  });
+  const shot = {
+    z: CAM.ballDist,
+    vx: 2,
+    vy: 7,
+    vz: 24,
+    spin: 0,
+    predictAt: () => ({ x: 4, y: 3, T: 2 })
+  };
+
+  assert.equal(keeper.homeX, 2.45, 'home position is clamped inside the smaller posts');
+  keeper.onShot(shot, goalZ);
+  assert.equal(keeper.shotX, 2.8);
+  assert.ok(Math.abs(keeper.shotY - 2.22) < 1e-10);
+  assert.equal(keeper.targetX, 2.65);
+  assert.ok(Math.abs(keeper.targetY - 2.12) < 1e-10);
+
+  for (let elapsed = 0; elapsed < 1.5; elapsed += PHYS.fixedStep) keeper.update(PHYS.fixedStep);
+  assert.ok(keeper.x <= 2.6, `keeper root ${keeper.x} must stay inside the scaled frame`);
+  keeper.reset();
+  assert.equal(keeper.x, 2.45);
+  assert.equal(keeper.goalWidth, 6);
+  assert.equal(keeper.goalHeight, 2.4);
+});
+
 test('clear left and right shots cannot produce opposite-facing dive reads', () => {
   const goalZ = CAM.ballDist + 17;
   const keeper = new Goalkeeper(sceneStub(), 0.1, goalZ, { rng: () => 1 });
@@ -317,6 +393,28 @@ test('central shots stay planted and flow into height-specific handling', () => 
   assert.deepEqual(keeper.spr.calls.setTexture, ['keeper-high-claim-hd', 4]);
 });
 
+test('a planted central save stays on ready frames instead of flashing a dive', () => {
+  const goalZ = CAM.ballDist + 17;
+  const keeper = new Goalkeeper(
+    sceneStub(['keeper-anim-hd', 'keeper-footwork-hd', 'keeper-dive-motion-hd']),
+    0.7,
+    goalZ,
+    { seed: 21 }
+  );
+  keeper.onShot({
+    z: 0, vx: 0, vy: 4, vz: 20, spin: 0,
+    predictAt: () => ({ x: 0.08, y: 1.15, T: 0.8 })
+  }, goalZ);
+
+  assert.equal(keeper.standingSave, true);
+  assert.equal(keeper.savePlan, null);
+  keeper.state = 'set';
+  keeper.stateT = keeper.setT * 0.7;
+  keeper.draw();
+  assert.equal(keeper.spr.calls.setTexture[0], 'keeper-anim-hd');
+  assert.ok([2, 4].includes(keeper.spr.calls.setTexture[1]));
+});
+
 test('dive root remains continuous through contact, descent and grounded impact', () => {
   const goalZ = CAM.ballDist + 17;
   const ball = new Ball();
@@ -374,6 +472,27 @@ test('footwork and handling atlases animate both travel and catch follow-through
   assert.equal(keeper.getHandlingFrame(), 4);
   keeper.draw();
   assert.deepEqual(keeper.spr.calls.setTexture, ['keeper-high-claim-hd', 4]);
+});
+
+test('settled tracking footwork keeps a live ready bounce away from centre', () => {
+  const keeper = new Goalkeeper(
+    sceneStub(['keeper-footwork-hd']),
+    0.7,
+    CAM.ballDist + 17,
+    { seed: 19 }
+  );
+  keeper.state = 'read';
+  keeper.diveDir = -1;
+  keeper.x = 1.1;
+  keeper.trackTargetX = 1.1;
+  keeper.moveVx = 0;
+
+  keeper.stateT = 0;
+  assert.equal(keeper.getFootworkFrame(), 0);
+  keeper.stateT = 0.14;
+  assert.equal(keeper.getFootworkFrame(), 4);
+  keeper.stateT = 0.27;
+  assert.equal(keeper.getFootworkFrame(), 0);
 });
 
 test('return-to-centre motion uses directional frames and settles without overshoot', () => {

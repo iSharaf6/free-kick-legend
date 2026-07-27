@@ -2,11 +2,18 @@ import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  ADVANCED_OBJECTIVE_TYPES,
   CUPS,
+  HAZARD_TYPES,
+  LEVEL_SCHEMA_VERSION,
   LEVELS,
+  WALL_TYPES,
   createSeededRng,
   dailyScenario,
-  randomScenario
+  getLevelMechanics,
+  randomScenario,
+  validateLevelDefinition,
+  validateLevelSet
 } from '../src/data/levels.js';
 import { getDailyMissions } from '../src/data/progression.js';
 import {
@@ -62,6 +69,7 @@ test('career data contains five coherent ten-level cups', () => {
 
   for (const level of LEVELS) {
     assert.match(level.id, /^[a-z]+-\d{2}$/);
+    assert.equal(level.schemaVersion, LEVEL_SCHEMA_VERSION);
     assert.equal(typeof level.name, 'string');
     assert.ok(level.distance >= 13 && level.distance <= 23);
     assert.ok(level.offsetX >= -6 && level.offsetX <= 6);
@@ -89,9 +97,59 @@ test('Level 15 and low-shot technique levels stay placement-open instead of forc
     assert.equal(level.target, null, `${level.id} should reward the low route, not a mandatory circle`);
   }
 
-  const targetObjectives = new Set(['target', 'target-streak', 'curve-target', 'wind-target']);
+  const targetObjectives = new Set([
+    'target', 'target-streak', 'curve-target', 'wind-target',
+    'ring-shot', 'limited-power', 'blind-shot', 'reverse-target'
+  ]);
   for (const level of LEVELS.filter((entry) => entry.target)) {
     assert.ok(targetObjectives.has(level.objective.type), `${level.id} uses a target on a non-target objective`);
+  }
+});
+
+test('v2 career definitions are valid, deeply immutable and remain sparse', () => {
+  assert.deepEqual(validateLevelSet(), []);
+  assert.deepEqual(validateLevelSet(JSON.parse(JSON.stringify(LEVELS))), [], 'level data survives JSON round-tripping');
+
+  let plainLevels = 0;
+  for (const level of LEVELS) {
+    assert.equal(Object.isFrozen(level), true);
+    assert.equal(Object.isFrozen(level.objective), true);
+    if (level.hazards) {
+      assert.ok(level.hazards.length > 0, `${level.id} should omit empty hazards`);
+      assert.equal(Object.isFrozen(level.hazards), true);
+    }
+    if (level.rings) {
+      assert.ok(level.rings.length > 0, `${level.id} should omit empty rings`);
+      assert.equal(Object.isFrozen(level.rings), true);
+    }
+    if (!level.wallConfig && !level.goal && !level.hazards && !level.rings && !level.shotRules && !level.keeperConfig) {
+      plainLevels++;
+    }
+  }
+  assert.ok(plainLevels >= 20, 'introductory encounters should keep the lean legacy payload');
+
+  const broken = {
+    ...LEVELS.find((level) => level.wallConfig?.type === 'double'),
+    wallConfig: { type: 'double', count: 99, rows: [] }
+  };
+  assert.match(validateLevelDefinition(broken).join('\n'), /wallConfig\.count must match legacy wall/);
+});
+
+test('later cups cover every authored wall, weather and objective twist', () => {
+  const laterLevels = LEVELS.slice(10);
+  const mechanics = new Set(laterLevels.flatMap(getLevelMechanics));
+
+  for (const type of WALL_TYPES.filter((type) => type !== 'standard')) {
+    assert.ok(mechanics.has(`${type}-wall`), `career needs a ${type} wall encounter`);
+  }
+  for (const type of HAZARD_TYPES) {
+    assert.ok(mechanics.has(type), `career needs the ${type} hazard`);
+  }
+  for (const type of ADVANCED_OBJECTIVE_TYPES) {
+    assert.ok(mechanics.has(type), `career needs the ${type} objective`);
+  }
+  for (const type of ['smaller-goal', 'rotating-wind', 'hoop-threading', 'sweeper-keeper', 'double-keeper']) {
+    assert.ok(mechanics.has(type), `career needs ${type}`);
   }
 });
 

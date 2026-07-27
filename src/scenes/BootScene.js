@@ -6,7 +6,6 @@ import { PlatformService } from '../systems/PlatformService.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
 import { makePuppetTextures } from '../art/PuppetTextures.js';
-import { CROWD_ANIMATION } from '../data/crowdAnimation.js';
 
 const KICKER_POSES = {
   idle: MAPS.kickerIdle,
@@ -40,16 +39,14 @@ export class BootScene extends Phaser.Scene {
 
   preload() {
     const base = import.meta.env.BASE_URL;
+    this.load.image('pitch-grass-hd-v2', `${base}assets/hd/pitch-grass-hd-v2.png`);
+    this.load.image('crowd-panorama-hd-v3', `${base}assets/hd/crowd-panorama-hd-v3-cropped.png`);
     getCosmeticsByCategory('kit').forEach((kit) => {
       HD_KICKER_POSES.forEach((pose) => {
         this.load.image(`kicker-hd-${kit.id}-${pose}`, `${base}assets/hd/kicker-hd-${kit.id}-${pose}.png`);
       });
     });
     this.load.spritesheet('keeper-anim-hd', `${base}assets/hd/keeper-animation-sheet-hd.png`, {
-      frameWidth: 320,
-      frameHeight: 280
-    });
-    this.load.spritesheet('keeper-recovery-hd', `${base}assets/hd/keeper-recovery-sheet-hd.png`, {
       frameWidth: 320,
       frameHeight: 280
     });
@@ -99,10 +96,6 @@ export class BootScene extends Phaser.Scene {
     }
     this.load.image('defender-hd', `${base}assets/hd/defender-hd.png`);
     this.load.image('ball-classic-hd', `${base}assets/hd/ball-classic-hd.png`);
-    this.load.spritesheet(CROWD_ANIMATION.textureKey, `${base}${CROWD_ANIMATION.assetPath}`, {
-      frameWidth: CROWD_ANIMATION.frameWidth,
-      frameHeight: CROWD_ANIMATION.frameHeight
-    });
   }
 
   create() {
@@ -115,12 +108,14 @@ export class BootScene extends Phaser.Scene {
     this.makeStadiumBackdrop();
     this.makeGrassNoise();
     this.makeVignette();
+    this.makeMenuLighting();
 
     // Handing off to the menu must be unconditional and happen exactly once.
     // Anything that can throw here - corrupt save JSON, a portal SDK that never
     // settles, a browser that denies audio - previously left the player on the
     // loading card with no way forward, which is indistinguishable from a crash.
     let handedOff = false;
+    let platformLoadingActive = false;
     const enterMenu = () => {
       if (handedOff || !this.scene.isActive('Boot')) return;
       handedOff = true;
@@ -131,17 +126,26 @@ export class BootScene extends Phaser.Scene {
       } catch (error) {
         console.warn('[Boot] settings unavailable, continuing with defaults', error);
       }
-      try {
+      if (platformLoadingActive) {
         PlatformService.loadingStop();
-      } catch (error) {
-        console.warn('[Boot] platform loadingStop failed', error);
+        platformLoadingActive = false;
       }
       document.getElementById('loading')?.classList.add('is-hidden');
       this.scene.start('Menu');
     };
 
-    PlatformService.loadingStart();
     PlatformService.init()
+      .then(async (available) => {
+        // SDK methods are unusable until init resolves. If the fail-safe has
+        // already handed off, do not start an orphaned loading interval.
+        if (!available || handedOff) return;
+        const started = await PlatformService.loadingStart();
+        if (handedOff || !this.scene.isActive('Boot')) {
+          if (started) PlatformService.loadingStop();
+          return;
+        }
+        platformLoadingActive = started;
+      })
       .catch((error) => console.warn('[Boot] platform init failed', error))
       .finally(enterMenu);
     // Belt and braces: even if the promise above is never settled by the SDK,
@@ -371,6 +375,36 @@ export class BootScene extends Phaser.Scene {
     grd.addColorStop(1, 'rgba(4,8,14,0.42)');
     ctx.fillStyle = grd;
     ctx.fillRect(0, 0, GAME_W, GAME_H);
+    c.refresh();
+  }
+
+  // Feathered menu lighting replaces the old hard spotlight polygons. Keeping
+  // it in one static CanvasTexture is both cheaper than several live Graphics
+  // objects and consistent in Phaser's WebGL and Canvas renderers.
+  makeMenuLighting() {
+    const c = this.textures.createCanvas('menu-lighting', GAME_W, GAME_H);
+    const ctx = c.context;
+
+    const flood = ctx.createRadialGradient(102, 78, 0, 102, 78, 178);
+    flood.addColorStop(0, 'rgba(184,218,228,0.10)');
+    flood.addColorStop(0.52, 'rgba(184,218,228,0.035)');
+    flood.addColorStop(1, 'rgba(184,218,228,0)');
+    ctx.fillStyle = flood;
+    ctx.fillRect(0, 24, GAME_W, GAME_H - 24);
+
+    const actionShade = ctx.createLinearGradient(82, 0, GAME_W, 0);
+    actionShade.addColorStop(0, 'rgba(4,8,14,0)');
+    actionShade.addColorStop(0.48, 'rgba(4,8,14,0.09)');
+    actionShade.addColorStop(1, 'rgba(4,8,14,0.60)');
+    ctx.fillStyle = actionShade;
+    ctx.fillRect(0, 30, GAME_W, GAME_H - 30);
+
+    const pitchFalloff = ctx.createLinearGradient(0, CAM.horizonY, 0, GAME_H);
+    pitchFalloff.addColorStop(0, 'rgba(3,9,13,0)');
+    pitchFalloff.addColorStop(1, 'rgba(3,9,13,0.18)');
+    ctx.fillStyle = pitchFalloff;
+    ctx.fillRect(0, CAM.horizonY, GAME_W, GAME_H - CAM.horizonY);
+
     c.refresh();
   }
 }
