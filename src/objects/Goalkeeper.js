@@ -1,8 +1,11 @@
 import { project, GOAL_W, GOAL_H, BALL_R, PHYS } from '../config.js';
 import { getKeeperMove, KEEPER_DISTRIBUTION_IDS } from '../data/keeperMoveset.js';
 
-const KEEPER_H = 1.86;
-const DIVE_H = 1.30;
+// The keeper is the only defender the player has to read at a glance, so he is
+// authored slightly taller than the wall he stands behind. Below 1.9m he
+// disappeared into the wall silhouette entirely.
+const KEEPER_H = 2.02;
+const DIVE_H = 1.41;
 const GROUND_Y = 0;         // visual root height above the pitch
 const KEEPER_ANIMATION_TEXTURE = 'keeper-anim-hd';
 const KEEPER_RECOVERY_TEXTURE = 'keeper-practical-recovery-hd';

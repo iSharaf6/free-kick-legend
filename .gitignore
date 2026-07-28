@@ -9,3 +9,4 @@ tmp/
 .codex/
 .impeccable/
 
+__pycache__/

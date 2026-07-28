@@ -7,6 +7,7 @@ import { CROWD_ANIMATION } from '../src/data/crowdAnimation.js';
 import {
   CROWD_MOTION,
   CROWD_PANORAMA,
+  crowdTierAspectError,
   getCrowdTilePositions
 } from '../src/data/crowdPanorama.js';
 
@@ -75,20 +76,47 @@ test('crowd panorama crop is tight and contains no visible chroma pixels', () =>
   }
 });
 
-test('crowd panorama tiles cover the stand with exact integer edges', () => {
-  const positions = getCrowdTilePositions(480);
-  assert.deepEqual(positions, [0, 240]);
-  assert.equal(positions.every(Number.isInteger), true);
-  for (let i = 0; i < positions.length - 1; i++) {
-    assert.equal(positions[i] + CROWD_PANORAMA.tileWidth, positions[i + 1]);
+test('every crowd tier renders at the source aspect so supporters are never stretched', () => {
+  assert.equal(
+    CROWD_PANORAMA.sourceAspect,
+    CROWD_PANORAMA.sourceWidth / CROWD_PANORAMA.sourceHeight
+  );
+  assert.ok(CROWD_PANORAMA.tiers.length >= 2, 'the stand is layered for depth');
+  for (const tier of CROWD_PANORAMA.tiers) {
+    assert.ok(
+      crowdTierAspectError(tier) < 0.01,
+      `${tier.id} tier distorts the panorama by ${(crowdTierAspectError(tier) * 100).toFixed(2)}%`
+    );
   }
-  assert.equal(positions.at(-1) + CROWD_PANORAMA.tileWidth, 480);
 });
 
-test('crowd animation uses integer-only vertical poses without changing tile width', () => {
+test('crowd tiers differ in scale and brightness so the stand reads as depth', () => {
+  const [far, near] = CROWD_PANORAMA.tiers;
+  assert.ok(near.tileHeight > far.tileHeight, 'the near tier is the larger one');
+  assert.ok(near.baselineY > far.baselineY, 'the near tier sits lower in frame');
+  assert.ok(near.tint > far.tint, 'the far tier is the darker one');
+});
+
+test('crowd panorama tiles cover the full stand width from their tier offset', () => {
+  for (const tier of CROWD_PANORAMA.tiers) {
+    const positions = getCrowdTilePositions(480, tier.tileWidth, tier.startX);
+    assert.equal(positions.every(Number.isInteger), true);
+    assert.equal(positions[0], tier.startX);
+    for (let i = 0; i < positions.length - 1; i++) {
+      assert.equal(positions[i] + tier.tileWidth, positions[i + 1]);
+    }
+    assert.ok(positions.at(-1) + tier.tileWidth >= 480, `${tier.id} tier leaves a gap`);
+  }
+});
+
+test('crowd animation uses integer-only vertical poses and never resizes a tile', () => {
   assert.equal(CROWD_MOTION.ambientLifts.every(Number.isInteger), true);
   assert.equal(CROWD_MOTION.goalLifts.every(Number.isInteger), true);
   assert.ok(Math.max(...CROWD_MOTION.ambientLifts) <= 1);
-  assert.ok(Math.max(...CROWD_MOTION.goalLifts) <= 2);
-  assert.equal(CROWD_PANORAMA.tileWidth, 240);
+  assert.ok(Math.max(...CROWD_MOTION.goalLifts) <= 3);
+  assert.ok(CROWD_MOTION.tilePhaseStride >= 1, 'tiles bob out of phase with each other');
+
+  const source = fs.readFileSync(new URL('../src/art/CrowdPanorama.js', import.meta.url), 'utf8');
+  const sizeWrites = source.match(/setDisplaySize/g) || [];
+  assert.equal(sizeWrites.length, 1, 'tile size is written once, at construction');
 });

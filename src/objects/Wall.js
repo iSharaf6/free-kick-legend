@@ -1,7 +1,7 @@
 import { project, PLAYER_H, BALL_R, PHYS } from '../config.js';
 import { getWallPoseOffsets, normalizeWallConfig } from '../systems/LevelMechanics.js';
 
-const SPACING = 0.58;      // shoulder-to-shoulder without sealing the goal
+const SPACING = 0.64;      // shoulder-to-shoulder without sealing the goal
 const JUMP_GRAVITY = 11;
 const IMPACT_FLASH_SECONDS = 0.095;
 const PLANE_TOLERANCE = 0.08;
@@ -16,11 +16,12 @@ function deterministicJumpSpeed(index, count) {
 function deterministicBuild(index, count) {
   const bucket = (index * 29 + count * 13 + 5) % 7;
   // Keep natural build variation without turning the shortest defenders into
-  // children beside a farther-away goalkeeper.
-  const heightFactor = 0.92 + bucket * 0.018;
+  // children beside a farther-away goalkeeper. Trimmed ~7% from the old build so
+  // the wall stops out-massing the goal it is standing in front of.
+  const heightFactor = 0.855 + bucket * 0.017;
   return {
     height: PLAYER_H * heightFactor,
-    halfWidth: 0.255 + (bucket % 3) * 0.018
+    halfWidth: 0.238 + (bucket % 3) * 0.016
   };
 }
 

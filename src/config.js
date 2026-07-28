@@ -26,7 +26,10 @@ export const CAM = {
   x: 0            // lateral camera position, set per level
 };
 
-export const GOAL_W = 9.0;   // goal frame width
+// The scoring area is deliberately a touch wider than the wall's reach. At 9.0m
+// a five-man wall covered so much of the frame that the goal stopped reading as
+// the biggest object in the shot.
+export const GOAL_W = 9.4;   // goal frame width
 export const GOAL_H = 3.1;   // crossbar height
 export const POST_R = 0.13;  // post thickness
 

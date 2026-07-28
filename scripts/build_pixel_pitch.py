@@ -11,7 +11,41 @@ OUTPUT = ROOT / "public/assets/hd/pitch-grass-pixel-v3.png"
 WIDTH = 960
 HEIGHT = 350
 VANISH_X = WIDTH // 2
-HORIZONTAL_BANDS = (0, 14, 32, 58, 92, 138, 196, 268, HEIGHT)
+
+# The turf has to converge on the same vanishing line the runtime camera uses,
+# or the painted mowing and the projected penalty-box markings disagree and the
+# foreground reads as 3D while the field reads as a flat overlay.
+#
+# Runtime geometry (src/config.js): the pitch texture is drawn from logical
+# y=104 to y=270, so one source pixel is 166/350 logical pixels, and the camera
+# vanishing line sits at logical y=76. That puts the vanishing point at source
+# row (76 - 104) / (166 / 350) = -59.
+PITCH_TOP_LOGICAL = 104
+PITCH_BOTTOM_LOGICAL = 270
+CAMERA_HORIZON_LOGICAL = 76
+LOGICAL_PER_SOURCE_PX = (PITCH_BOTTOM_LOGICAL - PITCH_TOP_LOGICAL) / HEIGHT
+VANISH_Y = (CAMERA_HORIZON_LOGICAL - PITCH_TOP_LOGICAL) / LOGICAL_PER_SOURCE_PX
+
+# perspective(y) is 0 on the vanishing line and 1 at the near edge, so lanes
+# converge exactly where the projected pitch lines do.
+_VANISH_T = VANISH_Y / (HEIGHT - 1)
+PERSPECTIVE_SLOPE = 1.0 / (1.0 - _VANISH_T)
+PERSPECTIVE_BASE = -_VANISH_T * PERSPECTIVE_SLOPE
+
+# Mowing bands are spaced by constant world depth, not by constant screen
+# distance, so they compress toward the horizon at the same rate the markings do.
+# Screen row for a depth z is 76 + (camera height 2.3 * focal 316) / z.
+_CAMERA_NUMERATOR = 2.3 * 316.0
+
+
+def _band_row(depth: float) -> int:
+    logical = CAMERA_HORIZON_LOGICAL + _CAMERA_NUMERATOR / depth
+    return max(0, min(HEIGHT, round((logical - PITCH_TOP_LOGICAL) / LOGICAL_PER_SOURCE_PX)))
+
+
+HORIZONTAL_BANDS = (0,) + tuple(
+    _band_row(depth) for depth in (25.0, 20.0, 13.0, 8.5, 5.8, 4.0)
+) + (HEIGHT,)
 
 # Four restrained mower tones keep the turf graphic and compatible with the
 # navy/gold character palette. Tufts use two additional authored colours.
@@ -45,7 +79,7 @@ def build_pixels() -> bytearray:
         depth_t = y / (HEIGHT - 1)
         # Convert the screen column back toward the near edge. Alternating
         # world-space lanes therefore converge cleanly on the central vanishing point.
-        perspective = 0.075 + depth_t * 0.925
+        perspective = PERSPECTIVE_BASE + depth_t * PERSPECTIVE_SLOPE
         for x in range(WIDTH):
             near_x = VANISH_X + (x - VANISH_X) / perspective
             lane = int((near_x + 720) // 120)

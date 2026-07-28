@@ -16,7 +16,10 @@ A polished, portal-ready pixel football game built with Phaser 3 and Vite. Draw 
 - A functional Locker with six kits, six balls, six trails, earned coins, progression gates, and no pay-to-win upgrades.
 - Versioned saves with v1 migration, validation, settings, lifetime stats, daily streaks/claims, achievements, and CrazyGames Data fallback.
 - CrazyGames SDK v3 lifecycle, cloud-data, completion, happy-time, and natural-break ad hooks; the bridge remains safe when the SDK is disabled or unavailable.
-- True 1920×1080 Full-HD rendering over stable logical coordinates, 4× text rasterization, high-density original striker/keeper/defender sprites, proportioned panoramic crowds, a purpose-built pixel pitch, responsive safe areas, and layered synthesized stadium audio.
+- True 1920×1080 Full-HD rendering over stable logical coordinates, 4× text rasterization, high-density original striker/keeper/defender sprites, a purpose-built pixel pitch whose mowing converges on the camera's own vanishing line, responsive safe areas, and layered synthesized stadium audio.
+- A layered stadium: two aspect-locked crowd tiers that read as depth rather than one flat band, six fictional sponsors on uneven boards, stewards, a photographers' pit, broadcast camera positions, stand entrances and wind-lean corner flags.
+- Hoop challenges rendered as physical gates - pixel rims with perspective lean, ground posts, cast shadows and mounted number plates - that light one at a time so the sequence reads without the objective text: gate 1, gate 2, then the corner arms.
+- Aim before you commit: a predicted opening arc from the real solver (wind, drag and curl included), a goal-plane reticle, a wind-drift tell, and live power/loft/curl meters.
 
 ## Run and verify
 
@@ -60,6 +63,9 @@ src/
 │   ├── SaveManager.js          v2 persistence, migration, currency, loadout, stats
 │   ├── PlatformService.js      no-op-safe CrazyGames/portal bridge
 │   └── AudioSynth.js           generated match and UI audio
+├── art/
+│   ├── CrowdPanorama.js        aspect-locked, layered supporter tiers
+│   └── PuppetTextures.js       generated rig textures
 ├── objects/
 │   ├── Ball.js                 fixed-step pseudo-3D solver
 │   ├── Goalkeeper.js           deterministic keeper state machine/contact
