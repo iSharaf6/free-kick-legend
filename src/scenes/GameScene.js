@@ -587,56 +587,33 @@ export class GameScene extends Phaser.Scene {
       if (atmosphereTint) this.crowdImage.setTint(atmosphereTint);
     }
 
-    if (!this.textures.exists(CROWD_ANIMATION.textureKey)) return;
+    const { textureKey, tileWidth, tileHeight, baselineY } = CROWD_PANORAMA;
+    const positions = getCrowdTilePositions(GAME_W, tileWidth, 0);
 
-    if (!this.anims.exists(CROWD_ANIMATION.ambientKey)) {
-      this.anims.create({
-        key: CROWD_ANIMATION.ambientKey,
-        frames: CROWD_ANIMATION.ambientFrames.map((frame) => ({
-          key: CROWD_ANIMATION.textureKey,
-          frame
-        })),
-        frameRate: CROWD_ANIMATION.ambientFrameRate,
-        repeat: -1
-      });
-    }
-
-    if (!this.anims.exists(CROWD_ANIMATION.goalKey)) {
-      this.anims.create({
-        key: CROWD_ANIMATION.goalKey,
-        frames: CROWD_ANIMATION.goalFrames.map((frame) => ({
-          key: CROWD_ANIMATION.textureKey,
-          frame
-        })),
-        frameRate: CROWD_ANIMATION.goalFrameRate,
-        repeat: 0
-      });
-    }
-
-    // Integer tile dimensions for small distant spectators matching on-field player scale
-    const tileHeight = 65;
-    const tileWidth = 240;
-
-    const startX = -120;
-    const endX = GAME_W + 120;
-
-    for (let x = startX; x <= endX; x += tileWidth) {
-      const crowdTile = this.add.sprite(x, 0, CROWD_ANIMATION.textureKey, 0)
-        .setOrigin(0, 0)
-        .setDisplaySize(tileWidth + 1, tileHeight)
+    // At 480 logical pixels the exact positions are [0, 240]. Both x and
+    // display width are integers, so tile[0].right === tile[1].left === 240.
+    for (const x of positions) {
+      const crowdTile = this.add.image(x, baselineY, textureKey)
+        .setOrigin(0, 1)
+        .setDisplaySize(tileWidth, tileHeight)
         .setDepth(1.3);
-
-      const atmosphereTint = CUP_TINTS[this.level.cup];
-      if (atmosphereTint) crowdTile.setTint(atmosphereTint);
-
-      if (!this.settings.reducedMotion) {
-        const delay = Math.abs(x % 350);
-        this.time.delayedCall(delay, () => {
-          if (crowdTile.active) crowdTile.play(CROWD_ANIMATION.ambientKey);
-        });
-      }
-
       this.nearCrowd.push(crowdTile);
+    }
+
+    this.crowdAnimationPhase = 0;
+    this.setCrowdPose(0);
+    this.crowdAmbientTimer?.remove?.();
+    if (!this.settings.reducedMotion) {
+      this.crowdAmbientTimer = this.time.addEvent({
+        delay: CROWD_MOTION.ambientFrameMs,
+        loop: true,
+        callback: () => {
+          if (this.time.now < this.crowdGoalAnimationUntil) return;
+          const lifts = CROWD_MOTION.ambientLifts;
+          this.crowdAnimationPhase = (this.crowdAnimationPhase + 1) % lifts.length;
+          this.setCrowdPose(lifts[this.crowdAnimationPhase]);
+        }
+      });
     }
   }
 
@@ -690,6 +667,7 @@ export class GameScene extends Phaser.Scene {
     const h = STADIUM_Y - y;
     const segmentW = 96;
     const board = this.add.graphics().setDepth(1.45);
+    const labels = [];
 
     board.fillStyle(PAL.ink, 1).fillRect(0, y - 2, GAME_W, h + 3);
     for (let x = 0, index = 0; x < GAME_W; x += segmentW, index++) {
@@ -705,20 +683,36 @@ export class GameScene extends Phaser.Scene {
         'calynx-logo-pixel'
       )
         .setDisplaySize(66, 20)
-        .setDepth(1.48);
-      this.sponsorBoardObjects.push(logo);
+        .setDepth(1.5);
+      labels.push(logo);
     }
+    this.sponsorBoardObjects = [board, ...labels];
+  }
+
+  setCrowdPose(lift = 0, alpha = 1) {
+    const integerLift = Math.max(0, Math.round(lift));
+    const { tileWidth, tileHeight, baselineY } = CROWD_PANORAMA;
+    this.nearCrowd?.forEach((tile) => {
+      if (!tile?.active) return;
+      // Width and x never change; every animation pose keeps exact tile edges.
+      tile.setPosition(Math.round(tile.x), baselineY)
+        .setDisplaySize(tileWidth, tileHeight + integerLift)
+        .setAlpha(alpha);
+    });
   }
 
   playCrowdGoal() {
     if (!this.nearCrowd?.length) return;
-    this.nearCrowd.forEach((tile) => {
-      if (!tile?.active) return;
-      tile.play(CROWD_ANIMATION.goalKey);
-      tile.once('animationcomplete', () => {
-        if (tile.active && !this.settings.reducedMotion) {
-          tile.play(CROWD_ANIMATION.ambientKey);
-        }
+    if (this.settings.reducedMotion) {
+      this.setCrowdPose(0);
+      return;
+    }
+
+    const { goalLifts, goalFrameMs } = CROWD_MOTION;
+    this.crowdGoalAnimationUntil = this.time.now + goalLifts.length * goalFrameMs;
+    goalLifts.forEach((lift, frame) => {
+      this.schedule(frame * goalFrameMs, () => {
+        this.setCrowdPose(lift, frame % 2 ? 0.88 : 1);
       });
     });
   }
