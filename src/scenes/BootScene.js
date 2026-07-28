@@ -41,6 +41,7 @@ export class BootScene extends Phaser.Scene {
   preload() {
     const base = import.meta.env.BASE_URL;
     this.load.image('pitch-grass-hd-v2', `${base}assets/hd/pitch-grass-hd-v2.png`);
+    this.load.image('crowd-v3-clean', `${base}assets/hd/crowd-panorama-v3-clean.png`);
     this.load.spritesheet(CROWD_ANIMATION.textureKey, `${base}${CROWD_ANIMATION.assetPath}`, {
       frameWidth: CROWD_ANIMATION.frameWidth,
       frameHeight: CROWD_ANIMATION.frameHeight

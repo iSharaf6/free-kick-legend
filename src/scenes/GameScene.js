@@ -551,41 +551,9 @@ export class GameScene extends Phaser.Scene {
 
   buildNearCrowd() {
     this.nearCrowd = [];
-    if (!this.textures.exists(CROWD_ANIMATION.textureKey)) return;
 
-    if (!this.anims.exists(CROWD_ANIMATION.ambientKey)) {
-      this.anims.create({
-        key: CROWD_ANIMATION.ambientKey,
-        frames: CROWD_ANIMATION.ambientFrames.map((frame) => ({
-          key: CROWD_ANIMATION.textureKey,
-          frame
-        })),
-        frameRate: CROWD_ANIMATION.ambientFrameRate,
-        repeat: -1
-      });
-    }
-    if (!this.anims.exists(CROWD_ANIMATION.goalKey)) {
-      this.anims.create({
-        key: CROWD_ANIMATION.goalKey,
-        frames: CROWD_ANIMATION.goalFrames.map((frame) => ({
-          key: CROWD_ANIMATION.textureKey,
-          frame
-        })),
-        frameRate: CROWD_ANIMATION.goalFrameRate,
-        repeat: 0
-      });
-    }
-
-    const railY = Math.round(project(0, 0, this.zGoal + 3.2).y);
-    const displayHeight = Math.max(90, Math.min(155, railY));
-
-    // 1. Source image cell dimensions (crowd-animation-sheet-hd.png)
-    const sourceWidth = 768;
-    const sourceHeight = 341;
-
-    // 2. Derive display width ONLY from uniform scale matching natural aspect ratio (2.252:1)
-    const scale = displayHeight / sourceHeight;
-    const displayWidth = sourceWidth * scale;
+    // Use transparent chroma-keyed pixel-art crowd asset (1827 x 590)
+    const textureKey = this.textures.exists('crowd-v3-clean') ? 'crowd-v3-clean' : 'crowd';
 
     if (this.crowdImage) {
       this.crowdImage.setTexture('crowd')
@@ -598,26 +566,24 @@ export class GameScene extends Phaser.Scene {
       if (atmosphereTint) this.crowdImage.setTint(atmosphereTint);
     }
 
-    // 3. Tile multiple natural-ratio crowd sprites horizontally with 1.5px overlap to eliminate seams
-    const startX = (GAME_W / 2) - displayWidth;
-    const endX = (GAME_W / 2) + displayWidth + (displayWidth / 2);
+    // Integer tile dimensions for small distant spectators matching on-field player scale
+    const tileHeight = 65; // integer height
+    const tileWidth = 201;  // integer width (Math.round(1827 * (65 / 590)))
 
-    for (let x = startX; x <= endX; x += displayWidth) {
-      const crowd = this.add.sprite(
-        x,
-        0,
-        CROWD_ANIMATION.textureKey,
-        CROWD_ANIMATION.ambientFrames[0]
-      )
-        .setOrigin(0.5, 0)
-        .setDisplaySize(displayWidth + 1.5, displayHeight)
+    // Integer start offset and tile loop (tile[n].right === tile[n+1].left)
+    const startX = -122; // integer start position
+    const endX = GAME_W + 120;
+
+    for (let x = startX; x <= endX; x += tileWidth) {
+      const crowdTile = this.add.image(x, 0, textureKey)
+        .setOrigin(0, 0)
+        .setDisplaySize(tileWidth, tileHeight)
         .setDepth(1.3);
 
       const atmosphereTint = CUP_TINTS[this.level.cup];
-      if (atmosphereTint) crowd.setTint(atmosphereTint);
+      if (atmosphereTint) crowdTile.setTint(atmosphereTint);
 
-      if (!this.settings.reducedMotion) crowd.play(CROWD_ANIMATION.ambientKey);
-      this.nearCrowd.push(crowd);
+      this.nearCrowd.push(crowdTile);
     }
   }
 
