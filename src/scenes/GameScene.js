@@ -1399,6 +1399,12 @@ export class GameScene extends Phaser.Scene {
     // Pause and terminal cards intentionally freeze the simulated match. The
     // Scene remains active so keyboard/pointer UI and overlay tweens still work.
     if (this.state === 'PAUSED' || this.state === 'OVERLAY' || this.state === 'TRANSITIONING') return;
+
+    // Step 3: Subtle slow ambient crowd shimmer (no distracting movement)
+    if (this.crowdImage && !this.settings?.reducedMotion) {
+      const shimmer = 0.96 + Math.sin(time * 0.0018) * 0.04;
+      this.crowdImage.setAlpha(shimmer);
+    }
     // Physics runs at a fixed cadence so the same gesture produces the same
     // shot at 30, 60, 120 Hz and after small browser stalls. The mode clock is
     // real-time based and intentionally pauses during result cards.

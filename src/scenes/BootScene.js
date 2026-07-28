@@ -266,7 +266,8 @@ export class BootScene extends Phaser.Scene {
 
     const crowdPalette = [
       0xd7a26b, 0x9c6548, 0xf0d7ad, 0x346c91, 0x244866,
-      0xb44137, 0x6e3441, 0xd6b63d, 0x42794c, 0x727c91
+      0xb44137, 0x6e3441, 0xd6b63d, 0x42794c, 0x727c91,
+      0xe07a5f, 0x3d405b, 0x81b29a, 0xf2cc8f, 0x9b5de5
     ];
     const drawTier = (y0, y1, cell, seed) => {
       g.fillStyle(PAL.night, 1);
@@ -282,7 +283,12 @@ export class BootScene extends Phaser.Scene {
           const color = crowdPalette[Math.floor(hash01(x + 9, y + 4, seed) * crowdPalette.length)];
           g.fillStyle(color, (0.68 + hash01(x + 3, y + 7, seed) * 0.3) * rowShade);
           g.fillRect(x, y, Math.max(1, cell - 2), Math.max(1, cell - 2));
-          if (hash01(x + 13, y, seed) > 0.84) {
+
+          // Phone flash or bright highlight pixel (~3% chance)
+          if (hash01(x + 19, y + 11, seed) > 0.97) {
+            g.fillStyle(0xffffff, 0.85 * rowShade);
+            g.fillRect(x, y, 1, 1);
+          } else if (hash01(x + 13, y, seed) > 0.84) {
             g.fillStyle(PAL.cream, 0.55 * rowShade);
             g.fillRect(x, y - 1, Math.max(1, cell - 3), 1);
           }
@@ -296,21 +302,30 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(PAL.ink, 0.45);
     g.fillRect(0, 28, GAME_W, 6);
 
+    // Tier break & structural ledge between upper and lower stands
     g.fillStyle(PAL.ink, 1);
     g.fillRect(0, 55, GAME_W, 4);
     g.fillStyle(PAL.borderDark, 1);
     g.fillRect(0, 55, GAME_W, 1);
+    g.fillStyle(PAL.cream, 0.35);
+    g.fillRect(0, 58, GAME_W, 1);
+
     drawTier(59, h - 8, 3, 83);
 
     // Balcony overhang shadow band (casting shadow over top rows of lower stand)
     g.fillStyle(PAL.ink, 0.38);
     g.fillRect(0, 59, GAME_W, 5);
 
-    // Aisles and railings separate the mosaic into believable stand sections.
-    g.lineStyle(2, PAL.borderDark, 0.9);
+    // Aisles, stairwells and railings separate the stand into believable sections.
     for (const x of [72, 156, 240, 324, 408]) {
-      g.lineBetween(x - 7, 30, x, 55);
-      g.lineBetween(x, 60, x + 6, h - 8);
+      // Dark stairwell channels
+      g.fillStyle(PAL.night, 0.75);
+      g.fillRect(x - 3, 28, 5, 27);
+      g.fillRect(x - 3, 59, 5, h - 67);
+      // Railing lines
+      g.lineStyle(1.5, PAL.borderDark, 0.9);
+      g.lineBetween(x - 5, 30, x + 1, 55);
+      g.lineBetween(x + 1, 60, x + 5, h - 8);
     }
     g.fillStyle(PAL.border, 0.72);
     g.fillRect(0, 58, GAME_W, 1);
