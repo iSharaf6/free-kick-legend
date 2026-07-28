@@ -598,7 +598,7 @@ export class GameScene extends Phaser.Scene {
       if (atmosphereTint) this.crowdImage.setTint(atmosphereTint);
     }
 
-    // 3. Tile multiple natural-ratio crowd sprites horizontally to cover canvas width edge-to-edge
+    // 3. Tile multiple natural-ratio crowd sprites horizontally with 1.5px overlap to eliminate seams
     const startX = (GAME_W / 2) - displayWidth;
     const endX = (GAME_W / 2) + displayWidth + (displayWidth / 2);
 
@@ -610,7 +610,7 @@ export class GameScene extends Phaser.Scene {
         CROWD_ANIMATION.ambientFrames[0]
       )
         .setOrigin(0.5, 0)
-        .setDisplaySize(displayWidth, displayHeight)
+        .setDisplaySize(displayWidth + 1.5, displayHeight)
         .setDepth(1.3);
 
       const atmosphereTint = CUP_TINTS[this.level.cup];

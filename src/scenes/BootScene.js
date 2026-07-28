@@ -316,14 +316,9 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(PAL.ink, 0.38);
     g.fillRect(0, 59, GAME_W, 5);
 
-    // Aisles, stairwells and railings separate the stand into believable sections.
-    for (const x of [72, 156, 240, 324, 408]) {
-      // Dark stairwell channels
-      g.fillStyle(PAL.night, 0.75);
-      g.fillRect(x - 3, 28, 5, 27);
-      g.fillRect(x - 3, 59, 5, h - 67);
-      // Railing lines
-      g.lineStyle(1.5, PAL.borderDark, 0.9);
+    // Railings separate the stand into believable sections.
+    g.lineStyle(1.2, PAL.borderDark, 0.7);
+    for (const x of [96, 192, 288, 384]) {
       g.lineBetween(x - 5, 30, x + 1, 55);
       g.lineBetween(x + 1, 60, x + 5, h - 8);
     }
