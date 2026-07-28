@@ -272,14 +272,18 @@ export class BootScene extends Phaser.Scene {
       g.fillStyle(PAL.night, 1);
       g.fillRect(0, y0, GAME_W, y1 - y0);
       for (let y = y0 + 1; y < y1 - 1; y += cell) {
+        // Vertical depth shading: back rows (near y0) are darker than front rows (near y1)
+        const rowProgress = (y - y0) / (y1 - y0);
+        const rowShade = 0.55 + rowProgress * 0.45;
+
         for (let x = 0; x < GAME_W; x += cell) {
           const r = hash01(x, y, seed);
           if (r < 0.12) continue;
           const color = crowdPalette[Math.floor(hash01(x + 9, y + 4, seed) * crowdPalette.length)];
-          g.fillStyle(color, 0.68 + hash01(x + 3, y + 7, seed) * 0.3);
+          g.fillStyle(color, (0.68 + hash01(x + 3, y + 7, seed) * 0.3) * rowShade);
           g.fillRect(x, y, Math.max(1, cell - 2), Math.max(1, cell - 2));
           if (hash01(x + 13, y, seed) > 0.84) {
-            g.fillStyle(PAL.cream, 0.55);
+            g.fillStyle(PAL.cream, 0.55 * rowShade);
             g.fillRect(x, y - 1, Math.max(1, cell - 3), 1);
           }
         }
@@ -287,11 +291,20 @@ export class BootScene extends Phaser.Scene {
     };
 
     drawTier(28, 55, 2, 41);
+    
+    // Roof overhang shadow band (casting shadow over top rows of upper stand)
+    g.fillStyle(PAL.ink, 0.45);
+    g.fillRect(0, 28, GAME_W, 6);
+
     g.fillStyle(PAL.ink, 1);
     g.fillRect(0, 55, GAME_W, 4);
     g.fillStyle(PAL.borderDark, 1);
     g.fillRect(0, 55, GAME_W, 1);
     drawTier(59, h - 8, 3, 83);
+
+    // Balcony overhang shadow band (casting shadow over top rows of lower stand)
+    g.fillStyle(PAL.ink, 0.38);
+    g.fillRect(0, 59, GAME_W, 5);
 
     // Aisles and railings separate the mosaic into believable stand sections.
     g.lineStyle(2, PAL.borderDark, 0.9);
