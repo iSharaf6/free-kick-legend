@@ -13,16 +13,16 @@ function pngDimensions(path) {
   };
 }
 
-test('crowd atlas has six ambient frames and three goal-jump frames', () => {
-  assert.deepEqual(CROWD_ANIMATION.ambientFrames, [0, 1, 2, 3, 4, 5]);
-  assert.deepEqual(CROWD_ANIMATION.goalFrames, [6, 7, 8]);
-  assert.equal(new Set([
+test('crowd atlas uses quiet poses for ambience and every pose for goal celebration', () => {
+  assert.deepEqual(CROWD_ANIMATION.ambientFrames, [0, 1, 0]);
+  assert.deepEqual(CROWD_ANIMATION.goalFrames, [2, 3, 4, 5, 4, 3, 2, 1, 0]);
+  assert.deepEqual([...new Set([
     ...CROWD_ANIMATION.ambientFrames,
     ...CROWD_ANIMATION.goalFrames
-  ]).size, 9);
+  ])].sort(), [0, 1, 2, 3, 4, 5]);
 });
 
-test('runtime crowd sheet is an exact 3x3 atlas', () => {
+test('runtime crowd sheet is an exact 2x3 atlas', () => {
   const dimensions = pngDimensions(new URL(
     '../public/assets/hd/crowd-animation-sheet-hd.png',
     import.meta.url

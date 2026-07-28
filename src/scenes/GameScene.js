@@ -117,7 +117,7 @@ export class GameScene extends Phaser.Scene {
       .setDepth(1)
       .setBlendMode('ADD');
     this.drawPitch();
-    this.buildNearCrowd(atmosphereTint);
+    this.buildNearCrowd();
     // Floodlight beams angled onto the penalty area sell the night-match
     // lighting; the vignette pulls focus toward the goalmouth.
     const beams = this.add.graphics().setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
@@ -235,7 +235,7 @@ export class GameScene extends Phaser.Scene {
 
   // ---------------------------------------------------------------- visuals
 
-  buildNearCrowd(atmosphereTint = null) {
+  buildNearCrowd() {
     this.nearCrowd = [];
     if (!this.textures.exists(CROWD_ANIMATION.textureKey)) return;
 
@@ -258,8 +258,7 @@ export class GameScene extends Phaser.Scene {
           frame
         })),
         frameRate: CROWD_ANIMATION.goalFrameRate,
-        repeat: 2,
-        repeatDelay: 45
+        repeat: 0
       });
     }
 
@@ -276,53 +275,40 @@ export class GameScene extends Phaser.Scene {
       0.94
     ).setDepth(1.18);
 
-    const sectionWidth = CROWD_ANIMATION.frameWidth * CROWD_ANIMATION.sectionScale;
-    const coverageWidth = sectionWidth * CROWD_ANIMATION.sectionCount;
-    const startX = (GAME_W - coverageWidth) / 2 + sectionWidth / 2;
-    for (let index = 0; index < CROWD_ANIMATION.sectionCount; index++) {
-      const section = this.add.sprite(
-        startX + index * sectionWidth,
-        railY,
-        CROWD_ANIMATION.textureKey,
-        CROWD_ANIMATION.ambientFrames[index % CROWD_ANIMATION.ambientFrames.length]
-      )
-        .setOrigin(0.5, 1)
-        .setScale(CROWD_ANIMATION.sectionScale)
-        .setFlipX(index % 2 === 1)
-        .setDepth(1.3);
-      if (atmosphereTint) section.setTint(atmosphereTint);
-      if (!this.settings.reducedMotion) {
-        section.play({
-          key: CROWD_ANIMATION.ambientKey,
-          startFrame: index % CROWD_ANIMATION.ambientFrames.length
-        });
-      }
-      this.nearCrowd.push(section);
-    }
+    // Each atlas cell is a complete stadium panorama. Rendering it once avoids
+    // the repeated six-section crowd and keeps supporters smaller than the
+    // players in front of them. The deliberate vertical fit preserves all five
+    // seating rows inside the shallow background plane.
+    const stand = this.add.sprite(
+      GAME_W / 2,
+      railY,
+      CROWD_ANIMATION.textureKey,
+      CROWD_ANIMATION.ambientFrames[0]
+    )
+      .setOrigin(0.5, 1)
+      .setDisplaySize(CROWD_ANIMATION.displayWidth, CROWD_ANIMATION.displayHeight)
+      .setDepth(1.3);
+
+    if (!this.settings.reducedMotion) stand.play(CROWD_ANIMATION.ambientKey);
+    this.nearCrowd.push(stand);
   }
 
   playCrowdGoal() {
-    this.nearCrowd?.forEach((section, index) => {
+    this.nearCrowd?.forEach((section) => {
       section.anims.stop();
       if (this.settings.reducedMotion) {
-        section.setFrame(CROWD_ANIMATION.goalFrames[1]);
+        section.setFrame(CROWD_ANIMATION.goalFrames[2]);
         this.time.delayedCall(520, () => {
-          if (section.active) section.setFrame(CROWD_ANIMATION.ambientFrames[index % 6]);
+          if (section.active) section.setFrame(CROWD_ANIMATION.ambientFrames[0]);
         });
         return;
       }
 
       section.once('animationcomplete', (animation) => {
         if (animation.key !== CROWD_ANIMATION.goalKey || !section.active) return;
-        section.play({
-          key: CROWD_ANIMATION.ambientKey,
-          startFrame: (index * 2) % CROWD_ANIMATION.ambientFrames.length
-        });
+        section.play(CROWD_ANIMATION.ambientKey);
       });
-      section.play({
-        key: CROWD_ANIMATION.goalKey,
-        delay: (index % 3) * 32
-      });
+      section.play(CROWD_ANIMATION.goalKey);
     });
   }
 

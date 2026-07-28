@@ -1,19 +1,21 @@
-const AMBIENT_FRAMES = Object.freeze([0, 1, 2, 3, 4, 5]);
-const GOAL_FRAMES = Object.freeze([6, 7, 8]);
+// The first two poses keep the stand alive without making every supporter
+// jump throughout the match. The remaining poses form the goal celebration.
+const AMBIENT_FRAMES = Object.freeze([0, 1, 0]);
+const GOAL_FRAMES = Object.freeze([2, 3, 4, 5, 4, 3, 2, 1, 0]);
 
 export const CROWD_ANIMATION = Object.freeze({
   textureKey: 'crowd-animation-hd',
   assetPath: 'assets/hd/crowd-animation-sheet-hd.png',
-  frameWidth: 512,
-  frameHeight: 342,
-  columns: 3,
+  frameWidth: 768,
+  frameHeight: 341,
+  columns: 2,
   rows: 3,
   ambientFrames: AMBIENT_FRAMES,
   goalFrames: GOAL_FRAMES,
   ambientKey: 'crowd-ambient',
   goalKey: 'crowd-goal-jump',
-  ambientFrameRate: 2.5,
-  goalFrameRate: 9,
-  sectionCount: 6,
-  sectionScale: 0.16
+  ambientFrameRate: 1.6,
+  goalFrameRate: 8,
+  displayWidth: 480,
+  displayHeight: 116
 });
