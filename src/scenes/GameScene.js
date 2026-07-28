@@ -576,31 +576,28 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
-    // The lower stand now finishes only a few pixels behind the goal line.
-    // This removes the empty strip of pitch that made the crowd feel remote.
     const railY = Math.round(project(0, 0, this.zGoal + 3.2).y);
-    const standTop = railY - CROWD_ANIMATION.displayHeight;
-    this.nearCrowdBackdrop = this.add.rectangle(
-      GAME_W / 2,
-      standTop + (railY - standTop) / 2,
-      GAME_W,
-      railY - standTop + 2,
-      PAL.night,
-      0.94
-    ).setDepth(1.18);
+    const displayHeight = Math.max(90, Math.min(155, railY));
+    const cropHeight = Math.min(341, Math.round(displayHeight * (768 / 480)));
 
-    // Each atlas cell is one complete stadium panorama. A single sprite keeps
-    // the crowd varied and correctly proportioned instead of repeating giant
-    // spectators across the goalmouth.
+    if (this.crowdImage) {
+      this.crowdImage.setVisible(false);
+    }
+
     const crowd = this.add.sprite(
       GAME_W / 2,
-      railY,
+      0,
       CROWD_ANIMATION.textureKey,
       CROWD_ANIMATION.ambientFrames[0]
     )
-      .setOrigin(0.5, 1)
-      .setDisplaySize(CROWD_ANIMATION.displayWidth, CROWD_ANIMATION.displayHeight)
+      .setOrigin(0.5, 0)
+      .setDisplaySize(GAME_W, displayHeight)
+      .setCrop(0, 0, 768, cropHeight)
       .setDepth(1.3);
+
+    const atmosphereTint = CUP_TINTS[this.level.cup];
+    if (atmosphereTint) crowd.setTint(atmosphereTint);
+
     if (!this.settings.reducedMotion) crowd.play(CROWD_ANIMATION.ambientKey);
     this.nearCrowd.push(crowd);
   }
@@ -664,40 +661,55 @@ export class GameScene extends Phaser.Scene {
     m.lineStyle(0.85, PAL.line, 0.62);
 
     const line = (x1, z1, x2, z2) => {
-      const a = project(x1, 0, z1);
-      const b = project(x2, 0, z2);
+      const minZ = 5.8;
+      if (z1 < minZ && z2 < minZ) return;
+      let cz1 = z1, cx1 = x1, cz2 = z2, cx2 = x2;
+      if (cz1 < minZ) {
+        const t = (minZ - z1) / (z2 - z1);
+        cz1 = minZ; cx1 = x1 + t * (x2 - x1);
+      }
+      if (cz2 < minZ) {
+        const t = (minZ - z2) / (z1 - z2);
+        cz2 = minZ; cx2 = x2 + t * (x1 - x2);
+      }
+      const a = project(cx1, 0, cz1);
+      const b = project(cx2, 0, cz2);
       m.lineBetween(a.x, a.y, b.x, b.y);
     };
 
     const zg = this.zGoal;
     // Goal line
-    line(-18, zg, 18, zg);
+    line(-16, zg, 16, zg);
 
-    // 18-yard Penalty Box (16.5m depth, 40.3m wide scaled)
-    const boxZ = zg - 16.5;
-    line(-9.0, zg, -9.0, boxZ);
-    line(9.0, zg, 9.0, boxZ);
-    line(-9.0, boxZ, 9.0, boxZ);
+    // 18-yard Penalty Box: extends 8.5m in front of goalLine (zg - 8.5m)
+    const boxZ = Math.max(5.8, zg - 8.5);
+    line(-7.5, zg, -7.5, boxZ);
+    line(7.5, zg, 7.5, boxZ);
+    line(-7.5, boxZ, 7.5, boxZ);
 
-    // 6-yard Box (5.5m depth, 18.3m wide scaled)
-    const sixZ = zg - 5.5;
-    line(-4.5, zg, -4.5, sixZ);
-    line(4.5, zg, 4.5, sixZ);
-    line(-4.5, sixZ, 4.5, sixZ);
+    // 6-yard Box: extends 3.0m in front of goalLine (zg - 3.0m)
+    const sixZ = Math.max(5.8, zg - 3.0);
+    line(-3.5, zg, -3.5, sixZ);
+    line(3.5, zg, 3.5, sixZ);
+    line(-3.5, sixZ, 3.5, sixZ);
 
-    // Penalty spot (11m from goal line)
-    const spotZ = zg - 11.0;
-    const spot = project(0, 0, spotZ);
-    m.fillStyle(PAL.line, 0.85);
-    m.fillCircle(spot.x, spot.y, Math.max(1.5, spot.s * 0.18));
+    // Penalty spot (5.5m in front of goal line)
+    const spotZ = zg - 5.5;
+    if (spotZ >= 5.8) {
+      const spot = project(0, 0, spotZ);
+      m.fillStyle(PAL.line, 0.85);
+      m.fillCircle(spot.x, spot.y, Math.max(1.5, spot.s * 0.18));
+    }
 
-    // Penalty D-Arc (9.15m radius centered at penalty spot, outside boxZ)
+    // Penalty D-Arc (centered at penalty spot, in front of boxZ)
     m.lineStyle(0.85, PAL.line, 0.55);
     const arcPoints = [];
-    for (let a = -0.95; a <= 0.95; a += 0.1) {
-      const px = Math.sin(a) * 9.15;
-      const pz = spotZ - Math.cos(a) * 9.15;
-      if (pz < boxZ) arcPoints.push(project(px, 0, pz));
+    for (let a = -0.8; a <= 0.8; a += 0.1) {
+      const px = Math.sin(a) * 4.5;
+      const pz = spotZ - Math.cos(a) * 4.5;
+      if (pz >= 5.8 && pz < boxZ) {
+        arcPoints.push(project(px, 0, pz));
+      }
     }
     for (let i = 0; i < arcPoints.length - 1; i++) {
       m.lineBetween(arcPoints[i].x, arcPoints[i].y, arcPoints[i + 1].x, arcPoints[i + 1].y);
