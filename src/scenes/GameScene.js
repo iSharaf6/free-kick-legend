@@ -578,37 +578,47 @@ export class GameScene extends Phaser.Scene {
 
     const railY = Math.round(project(0, 0, this.zGoal + 3.2).y);
     const displayHeight = Math.max(90, Math.min(155, railY));
-    const cropHeight = Math.min(341, Math.round(displayHeight * (768 / 480)));
 
-    const crowdWidth = GAME_W + 240;
+    // 1. Source image cell dimensions (crowd-animation-sheet-hd.png)
+    const sourceWidth = 768;
+    const sourceHeight = 341;
+
+    // 2. Derive display width ONLY from uniform scale matching natural aspect ratio (2.252:1)
+    const scale = displayHeight / sourceHeight;
+    const displayWidth = sourceWidth * scale;
 
     if (this.crowdImage) {
       this.crowdImage.setTexture('crowd')
-        .setOrigin(0.5, 0)
-        .setPosition(GAME_W / 2, 0)
-        .setDisplaySize(crowdWidth, CAM.horizonY)
+        .setOrigin(0, 0)
+        .setPosition(0, 0)
+        .setDisplaySize(GAME_W, CAM.horizonY)
         .setDepth(0)
         .setVisible(true);
       const atmosphereTint = CUP_TINTS[this.level.cup];
       if (atmosphereTint) this.crowdImage.setTint(atmosphereTint);
     }
 
-    const crowd = this.add.sprite(
-      GAME_W / 2,
-      0,
-      CROWD_ANIMATION.textureKey,
-      CROWD_ANIMATION.ambientFrames[0]
-    )
-      .setOrigin(0.5, 0)
-      .setDisplaySize(crowdWidth, displayHeight)
-      .setCrop(0, 0, 768, cropHeight)
-      .setDepth(1.3);
+    // 3. Tile multiple natural-ratio crowd sprites horizontally to cover canvas width edge-to-edge
+    const startX = (GAME_W / 2) - displayWidth;
+    const endX = (GAME_W / 2) + displayWidth + (displayWidth / 2);
 
-    const atmosphereTint = CUP_TINTS[this.level.cup];
-    if (atmosphereTint) crowd.setTint(atmosphereTint);
+    for (let x = startX; x <= endX; x += displayWidth) {
+      const crowd = this.add.sprite(
+        x,
+        0,
+        CROWD_ANIMATION.textureKey,
+        CROWD_ANIMATION.ambientFrames[0]
+      )
+        .setOrigin(0.5, 0)
+        .setDisplaySize(displayWidth, displayHeight)
+        .setDepth(1.3);
 
-    if (!this.settings.reducedMotion) crowd.play(CROWD_ANIMATION.ambientKey);
-    this.nearCrowd.push(crowd);
+      const atmosphereTint = CUP_TINTS[this.level.cup];
+      if (atmosphereTint) crowd.setTint(atmosphereTint);
+
+      if (!this.settings.reducedMotion) crowd.play(CROWD_ANIMATION.ambientKey);
+      this.nearCrowd.push(crowd);
+    }
   }
 
   playCrowdGoal() {
