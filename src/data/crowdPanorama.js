@@ -7,6 +7,13 @@ export const CROWD_PANORAMA = Object.freeze({
   baselineY: 95
 });
 
+export const CROWD_MOTION = Object.freeze({
+  ambientLifts: Object.freeze([0, 1, 0, 0, 1, 0, 0, 0]),
+  ambientFrameMs: 240,
+  goalLifts: Object.freeze([2, 0, 2, 1, 2, 0]),
+  goalFrameMs: 90
+});
+
 export function getCrowdTilePositions(
   viewWidth,
   tileWidth = CROWD_PANORAMA.tileWidth,

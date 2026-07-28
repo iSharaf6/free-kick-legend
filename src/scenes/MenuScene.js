@@ -10,7 +10,7 @@ import { LEVELS } from '../data/levels.js';
 import { PAL } from '../pixelart.js';
 import { Kicker } from '../objects/Kicker.js';
 import { utcDateKey } from '../data/progression.js';
-import { CROWD_ANIMATION } from '../data/crowdAnimation.js';
+import { addAnimatedCrowdPanorama } from '../art/CrowdPanorama.js';
 
 function levelId(level, index) {
   return level?.id ?? index;
@@ -24,22 +24,17 @@ export class MenuScene extends Phaser.Scene {
   create() {
     configureHdCamera(this);
     this.add.image(0, 0, 'stadium-menu').setOrigin(0).setDepth(0);
-    this.add.image(0, CAM.horizonY, 'pitch-grass-hd-v2')
+    this.add.image(0, CAM.horizonY, 'pitch-grass-pixel-v3')
       .setOrigin(0)
       .setDisplaySize(GAME_W, GAME_H - CAM.horizonY)
       .setDepth(1);
-    this.add.image(
-      GAME_W / 2,
-      CAM.horizonY,
-      CROWD_ANIMATION.textureKey,
-      CROWD_ANIMATION.ambientFrames[0]
-    )
-      .setOrigin(0.5, 1)
-      .setDisplaySize(CROWD_ANIMATION.displayWidth, CROWD_ANIMATION.menuDisplayHeight)
-      .setDepth(2);
+    const settings = SaveManager.getSettings?.() || {};
+    addAnimatedCrowdPanorama(this, {
+      depth: 2,
+      reducedMotion: Boolean(settings.reducedMotion)
+    });
     this.drawComposition();
 
-    const settings = SaveManager.getSettings?.() || {};
     const muted = settings.muted ?? settings.audioMuted ?? false;
     Audio.setMuted(muted);
 
