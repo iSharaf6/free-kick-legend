@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME_W, GAME_H, CAM } from '../config.js';
+import { GAME_W, GAME_H, STADIUM_Y } from '../config.js';
 import {
   makeButton, makeIconButton, makeStatChip, titleText, bodyText,
   drawPanel, addScanlines, sceneIntro, formatCompact, configureHdCamera, FONT
@@ -24,9 +24,9 @@ export class MenuScene extends Phaser.Scene {
   create() {
     configureHdCamera(this);
     this.add.image(0, 0, 'stadium-menu').setOrigin(0).setDepth(0);
-    this.add.image(0, CAM.horizonY, 'pitch-grass-pixel-v3')
+    this.add.image(0, STADIUM_Y, 'pitch-grass-pixel-v3')
       .setOrigin(0)
-      .setDisplaySize(GAME_W, GAME_H - CAM.horizonY)
+      .setDisplaySize(GAME_W, GAME_H - STADIUM_Y)
       .setDepth(1);
     const settings = SaveManager.getSettings?.() || {};
     addAnimatedCrowdPanorama(this, {

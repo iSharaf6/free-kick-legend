@@ -84,6 +84,91 @@ test('init drops destroyed optional HUD and world references before level 9', ()
   assert.equal(scene.wall, null);
   assert.equal(scene.scoreTxt, null);
   assert.equal(scene.dailyShotsTxt, null);
+  assert.deepEqual(scene.securityGuards, []);
+  assert.deepEqual(scene.securityGuardTweens, []);
+});
+
+test('security guards receive staggered ambient motion while keeping stable identities', () => {
+  const images = [];
+  const tweenConfigs = [];
+  const scene = Object.create(GameScene.prototype);
+  Object.assign(scene, {
+    levelIndex: 2,
+    settings: { reducedMotion: false },
+    textures: { exists: (key) => key === 'security-guards-hd' },
+    add: {
+      image: (x, y, texture, frame) => {
+        const image = {
+          x,
+          y,
+          texture,
+          frame,
+          active: true,
+          flipX: false,
+          setOrigin() { return this; },
+          setDisplaySize(width, height) {
+            this.displayWidth = width;
+            this.displayHeight = height;
+            this.scaleY = height / 204;
+            return this;
+          },
+          setDepth() { return this; },
+          setFlipX(value) { this.flipX = value; return this; }
+        };
+        images.push(image);
+        return image;
+      }
+    },
+    tweens: {
+      add: (config) => {
+        tweenConfigs.push(config);
+        return { config };
+      }
+    }
+  });
+
+  scene.buildSecurityGuards();
+
+  assert.equal(images.length, 6);
+  assert.deepEqual(images.map((image) => image.frame), [2, 3, 4, 5, 0, 1]);
+  assert.equal(tweenConfigs.length, 6);
+  assert.equal(scene.securityGuardTweens.length, 6);
+  assert.ok(tweenConfigs.every((config) => config.repeat === -1 && config.yoyo));
+  assert.equal(new Set(tweenConfigs.map((config) => config.delay)).size, 6);
+
+  tweenConfigs[0].onRepeat();
+  assert.equal(images[0].flipX, true);
+  tweenConfigs[1].onRepeat();
+  assert.equal(images[1].flipX, false);
+});
+
+test('reduced motion leaves security guards completely still', () => {
+  const scene = Object.create(GameScene.prototype);
+  let tweenCount = 0;
+  const makeImage = (x, y) => {
+    const image = {
+      x,
+      y,
+      scaleY: 1,
+      setOrigin() { return this; },
+      setDisplaySize() { return this; },
+      setDepth() { return this; }
+    };
+    return image;
+  };
+  Object.assign(scene, {
+    levelIndex: 0,
+    settings: { reducedMotion: true },
+    textures: { exists: () => true },
+    add: { image: makeImage },
+    tweens: { add: () => { tweenCount++; } }
+  });
+
+  scene.buildSecurityGuards();
+
+  assert.equal(scene.securityGuards.length, 6);
+  assert.equal(scene.securityGuardTweens.length, 0);
+  assert.equal(tweenCount, 0);
 });
 
 test('scene transition gate cancels callbacks and accepts only one restart', () => {

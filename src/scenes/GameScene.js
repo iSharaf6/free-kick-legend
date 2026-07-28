@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import {
-  GAME_W, GAME_H, RENDER_SCALE, CAM, GOAL_W, GOAL_H, POST_R, BALL_R, WALL_DIST, PHYS, SHOT, project
+  GAME_W, GAME_H, RENDER_SCALE, STADIUM_Y, CAM, GOAL_W, GOAL_H, POST_R, BALL_R, WALL_DIST, PHYS, SHOT, project
 } from '../config.js';
 import { LEVELS, dailyScenario, randomScenario } from '../data/levels.js';
 import { utcDateKey } from '../data/progression.js';
@@ -55,6 +55,13 @@ const CUP_TINTS = Object.freeze({
   legend: 0xe6dcff,
   daily: 0xffedbd
 });
+
+const SECURITY_GUARD_LAYOUT = Object.freeze([18, 76, 109, 326, 405, 458]);
+const SECURITY_GUARD_MOTION = Object.freeze([
+  { dx: -0.45, dy: -0.45, angle: -0.55, duration: 1120, hold: 720, repeatDelay: 1800 },
+  { dx: 0.55, dy: -0.25, angle: 0.45, duration: 1380, hold: 980, repeatDelay: 2300 },
+  { dx: -0.35, dy: -0.60, angle: -0.35, duration: 980, hold: 640, repeatDelay: 2700 }
+]);
 
 function mixColor(a, b, t) {
   const f = Phaser.Math.Clamp(t, 0, 1);
@@ -112,6 +119,9 @@ export class GameScene extends Phaser.Scene {
     this.targetAnchorScreenX = null;
     this.nearCrowd = [];
     this.nearCrowdBackdrop = null;
+    this.securityGuards = [];
+    this.securityGuardTweens = [];
+    this.sponsorBoardObjects = [];
     this.crowdAmbientTimer = null;
     this.crowdAnimationPhase = 0;
     this.crowdGoalAnimationUntil = 0;
@@ -189,15 +199,17 @@ export class GameScene extends Phaser.Scene {
     this.crowdImage = this.add.image(GAME_W / 2, 0, 'crowd').setOrigin(0.5, 0).setDepth(0);
     const atmosphereTint = CUP_TINTS[this.level.cup];
     if (atmosphereTint) this.crowdImage.setTint(atmosphereTint);
-    this.crowdGlow = this.add.rectangle(GAME_W / 2, CAM.horizonY / 2, GAME_W, CAM.horizonY, PAL.gold, 0)
+    this.crowdGlow = this.add.rectangle(GAME_W / 2, STADIUM_Y / 2, GAME_W, STADIUM_Y, PAL.gold, 0)
       .setDepth(1)
       .setBlendMode('ADD');
     this.drawPitch();
     this.buildNearCrowd();
+    this.buildSecurityGuards();
+    this.drawSponsorBoards();
     // A quiet floodlight wash keeps the night-match atmosphere without the
     // hard triangles that previously read as stray pitch markings.
-    this.add.rectangle(GAME_W / 2, CAM.horizonY + (GAME_H - CAM.horizonY) / 2,
-      GAME_W, GAME_H - CAM.horizonY, PAL.flood, 0.018)
+    this.add.rectangle(GAME_W / 2, STADIUM_Y + (GAME_H - STADIUM_Y) / 2,
+      GAME_W, GAME_H - STADIUM_Y, PAL.flood, 0.018)
       .setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
     this.add.image(0, 0, 'vignette').setOrigin(0, 0).setDepth(1950);
     this.drawGoal();
@@ -240,7 +252,7 @@ export class GameScene extends Phaser.Scene {
     this.kicker = new Kicker(this, ballStart.x - 23, ballStart.y + 15, {
       kitId: this.loadout.kit,
       pose: 'ready',
-      scale: 2.35,
+      scale: 2.7,
       depth: 1260,
       ambient: !this.settings.reducedMotion,
       reducedMotion: this.settings.reducedMotion
@@ -548,6 +560,9 @@ export class GameScene extends Phaser.Scene {
 
     // Drop references to objects the DisplayList destroyed during shutdown.
     this.nearCrowd = [];
+    this.securityGuards = [];
+    this.securityGuardTweens = [];
+    this.sponsorBoardObjects = [];
     this.ballGhosts = [];
     this.objectiveUi = null;
     this.attemptIcons = null;
@@ -565,7 +580,7 @@ export class GameScene extends Phaser.Scene {
       this.crowdImage.setTexture('crowd')
         .setOrigin(0, 0)
         .setPosition(0, 0)
-        .setDisplaySize(GAME_W, CAM.horizonY)
+        .setDisplaySize(GAME_W, STADIUM_Y)
         .setDepth(0)
         .setVisible(true);
       const atmosphereTint = CUP_TINTS[this.level.cup];
@@ -600,6 +615,78 @@ export class GameScene extends Phaser.Scene {
         }
       });
     }
+  }
+
+  buildSecurityGuards() {
+    this.securityGuards = [];
+    this.securityGuardTweens = [];
+    if (!this.textures.exists('security-guards-hd')) return;
+
+    // Keep the stewards irregularly spaced, as they would be around a real
+    // stand. Their lower bodies sit behind the LED boards at the next depth.
+    SECURITY_GUARD_LAYOUT.forEach((x, index) => {
+      const frame = (index + this.levelIndex) % 6;
+      const guard = this.add.image(x, 99, 'security-guards-hd', frame)
+        .setOrigin(0.5, 1)
+        .setDisplaySize(14, 32)
+        .setDepth(1.4);
+      this.securityGuards.push(guard);
+
+      if (!this.settings.reducedMotion) this.animateSecurityGuard(guard, index);
+    });
+  }
+
+  animateSecurityGuard(guard, index) {
+    const motion = SECURITY_GUARD_MOTION[index % SECURITY_GUARD_MOTION.length];
+    const baseScaleY = guard.scaleY;
+    const canScan = index % 3 !== 1;
+    const tween = this.tweens.add({
+      targets: guard,
+      x: guard.x + motion.dx,
+      y: guard.y + motion.dy,
+      angle: motion.angle,
+      scaleY: baseScaleY * 0.988,
+      duration: motion.duration,
+      delay: 180 + index * 210,
+      hold: motion.hold,
+      repeatDelay: motion.repeatDelay,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+      onRepeat: () => {
+        // A mirrored pose reads as a quick look along the touchline. Only a
+        // subset scan so the entire steward line never moves in unison.
+        if (canScan && guard.active) guard.setFlipX(!guard.flipX);
+      }
+    });
+    this.securityGuardTweens.push(tween);
+  }
+
+  drawSponsorBoards() {
+    const y = 83;
+    const h = STADIUM_Y - y;
+    const segmentW = 96;
+    const board = this.add.graphics().setDepth(1.45);
+    const labels = [];
+
+    board.fillStyle(PAL.ink, 1).fillRect(0, y - 2, GAME_W, h + 3);
+    for (let x = 0, index = 0; x < GAME_W; x += segmentW, index++) {
+      const w = Math.min(segmentW - 1, GAME_W - x);
+      board.fillStyle(index % 2 ? 0x173f91 : 0x214fa1, 1).fillRect(x + 1, y, w - 1, h);
+      board.fillStyle(0x6e93d3, 0.82).fillRect(x + 2, y + 1, w - 3, 1);
+      board.fillStyle(PAL.goldDark, 0.88).fillRect(x + w - 1, y, 1, h);
+      board.fillStyle(PAL.ink, 0.45).fillRect(x + 2, y + h - 2, w - 3, 1);
+
+      const logo = this.add.image(
+        x + w / 2,
+        y + h / 2,
+        'calynx-logo-pixel'
+      )
+        .setDisplaySize(66, 20)
+        .setDepth(1.5);
+      labels.push(logo);
+    }
+    this.sponsorBoardObjects = [board, ...labels];
   }
 
   setCrowdPose(lift = 0, alpha = 1) {
@@ -650,13 +737,14 @@ export class GameScene extends Phaser.Scene {
 
   drawPitch() {
     if (this.textures.exists('pitch-grass-pixel-v3')) {
-      this.pitchImage = this.add.image(0, CAM.horizonY, 'pitch-grass-pixel-v3')
+      this.pitchImage = this.add.image(0, STADIUM_Y, 'pitch-grass-pixel-v3')
         .setOrigin(0, 0)
-        .setDisplaySize(GAME_W, GAME_H - CAM.horizonY)
+        .setDisplaySize(GAME_W, GAME_H - STADIUM_Y)
+        .setTint(0xd6ffdc)
         .setDepth(1);
     } else {
-      this.add.rectangle(GAME_W / 2, CAM.horizonY + (GAME_H - CAM.horizonY) / 2,
-        GAME_W, GAME_H - CAM.horizonY, PAL.grass)
+      this.add.rectangle(GAME_W / 2, STADIUM_Y + (GAME_H - STADIUM_Y) / 2,
+        GAME_W, GAME_H - STADIUM_Y, PAL.grass)
         .setDepth(1);
     }
 
@@ -1051,55 +1139,54 @@ export class GameScene extends Phaser.Scene {
 
   buildHud() {
     const chrome = this.add.graphics().setDepth(1988);
-    drawPanel(chrome, 4, 3, GAME_W - 8, 31, {
+    drawPanel(chrome, 4, 1, GAME_W - 8, 9, {
       fill: PAL.panel,
       border: PAL.borderDark,
       corner: PAL.goldDark
     });
 
-    makeButton(this, 34, 18, 54, 23, 'EXIT', () => {
+    makeIconButton(this, 9, 5.5, 7, 'icon-back', () => {
       this.startScene(this.mode === 'career' ? 'LevelSelect' : 'Menu');
     }, {
       color: PAL.panelHi, hover: PAL.blue, border: PAL.borderDark,
-      icon: 'icon-back', iconScale: 0.62, iconX: 12,
-      fontSize: '7px', hitWidth: 58, hitHeight: 29
+      iconScale: 0.32, hitWidth: 22, hitHeight: 19
     }).setDepth(2000);
 
-    this.muteButton = makeIconButton(this, 70, 18, 21,
+    this.muteButton = makeIconButton(this, 23, 5.5, 7,
       Audio.muted ? 'icon-mute' : 'icon-sound', () => {
         const muted = Audio.toggleMuted();
         SaveManager.setSetting('muted', muted);
         this.muteButton.buttonIcon?.setTexture(muted ? 'icon-mute' : 'icon-sound');
       }, {
         color: PAL.panelHi, hover: PAL.blue, border: PAL.borderDark,
-        iconScale: 0.67, hitWidth: 29, hitHeight: 29
+        iconScale: 0.3, hitWidth: 22, hitHeight: 19
       }).setDepth(2000);
 
     if (this.mode === 'career') {
-      bodyText(this, 91, 11, `${String(this.level.cup || 'career').toUpperCase()} CUP  ·  MATCH ${String(this.levelIndex + 1).padStart(2, '0')}`, {
-        fontSize: '6px', color: '#8fa2ab', letterSpacing: 0.38
+      bodyText(this, 38, 5.5, `${String(this.level.cup || 'career').toUpperCase()} CUP  ·  MATCH ${String(this.levelIndex + 1).padStart(2, '0')}`, {
+        fontSize: '3px', color: '#8fa2ab', letterSpacing: 0.25
       }).setDepth(2000);
-      bodyText(this, 91, 24, String(this.level.name).toUpperCase(), {
-        fontFamily: FONT, fontSize: '8px', color: '#f3e7c3', letterSpacing: 0.2
+      bodyText(this, 114, 5.5, String(this.level.name).toUpperCase(), {
+        fontFamily: FONT, fontSize: '4px', color: '#f3e7c3', letterSpacing: 0.14
       }).setDepth(2000);
 
-      // Slim one-line strip; fades away while the shot is live so the bottom
-      // of the pitch belongs to the ball, not a UI slab.
+      // The objective floats above the touchline like a broadcast lower-third
+      // and fades while the shot is live, keeping the actual ball unobstructed.
       const objectivePlate = this.add.graphics().setDepth(1975);
-      drawPanel(objectivePlate, 137, GAME_H - 27, 337, 22, {
+      drawPanel(objectivePlate, 130, GAME_H - 39, 344, 25, {
         fill: PAL.panel, border: PAL.borderDark, corner: PAL.goldDark, alpha: 0.93
       });
-      const objectiveLabel = bodyText(this, 148, GAME_H - 16, 'OBJECTIVE', {
+      const objectiveLabel = bodyText(this, 143, GAME_H - 26.5, 'OBJECTIVE', {
         fontFamily: FONT, fontSize: '6px', color: '#f3c449', letterSpacing: 0.45
       }).setDepth(2000);
-      const objectiveCopy = bodyText(this, 207, GAME_H - 16, this.level.objective?.label || 'Score the free kick', {
+      const objectiveCopy = bodyText(this, 205, GAME_H - 26.5, this.level.objective?.label || 'Score the free kick', {
         fontSize: '7px', color: '#d7dfda', letterSpacing: 0.15
       }).setDepth(2000);
       this.objectiveUi = [objectivePlate, objectiveLabel, objectiveCopy];
 
       const needed = Math.max(1, this.level.objective?.goals || 1);
       if (needed > 1) {
-        this.objectiveProgressTxt = bodyText(this, 464, GAME_H - 16, `0/${needed}`, {
+        this.objectiveProgressTxt = bodyText(this, 464, GAME_H - 26.5, `0/${needed}`, {
           originX: 1, fontFamily: FONT, fontSize: '9px', color: '#f3c449'
         }).setDepth(2000);
         this.objectiveUi.push(this.objectiveProgressTxt);
@@ -1109,72 +1196,53 @@ export class GameScene extends Phaser.Scene {
       // so size the HUD icons from the texture instead of a fixed scale.
       const iconTexW = this.textures.get(this.ballTexture).getSourceImage()?.width || 12;
       for (let i = 0; i < this.maxAttempts; i++) {
-        const icon = this.add.image(GAME_W - 15 - i * 14, 18, this.ballTexture)
-          .setScale(11 / iconTexW).setDepth(2000);
+        const icon = this.add.image(GAME_W - 8 - i * 8, 5.5, this.ballTexture)
+          .setScale(5.5 / iconTexW).setDepth(2000);
         this.attemptIcons.push(icon);
       }
       const wind = getWindVectorAt(this.level.wind, this.simTime);
       if (wind.magnitude >= 0.1 || this.level.wind?.rotation) {
         const arrow = Math.abs(wind.x) < 0.06 ? (wind.y >= 0 ? '^' : 'v') : wind.x > 0 ? '>' : '<';
-        this.windTxt = bodyText(this, GAME_W - 64, 28, `WIND ${wind.magnitude.toFixed(1)} ${arrow}`, {
-          originX: 0.5, fontSize: '6px', color: '#f3c449'
+        this.windTxt = bodyText(this, GAME_W - 58, 5.5, `WIND ${wind.magnitude.toFixed(1)} ${arrow}`, {
+          originX: 0.5, fontSize: '4px', color: '#f3c449'
         }).setDepth(2000);
       }
-      const techniqueHint = this.level.rings?.length
-        ? 'THREAD EVERY HOOP  ·  THEN FINISH THE SHOT'
-        : this.level.objective?.type === 'blind-shot'
-          ? 'COMMIT YOUR LINE  ·  THE GUIDE VANISHES ON RUN-UP'
-          : this.level.objective?.type === 'bank-shot'
-            ? 'BANK IT IN  ·  POST OR CROSSBAR CONTACT REQUIRED'
-            : this.level.objective?.type === 'dip' || this.level.objective?.type === 'loft'
-        ? 'START AT THE BALL  ·  STEEPER SWIPE = MORE LOFT'
-        : this.level.objective?.type === 'low-shot'
-          ? 'START AT THE BALL  ·  SHORT FLAT SWIPE UNDER THE JUMP'
-          : this.levelIndex === 0
-            ? 'DRAG UP FROM THE BALL  ·  ARC THE SWIPE TO BEND'
-            : null;
-      if (techniqueHint) {
-        this.hint = crispText(this.add.text(GAME_W / 2 + 30, GAME_H - 84, techniqueHint, {
-          fontFamily: FONT, fontSize: '7px', color: '#f3e7c3', stroke: '#071018', strokeThickness: 2
-        }).setOrigin(0.5).setDepth(2000));
-        this.tweens.add({ targets: this.hint, alpha: 0.35, duration: 600, yoyo: true, repeat: -1 });
-      }
     } else if (this.mode === 'daily') {
-      bodyText(this, 91, 11, `DAILY KICK  ·  ${this.dailyDate}`, {
-        fontSize: '6px', color: '#f3c449', letterSpacing: 0.32
+      bodyText(this, 38, 5.5, `DAILY KICK  ·  ${this.dailyDate}`, {
+        fontSize: '3px', color: '#f3c449', letterSpacing: 0.24
       }).setDepth(2000);
-      bodyText(this, 91, 24, 'FIVE SHOTS  ·  ONE SHARED CHALLENGE', {
-        fontFamily: FONT, fontSize: '7px', color: '#f3e7c3', letterSpacing: 0.18
+      bodyText(this, 132, 5.5, 'FIVE SHOTS  ·  ONE SHARED CHALLENGE', {
+        fontFamily: FONT, fontSize: '3px', color: '#f3e7c3', letterSpacing: 0.12
       }).setDepth(2000);
-      this.scoreTxt = bodyText(this, 302, 18, `SCORE ${this.score}`, {
-        originX: 0.5, fontFamily: FONT, fontSize: '9px', color: '#f3e7c3'
+      this.scoreTxt = bodyText(this, 342, 5.5, `SCORE ${this.score}`, {
+        originX: 0.5, fontFamily: FONT, fontSize: '4px', color: '#f3e7c3'
       }).setDepth(2000);
-      const shots = makeStatChip(this, GAME_W - 42, 18, 70, 'icon-star', `1/${this.maxAttempts}`, {
-        height: 23, fill: PAL.night, border: PAL.goldDark, color: '#f3c449', fontSize: '9px'
+      const shots = makeStatChip(this, GAME_W - 28, 5.5, 44, 'icon-star', `1/${this.maxAttempts}`, {
+        height: 8, fill: PAL.night, border: PAL.goldDark, color: '#f3c449', fontSize: '4px', iconScale: 0.42
       }).setDepth(2000);
       this.dailyShotsTxt = shots.valueText;
 
       const objectivePlate = this.add.graphics().setDepth(1975);
-      drawPanel(objectivePlate, 137, GAME_H - 27, 337, 22, {
+      drawPanel(objectivePlate, 130, GAME_H - 39, 344, 25, {
         fill: PAL.panel, border: PAL.goldDark, corner: PAL.gold, alpha: 0.93
       });
-      const dailyLabel = bodyText(this, 148, GAME_H - 16, 'DAILY BONUS', {
+      const dailyLabel = bodyText(this, 143, GAME_H - 26.5, 'DAILY BONUS', {
         fontFamily: FONT, fontSize: '6px', color: '#f3c449', letterSpacing: 0.45
       }).setDepth(2000);
-      const dailyCopy = bodyText(this, 216, GAME_H - 16, 'Hit the moving target for +650. Every goal counts.', {
+      const dailyCopy = bodyText(this, 216, GAME_H - 26.5, 'Hit the moving target for +650. Every goal counts.', {
         fontSize: '7px', color: '#d7dfda', letterSpacing: 0.12
       }).setDepth(2000);
       this.objectiveUi = [objectivePlate, dailyLabel, dailyCopy];
     } else {
-      this.scoreTxt = bodyText(this, GAME_W / 2, 12, `SCORE ${this.score}`, {
-        originX: 0.5, fontFamily: FONT, fontSize: '10px', color: '#f3e7c3'
+      this.scoreTxt = bodyText(this, GAME_W / 2 - 32, 5.5, `SCORE ${this.score}`, {
+        originX: 0.5, fontFamily: FONT, fontSize: '4px', color: '#f3e7c3'
       }).setDepth(2000);
-      this.comboTxt = bodyText(this, GAME_W / 2, 26,
+      this.comboTxt = bodyText(this, GAME_W / 2 + 32, 5.5,
         this.combo > 1 ? `x${this.combo} COMBO` : `${this.goals} GOALS`, {
-          originX: 0.5, fontSize: '6px', color: '#74bde8', letterSpacing: 0.35
+          originX: 0.5, fontSize: '3px', color: '#74bde8', letterSpacing: 0.24
         }).setDepth(2000);
-      const timer = makeStatChip(this, GAME_W - 40, 18, 66, 'icon-clock', Math.ceil(this.timeLeft), {
-        height: 23, fill: PAL.night, border: PAL.goldDark, color: '#f3c449', fontSize: '10px'
+      const timer = makeStatChip(this, GAME_W - 27, 5.5, 42, 'icon-clock', Math.ceil(this.timeLeft), {
+        height: 8, fill: PAL.night, border: PAL.goldDark, color: '#f3c449', fontSize: '4px', iconScale: 0.42
       }).setDepth(2000);
       this.timerTxt = timer.valueText;
     }

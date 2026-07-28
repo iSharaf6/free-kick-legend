@@ -10,12 +10,18 @@ export const RENDER_SCALE = 4;
 export const RENDER_W = GAME_W * RENDER_SCALE;
 export const RENDER_H = GAME_H * RENDER_SCALE;
 
+// The authored stadium meets the turf below the camera's mathematical
+// vanishing line. Keeping those two values separate lets the goal, wall and
+// striker sit high in the cinematic frame while the crowd and advertising
+// boards still occupy a substantial upper tier.
+export const STADIUM_Y = 104;
+
 // Pseudo-3D camera: x = lateral, y = up, z = depth away from camera.
 export const CAM = {
   focal: 316,     // pixels per meter at 1m depth - tighter framing so the
                   // goal, keeper and wall read big instead of miniature
   height: 2.3,    // camera height above the pitch
-  horizonY: 95,   // screen y of the horizon line
+  horizonY: 76,   // mathematical vanishing line (stadium/pitch seam is STADIUM_Y)
   ballDist: 5.7,  // camera sits this far behind the ball
   x: 0            // lateral camera position, set per level
 };

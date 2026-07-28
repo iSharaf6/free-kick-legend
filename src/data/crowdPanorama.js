@@ -3,8 +3,8 @@ export const CROWD_PANORAMA = Object.freeze({
   assetPath: 'assets/hd/crowd-panorama-v3-clean.png',
   sourceCrop: Object.freeze({ x: 4, y: 273, width: 1819, height: 308 }),
   tileWidth: 240,
-  tileHeight: 41,
-  baselineY: 95
+  tileHeight: 55,
+  baselineY: 83
 });
 
 export const CROWD_MOTION = Object.freeze({

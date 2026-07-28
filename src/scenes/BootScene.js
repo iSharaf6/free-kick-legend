@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME_W, GAME_H, CAM } from '../config.js';
+import { GAME_W, GAME_H, STADIUM_Y } from '../config.js';
 import { textureFromMap, MAPS, PAL } from '../pixelart.js';
 import { getCosmeticsByCategory } from '../data/cosmetics.js';
 import { PlatformService } from '../systems/PlatformService.js';
@@ -96,6 +96,11 @@ export class BootScene extends Phaser.Scene {
       });
     }
     this.load.image('defender-hd', `${base}assets/hd/defender-hd.png`);
+    this.load.spritesheet('security-guards-hd', `${base}assets/hd/security-guards-sheet-hd.png`, {
+      frameWidth: 88,
+      frameHeight: 204
+    });
+    this.load.image('calynx-logo-pixel', `${base}assets/hd/calynx-logo-pixel.png`);
     this.load.image('ball-classic-hd', `${base}assets/hd/ball-classic-hd.png`);
   }
 
@@ -254,11 +259,11 @@ export class BootScene extends Phaser.Scene {
 
     // Floodlights are asymmetric enough to feel like a real venue.
     for (const x of [42, 128, 332, 418]) {
-      g.fillStyle(PAL.flood, 0.18);
+      g.fillStyle(PAL.flood, 0.055);
       g.fillRect(x - 8, 14, 28, 10);
-      g.fillStyle(PAL.flood, 1);
+      g.fillStyle(PAL.flood, 0.34);
       g.fillRect(x, 12, 13, 3);
-      for (let i = 0; i < 4; i++) g.fillRect(x + i * 3, 16, 2, 2);
+      for (let i = 0; i < 4; i++) g.fillRect(x + i * 3, 16, 2, 1);
     }
 
     const crowdPalette = [
@@ -338,22 +343,22 @@ export class BootScene extends Phaser.Scene {
   makeCrowd() {
     const g = this.add.graphics();
     // Gameplay receives the authored panorama on top of this empty stand.
-    this.drawStadium(g, CAM.horizonY, false);
-    g.generateTexture('crowd', GAME_W, CAM.horizonY);
+    this.drawStadium(g, STADIUM_Y, false);
+    g.generateTexture('crowd', GAME_W, STADIUM_Y);
     g.destroy();
   }
 
   makeStadiumBackdrop() {
     const g = this.add.graphics();
-    this.drawStadium(g, CAM.horizonY, false);
+    this.drawStadium(g, STADIUM_Y, false);
 
     // Matchday pitch, with perspective mowing bands and converging touchlines.
     g.fillStyle(PAL.grass, 1);
-    g.fillRect(0, CAM.horizonY, GAME_W, GAME_H - CAM.horizonY);
+    g.fillRect(0, STADIUM_Y, GAME_W, GAME_H - STADIUM_Y);
     const bands = [
-      [95, 106, PAL.grassDark], [106, 120, PAL.grass], [120, 138, PAL.grassDark],
-      [138, 160, PAL.grass], [160, 189, PAL.grassDark], [189, 225, PAL.grass],
-      [225, 270, PAL.grassDark]
+      [STADIUM_Y, 115, PAL.grassDark], [115, 129, PAL.grass], [129, 147, PAL.grassDark],
+      [147, 169, PAL.grass], [169, 198, PAL.grassDark], [198, 233, PAL.grass],
+      [233, 270, PAL.grassDark]
     ];
     bands.forEach(([y, y2, color]) => {
       g.fillStyle(color, 1);
@@ -363,7 +368,7 @@ export class BootScene extends Phaser.Scene {
     // Deterministic grass flecks are concentrated in the near field.
     for (let i = 0; i < 950; i++) {
       const x = Math.floor(hash01(i, 7, 131) * GAME_W);
-      const y = CAM.horizonY + Math.floor(Math.pow(hash01(i, 17, 197), 0.55) * (GAME_H - CAM.horizonY));
+      const y = STADIUM_Y + Math.floor(Math.pow(hash01(i, 17, 197), 0.55) * (GAME_H - STADIUM_Y));
       g.fillStyle(i % 3 ? PAL.grassDither : PAL.grassShadow, 0.58);
       g.fillRect(x, y, 1, 1);
     }
@@ -372,7 +377,7 @@ export class BootScene extends Phaser.Scene {
   }
 
   makeGrassNoise() {
-    const h = GAME_H - CAM.horizonY;
+    const h = GAME_H - STADIUM_Y;
     const g = this.add.graphics();
     for (let i = 0; i < 2600; i++) {
       const x = Math.floor(hash01(i, 23, 271) * GAME_W);
@@ -419,11 +424,11 @@ export class BootScene extends Phaser.Scene {
     ctx.fillStyle = actionShade;
     ctx.fillRect(0, 30, GAME_W, GAME_H - 30);
 
-    const pitchFalloff = ctx.createLinearGradient(0, CAM.horizonY, 0, GAME_H);
+    const pitchFalloff = ctx.createLinearGradient(0, STADIUM_Y, 0, GAME_H);
     pitchFalloff.addColorStop(0, 'rgba(3,9,13,0)');
     pitchFalloff.addColorStop(1, 'rgba(3,9,13,0.18)');
     ctx.fillStyle = pitchFalloff;
-    ctx.fillRect(0, CAM.horizonY, GAME_W, GAME_H - CAM.horizonY);
+    ctx.fillRect(0, STADIUM_Y, GAME_W, GAME_H - STADIUM_Y);
 
     c.refresh();
   }
