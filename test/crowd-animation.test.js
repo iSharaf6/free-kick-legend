@@ -4,7 +4,11 @@ import test from 'node:test';
 import zlib from 'node:zlib';
 
 import { CROWD_ANIMATION } from '../src/data/crowdAnimation.js';
-import { CROWD_PANORAMA, getCrowdTilePositions } from '../src/data/crowdPanorama.js';
+import {
+  CROWD_MOTION,
+  CROWD_PANORAMA,
+  getCrowdTilePositions
+} from '../src/data/crowdPanorama.js';
 
 function pngDimensions(path) {
   const header = fs.readFileSync(path).subarray(0, 24);
@@ -79,4 +83,12 @@ test('crowd panorama tiles cover the stand with exact integer edges', () => {
     assert.equal(positions[i] + CROWD_PANORAMA.tileWidth, positions[i + 1]);
   }
   assert.equal(positions.at(-1) + CROWD_PANORAMA.tileWidth, 480);
+});
+
+test('crowd animation uses integer-only vertical poses without changing tile width', () => {
+  assert.equal(CROWD_MOTION.ambientLifts.every(Number.isInteger), true);
+  assert.equal(CROWD_MOTION.goalLifts.every(Number.isInteger), true);
+  assert.ok(Math.max(...CROWD_MOTION.ambientLifts) <= 1);
+  assert.ok(Math.max(...CROWD_MOTION.goalLifts) <= 2);
+  assert.equal(CROWD_PANORAMA.tileWidth, 240);
 });
