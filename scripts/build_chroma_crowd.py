@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Chroma key magenta out of crowd-panorama-v3-chroma.png and output crowd-panorama-v3-clean.png"""
+"""Crop and chroma-key the authored crowd panorama for the runtime."""
 
 from pathlib import Path
 import struct
@@ -8,6 +8,59 @@ import zlib
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "assets/source/crowd-panorama-v3-chroma.png"
 OUTPUT = ROOT / "public/assets/hd/crowd-panorama-v3-clean.png"
+
+
+def is_flat_chroma(r: int, g: int, b: int) -> bool:
+    return (
+        r >= 128
+        and b >= 128
+        and g <= 96
+        and r - g >= 80
+        and b - g >= 80
+        and abs(r - b) <= 72
+    )
+
+
+def is_chroma_fringe(r: int, g: int, b: int) -> bool:
+    return (
+        r >= 32
+        and b >= 32
+        and g <= 72
+        and r - g >= 24
+        and b - g >= 24
+        and abs(r - b) <= 64
+    )
+
+
+def build_chroma_mask(pixels: bytearray, width: int, height: int) -> bytearray:
+    """Remove dark key spill only where it touches the keyed background."""
+    mask = bytearray(width * height)
+    for y in range(height):
+        for x in range(width):
+            i = (y * width + x) * 3
+            mask[y * width + x] = is_flat_chroma(pixels[i], pixels[i + 1], pixels[i + 2])
+
+    # The source's nearest-neighbour fringe is one pixel wide. Two adjacency
+    # passes catch diagonal corners without globally deleting burgundy shirts.
+    for _ in range(2):
+        expanded = bytearray(mask)
+        for y in range(height):
+            for x in range(width):
+                p = y * width + x
+                if mask[p]:
+                    continue
+                i = p * 3
+                if not is_chroma_fringe(pixels[i], pixels[i + 1], pixels[i + 2]):
+                    continue
+                touches_key = any(
+                    mask[ny * width + nx]
+                    for ny in range(max(0, y - 1), min(height, y + 2))
+                    for nx in range(max(0, x - 1), min(width, x + 2))
+                )
+                if touches_key:
+                    expanded[p] = 1
+        mask = expanded
+    return mask
 
 
 def build() -> None:
@@ -62,19 +115,34 @@ def build() -> None:
         pixels[y * width * 3 : (y + 1) * width * 3] = curr
         prev = curr
 
-    # Crop vertical top magenta block (y=271 to y=860) -> height = 590
-    crop_y0 = 271
-    crop_h = 590
-    crop_w = width
+    chroma_mask = build_chroma_mask(pixels, width, height)
+
+    # Derive the tight content rectangle after keying. The source has a large
+    # magenta area above and below the stand plus a few key-colour edge columns.
+    opaque = []
+    for y in range(height):
+        for x in range(width):
+            idx_p = (y * width + x) * 3
+            if not chroma_mask[y * width + x]:
+                opaque.append((x, y))
+
+    if not opaque:
+        raise ValueError("Source contains no non-chroma crowd pixels")
+
+    crop_x0 = min(x for x, _ in opaque)
+    crop_y0 = min(y for _, y in opaque)
+    crop_x1 = max(x for x, _ in opaque) + 1
+    crop_y1 = max(y for _, y in opaque) + 1
+    crop_w = crop_x1 - crop_x0
+    crop_h = crop_y1 - crop_y0
 
     rgba_raw = bytearray()
     for y in range(crop_y0, crop_y0 + crop_h):
         rgba_raw.append(0)  # Filter type 0 (None)
-        for x in range(crop_w):
+        for x in range(crop_x0, crop_x1):
             idx_p = (y * width + x) * 3
             r, g, b = pixels[idx_p], pixels[idx_p+1], pixels[idx_p+2]
-            # Key out magenta (R > 220, G < 40, B > 220)
-            if r > 220 and g < 40 and b > 220:
+            if chroma_mask[y * width + x]:
                 rgba_raw.extend([0, 0, 0, 0])
             else:
                 rgba_raw.extend([r, g, b, 255])
@@ -94,7 +162,10 @@ def build() -> None:
     with open(OUTPUT, "wb") as f:
         f.write(png_bytes)
 
-    print(f"Generated clean transparent crowd PNG: {OUTPUT} ({crop_w}x{crop_h})")
+    print(
+        f"Generated clean transparent crowd PNG: {OUTPUT} "
+        f"from crop x={crop_x0}, y={crop_y0}, width={crop_w}, height={crop_h}"
+    )
 
 
 if __name__ == "__main__":
