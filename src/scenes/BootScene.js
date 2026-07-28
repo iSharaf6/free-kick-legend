@@ -237,31 +237,36 @@ export class BootScene extends Phaser.Scene {
     g.destroy();
   }
 
-  drawStadium(g, h) {
+  drawStadium(g, h, width = GAME_W + 240, startX = -120) {
     // Cool dawn sky behind a hard-edged roof and two deep crowd tiers.
     g.fillStyle(PAL.sky, 1);
-    g.fillRect(0, 0, GAME_W, h);
+    g.fillRect(startX, 0, width, h);
     g.fillStyle(PAL.skyHi, 0.7);
-    g.fillRect(0, 16, GAME_W, 14);
+    g.fillRect(startX, 16, width, 14);
 
     // Roof cap, cantilever lip and structural trusses.
     g.fillStyle(PAL.ink, 1);
-    g.fillRect(0, 0, GAME_W, 11);
+    g.fillRect(startX, 0, width, 11);
     g.fillStyle(PAL.nightHi, 1);
-    g.fillRect(0, 11, GAME_W, 3);
+    g.fillRect(startX, 11, width, 3);
     g.lineStyle(2, PAL.borderDark, 1);
-    for (let x = -20; x < GAME_W + 30; x += 58) {
+    for (let x = startX - 20; x < startX + width + 30; x += 58) {
       g.lineBetween(x, 12, x + 28, 31);
       g.lineBetween(x + 28, 31, x + 56, 12);
     }
 
     // Floodlights are asymmetric enough to feel like a real venue.
-    for (const x of [42, 128, 332, 418]) {
-      g.fillStyle(PAL.flood, 0.18);
-      g.fillRect(x - 8, 14, 28, 10);
-      g.fillStyle(PAL.flood, 1);
-      g.fillRect(x, 12, 13, 3);
-      for (let i = 0; i < 4; i++) g.fillRect(x + i * 3, 16, 2, 2);
+    const floodX = [42, 128, 332, 418];
+    for (let offset = startX; offset < startX + width; offset += GAME_W) {
+      for (const fx of floodX) {
+        const x = offset + fx;
+        if (x < startX || x > startX + width) continue;
+        g.fillStyle(PAL.flood, 0.18);
+        g.fillRect(x - 8, 14, 28, 10);
+        g.fillStyle(PAL.flood, 1);
+        g.fillRect(x, 12, 13, 3);
+        for (let i = 0; i < 4; i++) g.fillRect(x + i * 3, 16, 2, 2);
+      }
     }
 
     const crowdPalette = [
@@ -270,9 +275,9 @@ export class BootScene extends Phaser.Scene {
     ];
     const drawTier = (y0, y1, cell, seed) => {
       g.fillStyle(PAL.night, 1);
-      g.fillRect(0, y0, GAME_W, y1 - y0);
+      g.fillRect(startX, y0, width, y1 - y0);
       for (let y = y0 + 1; y < y1 - 1; y += cell) {
-        for (let x = 2; x < GAME_W - 2; x += cell) {
+        for (let x = startX; x < startX + width; x += cell) {
           const r = hash01(x, y, seed);
           if (r < 0.12) continue;
           const color = crowdPalette[Math.floor(hash01(x + 9, y + 4, seed) * crowdPalette.length)];
@@ -288,25 +293,28 @@ export class BootScene extends Phaser.Scene {
 
     drawTier(28, 55, 2, 41);
     g.fillStyle(PAL.ink, 1);
-    g.fillRect(0, 55, GAME_W, 4);
+    g.fillRect(startX, 55, width, 4);
     g.fillStyle(PAL.borderDark, 1);
-    g.fillRect(0, 55, GAME_W, 1);
+    g.fillRect(startX, 55, width, 1);
     drawTier(59, h - 8, 3, 83);
 
     // Aisles and railings separate the mosaic into believable stand sections.
     g.lineStyle(2, PAL.borderDark, 0.9);
-    for (const x of [72, 156, 240, 324, 408]) {
-      g.lineBetween(x - 7, 30, x, 55);
-      g.lineBetween(x, 60, x + 6, h - 8);
+    for (let offset = startX; offset < startX + width; offset += GAME_W) {
+      for (const ax of [72, 156, 240, 324, 408]) {
+        const x = offset + ax;
+        g.lineBetween(x - 7, 30, x, 55);
+        g.lineBetween(x, 60, x + 6, h - 8);
+      }
     }
     g.fillStyle(PAL.border, 0.72);
-    g.fillRect(0, 58, GAME_W, 1);
+    g.fillRect(startX, 58, width, 1);
 
     // Fictional sponsor rhythm; no real-world branding.
     g.fillStyle(PAL.ink, 1);
-    g.fillRect(0, h - 8, GAME_W, 8);
+    g.fillRect(startX, h - 8, width, 8);
     const boardColors = [PAL.blue, PAL.red, PAL.green, PAL.goldDark];
-    for (let x = 3, i = 0; x < GAME_W; x += 50, i++) {
+    for (let x = startX + 3, i = 0; x < startX + width; x += 50, i++) {
       g.fillStyle(boardColors[i % boardColors.length], 1);
       g.fillRect(x, h - 6, 43, 4);
       g.fillStyle(PAL.cream, 0.8);
@@ -316,8 +324,8 @@ export class BootScene extends Phaser.Scene {
 
   makeCrowd() {
     const g = this.add.graphics();
-    this.drawStadium(g, CAM.horizonY);
-    g.generateTexture('crowd', GAME_W, CAM.horizonY);
+    this.drawStadium(g, CAM.horizonY, GAME_W + 240, -120);
+    g.generateTexture('crowd', GAME_W + 240, CAM.horizonY);
     g.destroy();
   }
 

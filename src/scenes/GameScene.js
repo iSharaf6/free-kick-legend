@@ -179,7 +179,7 @@ export class GameScene extends Phaser.Scene {
     this.baseTarget = this.level.target ? { ...this.level.target } : null;
     this.activeTarget = this.baseTarget ? { ...this.baseTarget } : null;
 
-    this.crowdImage = this.add.image(0, 0, 'crowd').setOrigin(0, 0).setDepth(0);
+    this.crowdImage = this.add.image(GAME_W / 2, 0, 'crowd').setOrigin(0.5, 0).setDepth(0);
     const atmosphereTint = CUP_TINTS[this.level.cup];
     if (atmosphereTint) this.crowdImage.setTint(atmosphereTint);
     this.crowdGlow = this.add.rectangle(GAME_W / 2, CAM.horizonY / 2, GAME_W, CAM.horizonY, PAL.gold, 0)
@@ -580,8 +580,17 @@ export class GameScene extends Phaser.Scene {
     const displayHeight = Math.max(90, Math.min(155, railY));
     const cropHeight = Math.min(341, Math.round(displayHeight * (768 / 480)));
 
+    const crowdWidth = GAME_W + 240;
+
     if (this.crowdImage) {
-      this.crowdImage.setVisible(false);
+      this.crowdImage.setTexture('crowd')
+        .setOrigin(0.5, 0)
+        .setPosition(GAME_W / 2, 0)
+        .setDisplaySize(crowdWidth, CAM.horizonY)
+        .setDepth(0)
+        .setVisible(true);
+      const atmosphereTint = CUP_TINTS[this.level.cup];
+      if (atmosphereTint) this.crowdImage.setTint(atmosphereTint);
     }
 
     const crowd = this.add.sprite(
@@ -591,7 +600,7 @@ export class GameScene extends Phaser.Scene {
       CROWD_ANIMATION.ambientFrames[0]
     )
       .setOrigin(0.5, 0)
-      .setDisplaySize(GAME_W, displayHeight)
+      .setDisplaySize(crowdWidth, displayHeight)
       .setCrop(0, 0, 768, cropHeight)
       .setDepth(1.3);
 
