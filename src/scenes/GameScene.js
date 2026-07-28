@@ -35,6 +35,7 @@ import {
   drawPanel, addScanlines, configureHdCamera, crispText, FONT
 } from '../ui.js';
 import { PAL } from '../pixelart.js';
+import { CROWD_ANIMATION } from '../data/crowdAnimation.js';
 
 const ATTEMPTS = 3;
 const ARCADE_TIME = 60;
@@ -185,7 +186,7 @@ export class GameScene extends Phaser.Scene {
       .setDepth(1)
       .setBlendMode('ADD');
     this.drawPitch();
-    this.buildNearCrowd(atmosphereTint);
+    this.buildNearCrowd();
     // A quiet floodlight wash keeps the night-match atmosphere without the
     // hard triangles that previously read as stray pitch markings.
     this.add.rectangle(GAME_W / 2, CAM.horizonY + (GAME_H - CAM.horizonY) / 2,
@@ -516,15 +517,37 @@ export class GameScene extends Phaser.Scene {
 
   // ---------------------------------------------------------------- visuals
 
-  buildNearCrowd(atmosphereTint = null) {
+  buildNearCrowd() {
     this.nearCrowd = [];
-    const textureKey = 'crowd-panorama-hd-v3';
-    if (!this.textures.exists(textureKey)) return;
+    if (!this.textures.exists(CROWD_ANIMATION.textureKey)) return;
+
+    if (!this.anims.exists(CROWD_ANIMATION.ambientKey)) {
+      this.anims.create({
+        key: CROWD_ANIMATION.ambientKey,
+        frames: CROWD_ANIMATION.ambientFrames.map((frame) => ({
+          key: CROWD_ANIMATION.textureKey,
+          frame
+        })),
+        frameRate: CROWD_ANIMATION.ambientFrameRate,
+        repeat: -1
+      });
+    }
+    if (!this.anims.exists(CROWD_ANIMATION.goalKey)) {
+      this.anims.create({
+        key: CROWD_ANIMATION.goalKey,
+        frames: CROWD_ANIMATION.goalFrames.map((frame) => ({
+          key: CROWD_ANIMATION.textureKey,
+          frame
+        })),
+        frameRate: CROWD_ANIMATION.goalFrameRate,
+        repeat: 0
+      });
+    }
 
     // The lower stand now finishes only a few pixels behind the goal line.
     // This removes the empty strip of pitch that made the crowd feel remote.
     const railY = Math.round(project(0, 0, this.zGoal + 3.2).y);
-    const standTop = CAM.horizonY - 36;
+    const standTop = railY - CROWD_ANIMATION.displayHeight;
     this.nearCrowdBackdrop = this.add.rectangle(
       GAME_W / 2,
       standTop + (railY - standTop) / 2,
@@ -534,45 +557,39 @@ export class GameScene extends Phaser.Scene {
       0.94
     ).setDepth(1.18);
 
-    // One authored panorama gives the stand real variation and consistent
-    // perspective. The old six tiled sections repeated the same giant faces,
-    // making spectators look taller than the keeper.
-    const source = this.textures.get(textureKey).getSourceImage();
-    const scale = GAME_W / Math.max(source?.width || GAME_W, 1);
-    const crowd = this.add.image(GAME_W / 2, railY, textureKey)
+    // Each atlas cell is one complete stadium panorama. A single sprite keeps
+    // the crowd varied and correctly proportioned instead of repeating giant
+    // spectators across the goalmouth.
+    const crowd = this.add.sprite(
+      GAME_W / 2,
+      railY,
+      CROWD_ANIMATION.textureKey,
+      CROWD_ANIMATION.ambientFrames[0]
+    )
       .setOrigin(0.5, 1)
-      .setScale(scale)
+      .setDisplaySize(CROWD_ANIMATION.displayWidth, CROWD_ANIMATION.displayHeight)
       .setDepth(1.3);
-    if (atmosphereTint) crowd.setTint(atmosphereTint);
-    crowd.fklBaseY = railY;
-    crowd.fklBaseScale = scale;
+    if (!this.settings.reducedMotion) crowd.play(CROWD_ANIMATION.ambientKey);
     this.nearCrowd.push(crowd);
   }
 
   playCrowdGoal() {
     this.nearCrowd?.forEach((section) => {
       if (!section?.active) return;
-      this.tweens.killTweensOf(section);
-      const baseY = section.fklBaseY ?? section.y;
-      const baseScale = section.fklBaseScale ?? section.scaleX;
+      section.anims.stop();
       if (this.settings.reducedMotion) {
-        section.setAlpha(0.82);
-        this.schedule(180, () => section.active && section.setAlpha(1));
+        section.setFrame(CROWD_ANIMATION.goalFrames[2]);
+        this.schedule(520, () => {
+          if (section.active) section.setFrame(CROWD_ANIMATION.ambientFrames[0]);
+        });
         return;
       }
-      section.setPosition(GAME_W / 2, baseY).setScale(baseScale);
-      this.tweens.add({
-        targets: section,
-        y: baseY - 2.2,
-        scaleY: baseScale * 1.035,
-        duration: 95,
-        ease: 'Sine.easeOut',
-        yoyo: true,
-        repeat: 2,
-        onComplete: () => {
-          if (section.active) section.setPosition(GAME_W / 2, baseY).setScale(baseScale);
-        }
+
+      section.once('animationcomplete', (animation) => {
+        if (animation.key !== CROWD_ANIMATION.goalKey || !section.active) return;
+        section.play(CROWD_ANIMATION.ambientKey);
       });
+      section.play(CROWD_ANIMATION.goalKey);
     });
   }
 

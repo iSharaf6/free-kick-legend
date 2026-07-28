@@ -10,6 +10,7 @@ import { LEVELS } from '../data/levels.js';
 import { PAL } from '../pixelart.js';
 import { Kicker } from '../objects/Kicker.js';
 import { utcDateKey } from '../data/progression.js';
+import { CROWD_ANIMATION } from '../data/crowdAnimation.js';
 
 function levelId(level, index) {
   return level?.id ?? index;
@@ -27,13 +28,15 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(0)
       .setDisplaySize(GAME_W, GAME_H - CAM.horizonY)
       .setDepth(1);
-    const crowd = this.add.image(0, CAM.horizonY, 'crowd-panorama-hd-v3')
-      .setOrigin(0, 1)
+    this.add.image(
+      GAME_W / 2,
+      CAM.horizonY,
+      CROWD_ANIMATION.textureKey,
+      CROWD_ANIMATION.ambientFrames[0]
+    )
+      .setOrigin(0.5, 1)
+      .setDisplaySize(CROWD_ANIMATION.displayWidth, CROWD_ANIMATION.menuDisplayHeight)
       .setDepth(2);
-    // Preserve the panorama's authored aspect ratio. At 480 logical pixels
-    // wide this makes the 320px alpha-tight source about 84px tall, leaving
-    // the procedural roof cap visible while keeping spectators human-scale.
-    crowd.setScale(GAME_W / crowd.width);
     this.drawComposition();
 
     const settings = SaveManager.getSettings?.() || {};

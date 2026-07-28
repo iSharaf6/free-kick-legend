@@ -6,6 +6,7 @@ import { PlatformService } from '../systems/PlatformService.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
 import { makePuppetTextures } from '../art/PuppetTextures.js';
+import { CROWD_ANIMATION } from '../data/crowdAnimation.js';
 
 const KICKER_POSES = {
   idle: MAPS.kickerIdle,
@@ -40,7 +41,10 @@ export class BootScene extends Phaser.Scene {
   preload() {
     const base = import.meta.env.BASE_URL;
     this.load.image('pitch-grass-hd-v2', `${base}assets/hd/pitch-grass-hd-v2.png`);
-    this.load.image('crowd-panorama-hd-v3', `${base}assets/hd/crowd-panorama-hd-v3-cropped.png`);
+    this.load.spritesheet(CROWD_ANIMATION.textureKey, `${base}${CROWD_ANIMATION.assetPath}`, {
+      frameWidth: CROWD_ANIMATION.frameWidth,
+      frameHeight: CROWD_ANIMATION.frameHeight
+    });
     getCosmeticsByCategory('kit').forEach((kit) => {
       HD_KICKER_POSES.forEach((pose) => {
         this.load.image(`kicker-hd-${kit.id}-${pose}`, `${base}assets/hd/kicker-hd-${kit.id}-${pose}.png`);
