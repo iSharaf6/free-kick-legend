@@ -1,13 +1,18 @@
-import { CROWD_MOTION, CROWD_PANORAMA, getCrowdTilePositions } from '../data/crowdPanorama.js';
+import {
+  CROWD_MOTION,
+  CROWD_PANORAMA,
+  CROWD_SETS,
+  getCrowdTilePositions
+} from '../data/crowdPanorama.js';
 
 export function addAnimatedCrowdPanorama(scene, {
   depth = 2,
   reducedMotion = false,
   tint = null
 } = {}) {
-  const { textureKey, tileWidth, tileHeight, baselineY } = CROWD_PANORAMA;
-  const tiles = getCrowdTilePositions(480, tileWidth, 0).map((x) => {
-    const tile = scene.add.image(x, baselineY, textureKey)
+  const { tileWidth, tileHeight, baselineY } = CROWD_PANORAMA;
+  const tiles = getCrowdTilePositions(480, tileWidth, 0).map((x, index) => {
+    const tile = scene.add.sprite(x, baselineY, CROWD_SETS[index].textureKey, 0)
       .setOrigin(0, 1)
       .setDisplaySize(tileWidth, tileHeight)
       .setDepth(depth);
@@ -21,10 +26,13 @@ export function addAnimatedCrowdPanorama(scene, {
       delay: CROWD_MOTION.ambientFrameMs,
       loop: true,
       callback: () => {
-        phase = (phase + 1) % CROWD_MOTION.ambientLifts.length;
-        const lift = CROWD_MOTION.ambientLifts[phase];
-        tiles.forEach((tile) => {
-          if (tile.active) tile.setDisplaySize(tileWidth, tileHeight + lift);
+        phase = (phase + 1) % CROWD_MOTION.ambientFrames.length;
+        tiles.forEach((tile, index) => {
+          if (!tile.active) return;
+          const pose = CROWD_MOTION.ambientFrames[
+            (phase + index) % CROWD_MOTION.ambientFrames.length
+          ];
+          tile.setFrame(pose);
         });
       }
     });

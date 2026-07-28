@@ -1,17 +1,22 @@
 export const CROWD_PANORAMA = Object.freeze({
-  textureKey: 'crowd-panorama-v3',
-  assetPath: 'assets/hd/crowd-panorama-v3-clean.png',
-  sourceCrop: Object.freeze({ x: 4, y: 273, width: 1819, height: 308 }),
-  tileWidth: 240,
-  tileHeight: 41,
+  frameWidth: 384,
+  frameHeight: 216,
+  frameCount: 5,
+  tileWidth: 96,
+  tileHeight: 54,
   baselineY: 95
 });
 
+export const CROWD_SETS = Object.freeze(Array.from({ length: 5 }, (_, index) => Object.freeze({
+  textureKey: `crowd-set-${index + 1}`,
+  assetPath: `assets/hd/crowd-set-${index + 1}-atlas.png`
+})));
+
 export const CROWD_MOTION = Object.freeze({
-  ambientLifts: Object.freeze([0, 1, 0, 0, 1, 0, 0, 0]),
-  ambientFrameMs: 240,
-  goalLifts: Object.freeze([2, 0, 2, 1, 2, 0]),
-  goalFrameMs: 90
+  ambientFrames: Object.freeze([0, 1, 0, 4]),
+  ambientFrameMs: 420,
+  goalFrames: Object.freeze([1, 2, 3, 2, 4, 0]),
+  goalFrameMs: 105
 });
 
 export function getCrowdTilePositions(
