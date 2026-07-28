@@ -15,6 +15,6 @@ export const CROWD_ANIMATION = Object.freeze({
   ambientFrameRate: 1.6,
   goalFrameRate: 8,
   displayWidth: 480,
-  displayHeight: 116,
-  menuDisplayHeight: 96
+  displayHeight: 48,
+  menuDisplayHeight: 42
 });

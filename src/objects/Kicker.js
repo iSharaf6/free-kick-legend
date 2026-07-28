@@ -448,7 +448,8 @@ export class Kicker {
   handleActionFrame(frame) {
     const action = this.activeKick;
     if (!action || action.token !== this.sequenceToken || this.destroyed) return;
-    const pose = poseFromTexture(frame?.textureKey || frame?.frame?.texture?.key);
+    const textureKey = frame?.textureKey || frame?.key || frame?.frame?.texture?.key || this.sprite?.texture?.key;
+    const pose = poseFromTexture(textureKey);
     if (pose === 'strike') this.enterStrikeFrame(action);
     else if (pose === 'follow') this.enterFollowFrame(action);
     else if (pose === 'ready' && action.phase === 'follow') this.enterRecoveryFrame(action);

@@ -356,16 +356,22 @@ export class GameScene extends Phaser.Scene {
     this.onTabKey = (event) => {
       event?.preventDefault?.();
       if (event) event.cancelled = 1;
-      if (event?.repeat || this.adRequestActive) return;
+      if (event?.repeat || this.adRequestActive || this.transitioning) return;
       this.togglePauseMenu();
     };
     this.onRestartKey = (event) => {
-      if (event?.repeat || this.adRequestActive) return;
-      this.restartCurrentLevel();
+      if (event?.repeat || this.adRequestActive || this.transitioning) return;
+      if (this.state === 'PAUSED' || this.state === 'OVERLAY' || this.state === 'AIMING' || this.state === 'RESULT' || this.state === 'FLIGHT') {
+        this.restartCurrentLevel();
+      }
     };
     this.onEscapeKey = (event) => {
-      if (event?.repeat || this.adRequestActive || this.state !== 'PAUSED') return;
-      this.startScene('Menu');
+      if (event?.repeat || this.adRequestActive || this.transitioning) return;
+      if (this.state === 'PAUSED') {
+        this.startScene('Menu');
+      } else {
+        this.togglePauseMenu();
+      }
     };
     keyboard.on('keydown-TAB', this.onTabKey);
     keyboard.on('keydown-R', this.onRestartKey);
@@ -507,12 +513,38 @@ export class GameScene extends Phaser.Scene {
     if (import.meta.env.DEV && globalThis.window?.__fkl === this) globalThis.window.__fkl = null;
     PlatformService.gameplayStop();
 
+    // Destroy game objects and rigs safely
+    this.keepers?.forEach((keeper) => keeper?.destroy?.());
+    this.keepers = [];
+    this.keeper = null;
+    this.walls?.forEach((wall) => wall?.destroy?.());
+    this.walls = [];
+    this.wall = null;
+    this.kicker?.destroy?.();
+    this.kicker = null;
+    this.snowEmitter?.destroy?.();
+    this.snowEmitter = null;
+    this.hazardVisuals?.forEach((v) => { if (v?.destroy) v.destroy(); });
+    this.hazardVisuals = [];
+    this.ringVisuals?.forEach((v) => { v.gfx?.destroy?.(); v.label?.destroy?.(); });
+    this.ringVisuals?.clear();
+    this.targetGfx?.destroy?.();
+    this.targetGfx = null;
+    this.pitchGfx?.destroy?.();
+    this.pitchGfx = null;
+    this.trailGfx?.destroy?.();
+    this.trailGfx = null;
+    this.pressureMeterGfx?.destroy?.();
+    this.pressureMeterGfx = null;
+
     // Drop references to objects the DisplayList destroyed during shutdown.
     this.nearCrowd = [];
     this.ballGhosts = [];
     this.objectiveUi = null;
     this.attemptIcons = null;
+    this.terminalOverlayObjects?.forEach((obj) => { if (obj?.active) obj.destroy(); });
     this.terminalOverlayObjects = [];
+    this.terminalOverlayShown = false;
   }
 
   // ---------------------------------------------------------------- visuals
@@ -623,28 +655,53 @@ export class GameScene extends Phaser.Scene {
         .setDepth(1);
     }
 
-    // Only regulation markings remain. All decorative diagonal light polygons
-    // were removed because they looked like broken geometry on the turf.
+    if (this.pitchGfx) {
+      this.pitchGfx.destroy();
+      this.pitchGfx = null;
+    }
     const m = this.add.graphics().setDepth(1);
-    m.lineStyle(0.75, PAL.line, 0.54);
+    this.pitchGfx = m;
+    m.lineStyle(0.85, PAL.line, 0.62);
+
     const line = (x1, z1, x2, z2) => {
       const a = project(x1, 0, z1);
       const b = project(x2, 0, z2);
       m.lineBetween(a.x, a.y, b.x, b.y);
     };
+
     const zg = this.zGoal;
-    line(-22, zg, 22, zg);                    // goal line
-    const boxZ = zg - 5.5;
-    line(-8.25, zg, -8.25, boxZ);             // penalty box
-    line(8.25, zg, 8.25, boxZ);
-    line(-8.25, boxZ, 8.25, boxZ);
-    const sixZ = zg - 2.3;
-    line(-3.6, zg, -3.6, sixZ);               // six yard box
-    line(3.6, zg, 3.6, sixZ);
-    line(-3.6, sixZ, 3.6, sixZ);
-    const spot = project(0, 0, zg - 7.5);
-    m.fillStyle(PAL.line, 0.7);
-    m.fillRect(spot.x - 1, spot.y, 2, 1);
+    // Goal line
+    line(-18, zg, 18, zg);
+
+    // 18-yard Penalty Box (16.5m depth, 40.3m wide scaled)
+    const boxZ = zg - 16.5;
+    line(-9.0, zg, -9.0, boxZ);
+    line(9.0, zg, 9.0, boxZ);
+    line(-9.0, boxZ, 9.0, boxZ);
+
+    // 6-yard Box (5.5m depth, 18.3m wide scaled)
+    const sixZ = zg - 5.5;
+    line(-4.5, zg, -4.5, sixZ);
+    line(4.5, zg, 4.5, sixZ);
+    line(-4.5, sixZ, 4.5, sixZ);
+
+    // Penalty spot (11m from goal line)
+    const spotZ = zg - 11.0;
+    const spot = project(0, 0, spotZ);
+    m.fillStyle(PAL.line, 0.85);
+    m.fillCircle(spot.x, spot.y, Math.max(1.5, spot.s * 0.18));
+
+    // Penalty D-Arc (9.15m radius centered at penalty spot, outside boxZ)
+    m.lineStyle(0.85, PAL.line, 0.55);
+    const arcPoints = [];
+    for (let a = -0.95; a <= 0.95; a += 0.1) {
+      const px = Math.sin(a) * 9.15;
+      const pz = spotZ - Math.cos(a) * 9.15;
+      if (pz < boxZ) arcPoints.push(project(px, 0, pz));
+    }
+    for (let i = 0; i < arcPoints.length - 1; i++) {
+      m.lineBetween(arcPoints[i].x, arcPoints[i].y, arcPoints[i + 1].x, arcPoints[i + 1].y);
+    }
   }
 
   drawGoal() {

@@ -286,12 +286,12 @@ export class BootScene extends Phaser.Scene {
       }
     };
 
-    drawTier(30, 55, 4, 41);
+    drawTier(28, 55, 2, 41);
     g.fillStyle(PAL.ink, 1);
-    g.fillRect(0, 55, GAME_W, 5);
+    g.fillRect(0, 55, GAME_W, 4);
     g.fillStyle(PAL.borderDark, 1);
     g.fillRect(0, 55, GAME_W, 1);
-    drawTier(60, h - 8, 5, 83);
+    drawTier(59, h - 8, 3, 83);
 
     // Aisles and railings separate the mosaic into believable stand sections.
     g.lineStyle(2, PAL.borderDark, 0.9);
@@ -337,12 +337,6 @@ export class BootScene extends Phaser.Scene {
       g.fillStyle(color, 1);
       g.fillRect(0, y, GAME_W, y2 - y);
     });
-    g.lineStyle(1, PAL.line, 0.7);
-    g.lineBetween(105, CAM.horizonY, 0, GAME_H);
-    g.lineBetween(GAME_W - 105, CAM.horizonY, GAME_W, GAME_H);
-    g.lineBetween(GAME_W / 2, CAM.horizonY, GAME_W / 2, GAME_H);
-    g.lineBetween(0, 216, GAME_W, 216);
-    g.strokeEllipse(GAME_W / 2, 216, 96, 31);
 
     // Deterministic grass flecks are concentrated in the near field.
     for (let i = 0; i < 950; i++) {
