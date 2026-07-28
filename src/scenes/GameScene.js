@@ -38,6 +38,7 @@ import { PAL } from '../pixelart.js';
 import {
   CROWD_MOTION,
   CROWD_PANORAMA,
+  CROWD_SETS,
   getCrowdTilePositions
 } from '../data/crowdPanorama.js';
 
@@ -572,21 +573,21 @@ export class GameScene extends Phaser.Scene {
       if (atmosphereTint) this.crowdImage.setTint(atmosphereTint);
     }
 
-    const { textureKey, tileWidth, tileHeight, baselineY } = CROWD_PANORAMA;
+    const { tileWidth, tileHeight, baselineY } = CROWD_PANORAMA;
     const positions = getCrowdTilePositions(GAME_W, tileWidth, 0);
 
-    // At 480 logical pixels the exact positions are [0, 240]. Both x and
-    // display width are integers, so tile[0].right === tile[1].left === 240.
-    for (const x of positions) {
-      const crowdTile = this.add.image(x, baselineY, textureKey)
+    // Five different animation sets occupy exact 96px sections: 0, 96, 192,
+    // 288 and 384. Width and x remain fixed for every animation frame.
+    positions.forEach((x, index) => {
+      const crowdTile = this.add.sprite(x, baselineY, CROWD_SETS[index].textureKey, 0)
         .setOrigin(0, 1)
         .setDisplaySize(tileWidth, tileHeight)
         .setDepth(1.3);
       this.nearCrowd.push(crowdTile);
-    }
+    });
 
     this.crowdAnimationPhase = 0;
-    this.setCrowdPose(0);
+    this.setCrowdFrame(0);
     this.crowdAmbientTimer?.remove?.();
     if (!this.settings.reducedMotion) {
       this.crowdAmbientTimer = this.time.addEvent({
@@ -594,22 +595,24 @@ export class GameScene extends Phaser.Scene {
         loop: true,
         callback: () => {
           if (this.time.now < this.crowdGoalAnimationUntil) return;
-          const lifts = CROWD_MOTION.ambientLifts;
-          this.crowdAnimationPhase = (this.crowdAnimationPhase + 1) % lifts.length;
-          this.setCrowdPose(lifts[this.crowdAnimationPhase]);
+          const frames = CROWD_MOTION.ambientFrames;
+          this.crowdAnimationPhase = (this.crowdAnimationPhase + 1) % frames.length;
+          this.nearCrowd.forEach((tile, index) => {
+            const frame = frames[(this.crowdAnimationPhase + index) % frames.length];
+            if (tile.active) tile.setFrame(frame).setAlpha(1);
+          });
         }
       });
     }
   }
 
-  setCrowdPose(lift = 0, alpha = 1) {
-    const integerLift = Math.max(0, Math.round(lift));
+  setCrowdFrame(frame = 0, alpha = 1) {
     const { tileWidth, tileHeight, baselineY } = CROWD_PANORAMA;
     this.nearCrowd?.forEach((tile) => {
       if (!tile?.active) return;
-      // Width and x never change; every animation pose keeps exact tile edges.
       tile.setPosition(Math.round(tile.x), baselineY)
-        .setDisplaySize(tileWidth, tileHeight + integerLift)
+        .setDisplaySize(tileWidth, tileHeight)
+        .setFrame(frame)
         .setAlpha(alpha);
     });
   }
@@ -617,15 +620,15 @@ export class GameScene extends Phaser.Scene {
   playCrowdGoal() {
     if (!this.nearCrowd?.length) return;
     if (this.settings.reducedMotion) {
-      this.setCrowdPose(0);
+      this.setCrowdFrame(0);
       return;
     }
 
-    const { goalLifts, goalFrameMs } = CROWD_MOTION;
-    this.crowdGoalAnimationUntil = this.time.now + goalLifts.length * goalFrameMs;
-    goalLifts.forEach((lift, frame) => {
+    const { goalFrames, goalFrameMs } = CROWD_MOTION;
+    this.crowdGoalAnimationUntil = this.time.now + goalFrames.length * goalFrameMs;
+    goalFrames.forEach((pose, frame) => {
       this.schedule(frame * goalFrameMs, () => {
-        this.setCrowdPose(lift, frame % 2 ? 0.88 : 1);
+        this.setCrowdFrame(pose, frame % 2 ? 0.92 : 1);
       });
     });
   }
@@ -688,23 +691,21 @@ export class GameScene extends Phaser.Scene {
     };
 
     const zg = this.zGoal;
-    // Goal line
-    line(-16, zg, 16, zg);
+    // A compact, camera-safe penalty area. The previous regulation-scale box
+    // projected beyond the viewport and left giant diagonal lines across the pitch.
+    const boxHalfWidth = 6;
+    const boxZ = Math.max(6.2, zg - 7);
+    line(-boxHalfWidth, zg, -boxHalfWidth, boxZ);
+    line(boxHalfWidth, zg, boxHalfWidth, boxZ);
+    line(-boxHalfWidth, boxZ, boxHalfWidth, boxZ);
 
-    // 18-yard Penalty Box: extends 8.5m in front of goalLine (zg - 8.5m)
-    const boxZ = Math.max(5.8, zg - 8.5);
-    line(-7.5, zg, -7.5, boxZ);
-    line(7.5, zg, 7.5, boxZ);
-    line(-7.5, boxZ, 7.5, boxZ);
+    const sixHalfWidth = 3.1;
+    const sixZ = Math.max(6.2, zg - 2.4);
+    line(-sixHalfWidth, zg, -sixHalfWidth, sixZ);
+    line(sixHalfWidth, zg, sixHalfWidth, sixZ);
+    line(-sixHalfWidth, sixZ, sixHalfWidth, sixZ);
 
-    // 6-yard Box: extends 3.0m in front of goalLine (zg - 3.0m)
-    const sixZ = Math.max(5.8, zg - 3.0);
-    line(-3.5, zg, -3.5, sixZ);
-    line(3.5, zg, 3.5, sixZ);
-    line(-3.5, sixZ, 3.5, sixZ);
-
-    // Penalty spot (5.5m in front of goal line)
-    const spotZ = zg - 5.5;
+    const spotZ = zg - 5;
     if (spotZ >= 5.8) {
       const spot = project(0, 0, spotZ);
       m.fillStyle(PAL.line, 0.85);
@@ -717,8 +718,8 @@ export class GameScene extends Phaser.Scene {
     m.lineStyle(1, PAL.line, 0.72);
     const arcPoints = [];
     for (let a = -0.8; a <= 0.8; a += 0.1) {
-      const px = Math.sin(a) * 4.5;
-      const pz = spotZ - Math.cos(a) * 4.5;
+      const px = Math.sin(a) * 3.5;
+      const pz = spotZ - Math.cos(a) * 3.5;
       if (pz >= 5.8 && pz < boxZ) {
         arcPoints.push(project(px, 0, pz));
       }

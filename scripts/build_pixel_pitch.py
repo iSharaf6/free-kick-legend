@@ -48,7 +48,7 @@ def build_pixels() -> bytearray:
         perspective = 0.075 + depth_t * 0.925
         for x in range(WIDTH):
             near_x = VANISH_X + (x - VANISH_X) / perspective
-            lane = int((near_x + 720) // 120)
+            lane = int((near_x + 720) // 240)
             color = MOWER[band & 1][lane & 1]
             set_pixel(pixels, x, y, color)
 
