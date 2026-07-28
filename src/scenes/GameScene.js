@@ -35,7 +35,7 @@ import {
   drawPanel, addScanlines, configureHdCamera, crispText, FONT
 } from '../ui.js';
 import { PAL } from '../pixelart.js';
-import { CROWD_ANIMATION } from '../data/crowdAnimation.js';
+import { CROWD_PANORAMA, getCrowdTilePositions } from '../data/crowdPanorama.js';
 
 const ATTEMPTS = 3;
 const ARCADE_TIME = 60;
@@ -552,9 +552,6 @@ export class GameScene extends Phaser.Scene {
   buildNearCrowd() {
     this.nearCrowd = [];
 
-    // Use transparent chroma-keyed pixel-art crowd asset (1827 x 590)
-    const textureKey = this.textures.exists('crowd-v3-clean') ? 'crowd-v3-clean' : 'crowd';
-
     if (this.crowdImage) {
       this.crowdImage.setTexture('crowd')
         .setOrigin(0, 0)
@@ -566,44 +563,30 @@ export class GameScene extends Phaser.Scene {
       if (atmosphereTint) this.crowdImage.setTint(atmosphereTint);
     }
 
-    // Integer tile dimensions for small distant spectators matching on-field player scale
-    const tileHeight = 65; // integer height
-    const tileWidth = 201;  // integer width (Math.round(1827 * (65 / 590)))
+    const { textureKey, tileWidth, tileHeight, baselineY } = CROWD_PANORAMA;
+    const tileY = baselineY - tileHeight;
+    const positions = getCrowdTilePositions(GAME_W, tileWidth, 0);
 
-    // Integer start offset and tile loop (tile[n].right === tile[n+1].left)
-    const startX = -122; // integer start position
-    const endX = GAME_W + 120;
-
-    for (let x = startX; x <= endX; x += tileWidth) {
-      const crowdTile = this.add.image(x, 0, textureKey)
+    // At 480 logical pixels the exact positions are [0, 240]. Both x and
+    // display width are integers, so tile[0].right === tile[1].left === 240.
+    for (const x of positions) {
+      const crowdTile = this.add.image(x, tileY, textureKey)
         .setOrigin(0, 0)
         .setDisplaySize(tileWidth, tileHeight)
         .setDepth(1.3);
-
-      const atmosphereTint = CUP_TINTS[this.level.cup];
-      if (atmosphereTint) crowdTile.setTint(atmosphereTint);
-
       this.nearCrowd.push(crowdTile);
     }
   }
 
   playCrowdGoal() {
-    this.nearCrowd?.forEach((section) => {
-      if (!section?.active) return;
-      section.anims.stop();
-      if (this.settings.reducedMotion) {
-        section.setFrame(CROWD_ANIMATION.goalFrames[2]);
-        this.schedule(520, () => {
-          if (section.active) section.setFrame(CROWD_ANIMATION.ambientFrames[0]);
-        });
-        return;
-      }
-
-      section.once('animationcomplete', (animation) => {
-        if (animation.key !== CROWD_ANIMATION.goalKey || !section.active) return;
-        section.play(CROWD_ANIMATION.ambientKey);
-      });
-      section.play(CROWD_ANIMATION.goalKey);
+    if (this.settings.reducedMotion || !this.nearCrowd?.length) return;
+    this.tweens.add({
+      targets: this.nearCrowd,
+      alpha: 0.72,
+      duration: 90,
+      yoyo: true,
+      repeat: 2,
+      ease: 'Cubic.easeOut'
     });
   }
 

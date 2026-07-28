@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
+import zlib from 'node:zlib';
 
 import { CROWD_ANIMATION } from '../src/data/crowdAnimation.js';
+import { CROWD_PANORAMA, getCrowdTilePositions } from '../src/data/crowdPanorama.js';
 
 function pngDimensions(path) {
   const header = fs.readFileSync(path).subarray(0, 24);
@@ -31,4 +33,50 @@ test('runtime crowd sheet is an exact 2x3 atlas', () => {
     width: CROWD_ANIMATION.frameWidth * CROWD_ANIMATION.columns,
     height: CROWD_ANIMATION.frameHeight * CROWD_ANIMATION.rows
   });
+});
+
+test('crowd panorama crop is tight and contains no visible chroma pixels', () => {
+  const path = new URL('../public/assets/hd/crowd-panorama-v3-clean.png', import.meta.url);
+  const png = fs.readFileSync(path);
+  const dimensions = pngDimensions(path);
+  assert.deepEqual(dimensions, {
+    width: CROWD_PANORAMA.sourceCrop.width,
+    height: CROWD_PANORAMA.sourceCrop.height
+  });
+
+  let offset = 8;
+  const idat = [];
+  while (offset < png.length) {
+    const length = png.readUInt32BE(offset);
+    const type = png.toString('ascii', offset + 4, offset + 8);
+    if (type === 'IDAT') idat.push(png.subarray(offset + 8, offset + 8 + length));
+    offset += length + 12;
+  }
+
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const stride = dimensions.width * 4 + 1;
+  for (let y = 0; y < dimensions.height; y++) {
+    assert.equal(raw[y * stride], 0, 'runtime crowd rows use deterministic PNG filter 0');
+    for (let x = 0; x < dimensions.width; x++) {
+      const i = y * stride + 1 + x * 4;
+      const [r, g, b, a] = raw.subarray(i, i + 4);
+      if (a === 0) {
+        assert.deepEqual([r, g, b], [0, 0, 0]);
+      } else {
+        const looksLikeChroma = r >= 128 && b >= 128 && g <= 96
+          && r - g >= 80 && b - g >= 80 && Math.abs(r - b) <= 72;
+        assert.equal(looksLikeChroma, false, `visible chroma pixel at ${x},${y}`);
+      }
+    }
+  }
+});
+
+test('crowd panorama tiles cover the stand with exact integer edges', () => {
+  const positions = getCrowdTilePositions(480);
+  assert.deepEqual(positions, [0, 240]);
+  assert.equal(positions.every(Number.isInteger), true);
+  for (let i = 0; i < positions.length - 1; i++) {
+    assert.equal(positions[i] + CROWD_PANORAMA.tileWidth, positions[i + 1]);
+  }
+  assert.equal(positions.at(-1) + CROWD_PANORAMA.tileWidth, 480);
 });

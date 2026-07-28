@@ -7,6 +7,7 @@ import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
 import { makePuppetTextures } from '../art/PuppetTextures.js';
 import { CROWD_ANIMATION } from '../data/crowdAnimation.js';
+import { CROWD_PANORAMA } from '../data/crowdPanorama.js';
 
 const KICKER_POSES = {
   idle: MAPS.kickerIdle,
@@ -41,7 +42,7 @@ export class BootScene extends Phaser.Scene {
   preload() {
     const base = import.meta.env.BASE_URL;
     this.load.image('pitch-grass-hd-v2', `${base}assets/hd/pitch-grass-hd-v2.png`);
-    this.load.image('crowd-v3-clean', `${base}assets/hd/crowd-panorama-v3-clean.png`);
+    this.load.image(CROWD_PANORAMA.textureKey, `${base}${CROWD_PANORAMA.assetPath}`);
     this.load.spritesheet(CROWD_ANIMATION.textureKey, `${base}${CROWD_ANIMATION.assetPath}`, {
       frameWidth: CROWD_ANIMATION.frameWidth,
       frameHeight: CROWD_ANIMATION.frameHeight
@@ -238,7 +239,7 @@ export class BootScene extends Phaser.Scene {
     g.destroy();
   }
 
-  drawStadium(g, h) {
+  drawStadium(g, h, includeProceduralCrowd = true) {
     // Cool dawn sky behind a hard-edged roof and two deep crowd tiers.
     g.fillStyle(PAL.sky, 1);
     g.fillRect(0, 0, GAME_W, h);
@@ -273,6 +274,7 @@ export class BootScene extends Phaser.Scene {
     const drawTier = (y0, y1, cell, seed) => {
       g.fillStyle(PAL.night, 1);
       g.fillRect(0, y0, GAME_W, y1 - y0);
+      if (!includeProceduralCrowd) return;
       for (let y = y0 + 1; y < y1 - 1; y += cell) {
         // Vertical depth shading: back rows (near y0) are darker than front rows (near y1)
         const rowProgress = (y - y0) / (y1 - y0);
@@ -340,7 +342,8 @@ export class BootScene extends Phaser.Scene {
 
   makeCrowd() {
     const g = this.add.graphics();
-    this.drawStadium(g, CAM.horizonY);
+    // Gameplay receives the authored panorama on top of this empty stand.
+    this.drawStadium(g, CAM.horizonY, false);
     g.generateTexture('crowd', GAME_W, CAM.horizonY);
     g.destroy();
   }
