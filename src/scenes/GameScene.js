@@ -99,25 +99,14 @@ const TRACKSIDE_LAYOUT = Object.freeze([
 // crowd somewhere to have come from.
 const STAND_ENTRANCES = Object.freeze([64, 186, 302, 424]);
 
-// What each hazard actually does to the shot, in the player's language. Without
-// these the effects are indistinguishable from bugs: a heavier ball reads as
-// wrong physics, and a run-up that moves the power meter reads as a glitch.
-const CONDITION_CHIPS = Object.freeze({
-  snow: Object.freeze({ label: 'SNOW · HEAVY BALL', color: '#cfe6f5' }),
-  slippery: Object.freeze({ label: 'SLIPPERY RUN-UP', color: '#ff8a65' }),
-  fog: Object.freeze({ label: 'FOG', color: '#d7dfda' }),
-  glare: Object.freeze({ label: 'FLOODLIGHT GLARE', color: '#ffe6a8' }),
-  'crowd-pressure': Object.freeze({ label: 'CROWD PRESSURE', color: '#ff8a65' })
-});
-
 const HOOP_STAGES = Object.freeze({
   // A pending gate is deliberately much quieter than the live one. When two
   // hoops overlap on screen - which authored depths regularly cause - that
   // brightness gap is the only thing that tells the player which is next.
-  pending: Object.freeze({ band: 0x7a5a1f, hi: 0x9a7530, alpha: 0.34, glyph: null, glyphColor: '#a08a55' }),
-  active: Object.freeze({ band: 0xf3c449, hi: 0xffe9a8, alpha: 0.72, glyph: null, glyphColor: '#fff3cd' }),
-  cleared: Object.freeze({ band: 0x49a760, hi: 0x9ef0b8, alpha: 0.8, glyph: '✓', glyphColor: '#9ef0b8' }),
-  missed: Object.freeze({ band: 0x8b2c2c, hi: 0xd97a63, alpha: 0.55, glyph: '✕', glyphColor: '#ff8a65' })
+  pending: Object.freeze({ band: 0x7a5a1f, hi: 0x9a7530, alpha: 0.42, glyph: null, glyphColor: '#a08a55' }),
+  active: Object.freeze({ band: 0xf3c449, hi: 0xffe9a8, alpha: 1, glyph: null, glyphColor: '#fff3cd' }),
+  cleared: Object.freeze({ band: 0x49a760, hi: 0x9ef0b8, alpha: 0.95, glyph: '✓', glyphColor: '#9ef0b8' }),
+  missed: Object.freeze({ band: 0x8b2c2c, hi: 0xd97a63, alpha: 0.7, glyph: '✕', glyphColor: '#ff8a65' })
 });
 
 // How far each hoop leans away from the camera, in radians. A gate rendered as
@@ -135,8 +124,6 @@ const RING_FORGIVENESS = 0.22;
 // The thread itself: one continuous line drawn through the ball, every gate and
 // the finish. This is the level, not decoration - the gates are eyes on it.
 const THREAD_SAMPLES = 260;
-const THREAD_ALPHA_LIVE = 0.5;   // the stretch the player still has to hit
-const THREAD_ALPHA_AHEAD = 0.24; // the rest of the route, present but quiet
 
 function mixColor(a, b, t) {
   const f = Phaser.Math.Clamp(t, 0, 1);
@@ -1247,14 +1234,16 @@ export class GameScene extends Phaser.Scene {
       const ahead = point.z > nextZ + 0.05;
       // Beads are sized by depth so the thread tapers away from the ball like
       // any other object in the scene rather than reading as a flat UI stroke.
-      // Kept deliberately faint: this is a route the player reads past, and at
-      // full strength it buried the wall, the keeper and the ball behind it.
-      const size = Math.max(1, Math.round(point.s * 0.038));
-      const alpha = ahead ? THREAD_ALPHA_AHEAD : THREAD_ALPHA_LIVE;
-      gfx.fillStyle(0x071018, alpha * 0.5);
+      const size = Math.max(2, Math.round(point.s * 0.05));
+      const alpha = ahead ? 0.5 : 1;
+      gfx.fillStyle(0x071018, alpha * 0.75);
       gfx.fillRect(Math.round(point.x - size / 2) - 1, Math.round(point.y - size / 2) - 1, size + 2, size + 2);
       gfx.fillStyle(ahead ? 0xb98f38 : PAL.gold, alpha);
       gfx.fillRect(Math.round(point.x - size / 2), Math.round(point.y - size / 2), size, size);
+      if (!ahead && size > 2) {
+        gfx.fillStyle(0xfff3cd, 0.8);
+        gfx.fillRect(Math.round(point.x - size / 2), Math.round(point.y - size / 2), 1, 1);
+      }
     }
   }
 
@@ -1812,7 +1801,6 @@ export class GameScene extends Phaser.Scene {
         }).setDepth(2000);
       }
 
-      this.buildConditionChips(4 + subWidth + 4);
       this.buildObjectiveStrip();
     } else if (this.mode === 'daily') {
       bodyText(this, 38, 5.5, `DAILY KICK  ·  ${this.dailyDate}`, {
@@ -1880,32 +1868,6 @@ export class GameScene extends Phaser.Scene {
     ];
     this.meterUi.forEach((label) => label.setDepth(1501).setVisible(false));
     addScanlines(this, 1850, 0.022);
-  }
-
-  /**
-   * Name the match conditions that change how the ball behaves.
-   *
-   * A snow level genuinely makes the ball heavier - there is extra drag on
-   * every axis - and a slippery run-up genuinely moves the power at the moment
-   * of contact. Both are deliberate, and both look like faults until the game
-   * says so out loud.
-   */
-  buildConditionChips(startX) {
-    let x = startX;
-    for (const hazard of this.hazards) {
-      const chip = CONDITION_CHIPS[hazard.type];
-      if (!chip) continue;
-      const width = chip.label.length * 2.4 + 10;
-      if (x + width > GAME_W - 4) break;
-      const plate = this.add.graphics().setDepth(1988);
-      drawPanel(plate, x, 11.5, width, 8, {
-        fill: PAL.panelMuted, border: PAL.borderDark, corner: PAL.goldDark, alpha: 0.9
-      });
-      bodyText(this, x + width / 2, 15.5, chip.label, {
-        originX: 0.5, fontSize: '4px', color: chip.color, letterSpacing: 0.25
-      }).setDepth(2000);
-      x += width + 4;
-    }
   }
 
   /**
@@ -2117,18 +2079,7 @@ export class GameScene extends Phaser.Scene {
 
   // ---------------------------------------------------------------- shooting
 
-  /**
-   * Resolve a gesture into the shot it will actually produce.
-   *
-   * `preview` matters on slippery levels. The jitter is a continuous function
-   * of simTime at up to 10Hz, and drawAim calls this every frame - so the
-   * preview arc, the reticle and all three meters were re-rolling sixty times
-   * a second and thrashing on screen. That reads as a broken game, not as a
-   * treacherous run-up. Previews therefore take the un-jittered shot and carry
-   * the jitter's *range* instead, which the meter draws as an uncertainty band;
-   * the live shot at release still gets the real jitter applied.
-   */
-  prepareShot(input = {}, { preview = false } = {}) {
+  prepareShot(input = {}) {
     const shot = {
       ...input,
       vx: Number(input.vx) || 0,
@@ -2150,8 +2101,7 @@ export class GameScene extends Phaser.Scene {
       Number(this.level.shotRules?.powerJitter || 0),
       Number(slippery?.powerJitter || 0)
     );
-    shot.powerJitterRange = jitterAmount;
-    if (jitterAmount > 0 && !preview) {
+    if (jitterAmount > 0) {
       const jitter = getJitteredPower(effectivePower, {
         amount: jitterAmount,
         frequency: slippery?.frequency,
@@ -3452,7 +3402,7 @@ export class GameScene extends Phaser.Scene {
     this.previewGfx?.clear();
     const pts = this.state === 'AIMING' ? this.swipe.activePath : [];
     const rawPreview = pts.length >= 2 ? computeShotFromPath(pts, { preview: true }).shot : null;
-    const preview = rawPreview ? this.prepareShot(rawPreview, { preview: true }) : null;
+    const preview = rawPreview ? this.prepareShot(rawPreview) : null;
     this.meterUi?.forEach((label) => label.setVisible(Boolean(preview)));
     if (!preview) return;
 
@@ -3530,13 +3480,6 @@ export class GameScene extends Phaser.Scene {
     this.aimGfx.fillRect(meterX, meterY, 94, 5);
     this.aimGfx.fillStyle(power > 0.88 ? 0xf3c449 : 0xf3e7c3, 1);
     this.aimGfx.fillRect(meterX, meterY, Math.round(94 * power), 5);
-    // Slippery run-up: the band is how much the footing can take off or add.
-    if (preview.powerJitterRange > 0) {
-      const lo = Phaser.Math.Clamp(power - preview.powerJitterRange, 0, 1);
-      const hi = Phaser.Math.Clamp(power + preview.powerJitterRange, 0, 1);
-      this.aimGfx.fillStyle(0xff8a65, 0.5);
-      this.aimGfx.fillRect(meterX + Math.round(94 * lo), meterY - 2, Math.max(1, Math.round(94 * (hi - lo))), 9);
-    }
     const maxPower = Phaser.Math.Clamp(this.level.shotRules?.maxPower ?? 1, 0.45, 1);
     if (maxPower < 1) {
       const capX = meterX + Math.round(94 * maxPower);

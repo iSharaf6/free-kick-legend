@@ -6,38 +6,12 @@ const JUMP_GRAVITY = 11;
 const IMPACT_FLASH_SECONDS = 0.095;
 const PLANE_TOLERANCE = 0.08;
 
-// A more committed leap. Measured against the whole legal shot space on the
-// rushing-wall levels: raising the base from 3.55 lifts shots that beat the
-// wall underneath from 1.8% to 2.4% while the share of blocked shots does not
-// move at all (19.5% either way) - the wall gives up the ground it was denying
-// without becoming better at stopping anything else.
-const JUMP_SPEED_BASE = 3.8;
-
 function deterministicJumpSpeed(index, count) {
   // Stable variation keeps the silhouettes organic without making an
   // identical shot change outcome between retries or replay recordings.
   const bucket = (index * 37 + count * 17 + 11) % 9;
-  return JUMP_SPEED_BASE + bucket * 0.075;
+  return 3.55 + bucket * 0.075;
 }
-
-// Collision box measured from the shipped defender art rather than guessed.
-// defender-hd.png is a 77x204 canvas whose opaque body occupies rows 8..195
-// and whose median row is 50px wide; the sprite is drawn so the whole canvas
-// spans `height`, which makes one canvas pixel height/204 world metres.
-//
-// This matters beyond tidiness. The old box ran from the defender's feet to
-// the full canvas height and was 0.48-0.54m wide, so it claimed the 9px of
-// transparent padding under the boots and a chunk of empty air above the head.
-// Since contact also inflates by the ball's radius, that padding was the
-// difference between a low drive sliding under a jumping wall and being
-// blocked by nothing.
-const SPRITE_HEIGHT_PX = 204;
-const BODY_TOP_PX = 8;
-const BODY_BOTTOM_PX = 195;
-const BODY_WIDTH_PX = 50;
-const BODY_FOOT_RATIO = (SPRITE_HEIGHT_PX - BODY_BOTTOM_PX) / SPRITE_HEIGHT_PX;
-const BODY_HEAD_RATIO = (SPRITE_HEIGHT_PX - BODY_TOP_PX) / SPRITE_HEIGHT_PX;
-const BODY_HALF_WIDTH_RATIO = BODY_WIDTH_PX / SPRITE_HEIGHT_PX / 2;
 
 function deterministicBuild(index, count) {
   const bucket = (index * 29 + count * 13 + 5) % 7;
@@ -45,13 +19,9 @@ function deterministicBuild(index, count) {
   // children beside a farther-away goalkeeper. Trimmed ~7% from the old build so
   // the wall stops out-massing the goal it is standing in front of.
   const heightFactor = 0.855 + bucket * 0.017;
-  const height = PLAYER_H * heightFactor;
   return {
-    height,
-    // A hair of per-defender variation on top of the measured torso width.
-    halfWidth: height * BODY_HALF_WIDTH_RATIO * (0.97 + (bucket % 3) * 0.03),
-    footY: height * BODY_FOOT_RATIO,
-    headY: height * BODY_HEAD_RATIO
+    height: PLAYER_H * heightFactor,
+    halfWidth: 0.238 + (bucket % 3) * 0.016
   };
 }
 
@@ -132,7 +102,7 @@ export class Wall {
         .setOrigin(0.5, 1)
         .setFlipX(hd && i % 2 === 1);
       const jumpSpeed = this.rng
-        ? JUMP_SPEED_BASE + Math.max(0, Math.min(1, Number(this.rng()) || 0)) * 0.60
+        ? 3.55 + Math.max(0, Math.min(1, Number(this.rng()) || 0)) * 0.60
         : deterministicJumpSpeed(i, config.count);
       const build = deterministicBuild(i, config.count);
       this.players.push({
@@ -378,10 +348,8 @@ export class Wall {
   }
 
   _contactPlayer(player, pt) {
-    // The body, not the canvas: footY/headY are the defender's actual boots and
-    // head, so a ball can pass through the padding the sprite carries.
-    const footY = player.jumpY + player.footY;
-    const headY = player.jumpY + player.headY;
+    const footY = player.jumpY;
+    const headY = player.jumpY + player.height;
     const overlapsX = Math.abs(pt.x - player.x) < player.halfWidth + BALL_R;
     const overlapsY = pt.y + BALL_R > footY && pt.y - BALL_R < headY;
     if (overlapsX && overlapsY) return { player, index: player.index, part: 'body' };
