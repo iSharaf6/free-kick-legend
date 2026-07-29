@@ -134,12 +134,6 @@ const RING_FORGIVENESS = 0.22;
 
 // The thread itself: one continuous line drawn through the ball, every gate and
 // the finish. This is the level, not decoration - the gates are eyes on it.
-// The aim arc is a hint, not a road. It starts clear of the ball so the swipe
-// line and the ball itself stay the brightest things on screen, and its dots
-// never grow past a couple of pixels however near the camera they are.
-const PREVIEW_ARC_SKIP = 4;
-const PREVIEW_DOT_MAX = 2;
-
 const THREAD_SAMPLES = 260;
 const THREAD_ALPHA_LIVE = 0.5;   // the stretch the player still has to hit
 const THREAD_ALPHA_AHEAD = 0.24; // the rest of the route, present but quiet
@@ -3407,15 +3401,12 @@ export class GameScene extends Phaser.Scene {
     const arc = this.previewTrajectory(preview);
     for (let i = 0; i < arc.length; i++) {
       const point = arc[i];
-      // The first stretch is skipped and the dot size is capped. Sizing purely
-      // by depth put the biggest, boldest markers right on top of the ball and
-      // the swipe line - directly over the one place the player is looking.
-      if (i < PREVIEW_ARC_SKIP) continue;
+      // Dots fade out along the arc: the further ahead, the less certain.
       const fade = 1 - i / Math.max(arc.length, 1);
-      const size = Math.min(PREVIEW_DOT_MAX, Math.max(1, Math.round(point.s * BALL_R * 0.4)));
-      gfx.fillStyle(0x071018, 0.34 * fade);
+      const size = Math.max(1, Math.round(point.s * BALL_R * 0.55));
+      gfx.fillStyle(0x071018, 0.5 * fade);
       gfx.fillRect(Math.round(point.x - size / 2) - 1, Math.round(point.y - size / 2) - 1, size + 2, size + 2);
-      gfx.fillStyle(lineColor, 0.2 + 0.34 * fade);
+      gfx.fillStyle(lineColor, 0.28 + 0.5 * fade);
       gfx.fillRect(Math.round(point.x - size / 2), Math.round(point.y - size / 2), size, size);
     }
 
@@ -3428,12 +3419,15 @@ export class GameScene extends Phaser.Scene {
       const inFrame = Math.abs(landing.x) <= this.goalWidth / 2 &&
         landing.y >= 0 && landing.y <= this.goalHeight;
       const color = inFrame ? 0xf3e7c3 : 0xff8a65;
-      gfx.lineStyle(2, 0x071018, 0.45);
+      gfx.lineStyle(2, 0x071018, 0.6);
       gfx.strokeCircle(hit.x, hit.y, r + 1);
-      gfx.lineStyle(1, color, 0.75);
+      gfx.lineStyle(1, color, 0.92);
       gfx.strokeCircle(hit.x, hit.y, r);
-      gfx.fillStyle(color, 0.8);
+      gfx.fillStyle(color, 0.95);
       gfx.fillRect(Math.round(hit.x) - 1, Math.round(hit.y) - 1, 2, 2);
+      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+        gfx.fillRect(Math.round(hit.x + dx * (r + 2)) - 0.5, Math.round(hit.y + dy * (r + 2)) - 0.5, 1, 1);
+      }
 
       // Wind tell: a short arrow off the reticle in the direction the air is
       // pushing, sized by strength.
@@ -3445,9 +3439,9 @@ export class GameScene extends Phaser.Scene {
         const dirY = -Math.sign(wind.y) || 0;
         const tipX = hit.x + dirX * (r + 3 + length);
         const tipY = hit.y + dirY * (r + 3 + length);
-        gfx.lineStyle(1, 0x74bde8, 0.6);
+        gfx.lineStyle(1, 0x74bde8, 0.8);
         gfx.lineBetween(hit.x + dirX * (r + 3), hit.y + dirY * (r + 3), tipX, tipY);
-        gfx.fillStyle(0x74bde8, 0.7);
+        gfx.fillStyle(0x74bde8, 0.9);
         gfx.fillRect(Math.round(tipX) - 1, Math.round(tipY) - 1, 2, 2);
       }
     }
