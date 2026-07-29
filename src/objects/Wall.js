@@ -6,12 +6,16 @@ const JUMP_GRAVITY = 11;
 const IMPACT_FLASH_SECONDS = 0.095;
 const PLANE_TOLERANCE = 0.08;
 
-// A more committed leap. Measured against the whole legal shot space on the
-// rushing-wall levels: raising the base from 3.55 lifts shots that beat the
-// wall underneath from 1.8% to 2.4% while the share of blocked shots does not
-// move at all (19.5% either way) - the wall gives up the ground it was denying
-// without becoming better at stopping anything else.
-const JUMP_SPEED_BASE = 3.8;
+// Do not raise this to buy a wider gap underneath.
+//
+// It was briefly 3.8, on the evidence that the total share of blocked shots
+// did not move (19.5% either way). That number was hiding a straight trade:
+// bucketing the blocked shots by the ball's height at the wall showed -5,624
+// in the 0.0-0.8m bands and +5,762 in the 2.4-2.8m band. The extra leap paid
+// for the ground route by eating the chip over the wall into the top corner,
+// which is the shot this game is about. Aggregates are not enough here; check
+// the distribution by height before touching it.
+const JUMP_SPEED_BASE = 3.55;
 
 function deterministicJumpSpeed(index, count) {
   // Stable variation keeps the silhouettes organic without making an
