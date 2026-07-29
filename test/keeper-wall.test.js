@@ -706,11 +706,39 @@ test('wall jump variation is deterministic and frame-rate invariant', () => {
 
 test('wall collision expands both axes by the ball radius', () => {
   const wall = new Wall(sceneStub(), 1, 12, 0);
-  const expandedHalfWidth = wall.players[0].halfWidth + BALL_R;
+  const defender = wall.players[0];
+  const expandedHalfWidth = defender.halfWidth + BALL_R;
   assert.equal(wall.blocks({ x: expandedHalfWidth - 0.001, y: BALL_R }), true);
   assert.equal(wall.blocks({ x: expandedHalfWidth + 0.001, y: BALL_R }), false);
 
-  wall.players[0].jumpY = 0.8;
-  assert.equal(wall.blocks({ x: 0, y: 0.8 - BALL_R - 0.001 }), false);
-  assert.equal(wall.blocks({ x: 0, y: 0.8 - BALL_R + 0.001 }), true);
+  defender.jumpY = 0.8;
+  const boots = defender.jumpY + defender.footY;
+  assert.equal(wall.blocks({ x: 0, y: boots - BALL_R - 0.001 }), false);
+  assert.equal(wall.blocks({ x: 0, y: boots - BALL_R + 0.001 }), true);
+});
+
+// The defender sprite carries transparent padding under the boots and above the
+// head. The collision box used to claim all of it, so a low drive was stopped
+// by empty canvas - the single biggest reason shots could not be slid under a
+// jumping wall.
+test('the collision box is the defender, not the sprite canvas', () => {
+  const wall = new Wall(sceneStub(), 1, 12, 0);
+  const defender = wall.players[0];
+
+  assert.ok(defender.footY > 0, 'the boots sit above the bottom of the canvas');
+  assert.ok(defender.headY < defender.height, 'the head sits below the top of the canvas');
+  assert.ok(
+    defender.halfWidth * 2 < defender.height * 0.3,
+    'the torso is narrower than a third of the defender height'
+  );
+
+  // Padding under a jumping defender is passable; the body above it is not.
+  defender.jumpY = 0.8;
+  const padding = defender.jumpY + defender.footY * 0.5;
+  assert.equal(wall.blocks({ x: 0, y: padding - BALL_R }), false);
+  assert.equal(wall.blocks({ x: 0, y: defender.jumpY + defender.height * 0.5 }), true);
+
+  // Padding above the head is passable too.
+  defender.jumpY = 0;
+  assert.equal(wall.blocks({ x: 0, y: defender.height + BALL_R }), false);
 });
