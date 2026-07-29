@@ -17,8 +17,8 @@ A polished, portal-ready pixel football game built with Phaser 3 and Vite. Draw 
 - Versioned saves with v1 migration, validation, settings, lifetime stats, daily streaks/claims, achievements, and CrazyGames Data fallback.
 - CrazyGames SDK v3 lifecycle, cloud-data, completion, happy-time, and natural-break ad hooks; the bridge remains safe when the SDK is disabled or unavailable.
 - True 1920×1080 Full-HD rendering over stable logical coordinates, 4× text rasterization, high-density original striker/keeper/defender sprites, a purpose-built pixel pitch whose mowing converges on the camera's own vanishing line, responsive safe areas, and layered synthesized stadium audio.
-- A layered stadium: two aspect-locked crowd tiers that read as depth rather than one flat band, six fictional sponsors on uneven boards, stewards, a photographers' pit, broadcast camera positions, stand entrances and wind-lean corner flags.
-- Hoop challenges rendered as physical gates - pixel rims with perspective lean, ground posts, cast shadows and mounted number plates - that light one at a time so the sequence reads without the objective text: gate 1, gate 2, then the corner arms.
+- A layered stadium: two aspect-locked crowd tiers that read as depth rather than one flat band, a CALYNX hoarding run in six colourways and uneven widths, stewards, a photographers' pit, broadcast camera positions, stand entrances and wind-lean corner flags. The hoardings are a physical backstop - shots that miss thump into the advertising and rebound onto the pitch.
+- Hoop challenges drawn as one continuous golden thread running from the ball through every gate to the finish, with the gates as pixel-rim eyes on it that light one at a time - so the route reads without the objective text. Gate centres are sampled from real scoring trajectories rather than placed by eye, which is what makes them threadable at all.
 - Aim before you commit: a predicted opening arc from the real solver (wind, drag and curl included), a goal-plane reticle, a wind-drift tell, and live power/loft/curl meters.
 
 ## Run and verify

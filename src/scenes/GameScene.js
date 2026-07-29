@@ -14,7 +14,12 @@ import { SaveManager } from '../systems/SaveManager.js';
 import { PlatformService } from '../systems/PlatformService.js';
 import { Audio } from '../systems/AudioSynth.js';
 import { careerStars, isTopCorner, scoreShot, targetGeometry } from '../systems/ShotScoring.js';
-import { classifyGoalPlane, reboundFromGoalFrame, sweepGoalFrame } from '../systems/GoalFramePhysics.js';
+import {
+  classifyGoalPlane,
+  classifyReboundPosition,
+  reboundFromGoalFrame,
+  sweepGoalFrame
+} from '../systems/GoalFramePhysics.js';
 import { GoalNetPhysics } from '../systems/GoalNetPhysics.js';
 import { sweepMovingZPlane } from '../systems/SweptCollision.js';
 import {
@@ -59,17 +64,23 @@ const SECURITY_GUARD_MOTION = Object.freeze([
   { dx: -0.35, dy: -0.60, angle: -0.35, duration: 980, hold: 640, repeatDelay: 2700 }
 ]);
 
-// Six identical boards read as a texture, not a stadium. One anchor sponsor
-// repeated at a believable rate plus fictional secondary brands, each with its
-// own width and board design, is what makes the touchline look built rather
-// than tiled. Widths are deliberately uneven.
+// The touchline belongs to one sponsor, but six identical boards read as a
+// texture rather than a stadium. Every board carries the CALYNX mark; what
+// varies is the colourway and the width, which is how a real ground looks when
+// an anchor sponsor has bought the whole run.
+const BOARD_TOP_Y = 83;
+// Hoarding height in world metres, derived from where the boards are painted:
+// their top edge is BOARD_TOP_Y and their foot is on the stadium/turf seam.
+const BOARD_HEIGHT = CAM.height -
+  ((BOARD_TOP_Y - CAM.horizonY) * (CAM.height * CAM.focal / (STADIUM_Y - CAM.horizonY))) / CAM.focal;
+
 const SPONSOR_BOARDS = Object.freeze([
-  Object.freeze({ style: 'logo', width: 104, fill: 0x1c4a9a, shade: 0x143676, trim: 0x6e93d3 }),
-  Object.freeze({ style: 'wordmark', width: 72, fill: 0x14342a, shade: 0x0d241d, trim: 0x49a760, label: 'STRYDE', color: '#9ef0b8' }),
-  Object.freeze({ style: 'split', width: 88, fill: 0x2a1836, shade: 0x1b0f24, trim: 0x9b5de5, label: 'NOVA FC', color: '#e6d6ff' }),
-  Object.freeze({ style: 'logo', width: 104, fill: 0x1c4a9a, shade: 0x143676, trim: 0x6e93d3 }),
-  Object.freeze({ style: 'wordmark', width: 78, fill: 0x3a2410, shade: 0x261708, trim: 0xf3c449, label: 'KINETIK', color: '#ffe6a8' }),
-  Object.freeze({ style: 'split', width: 84, fill: 0x2b1418, shade: 0x1c0c0f, trim: 0xd75a3a, label: 'HALVARD', color: '#ffc3ad' })
+  Object.freeze({ width: 104, fill: 0x1c4a9a, shade: 0x143676, trim: 0x6e93d3, logo: 0xf8f2df }),
+  Object.freeze({ width: 88, fill: 0x156b45, shade: 0x0e4a2f, trim: 0x49a760, logo: 0xeafff2 }),
+  Object.freeze({ width: 96, fill: 0x2b2413, shade: 0x1a1509, trim: 0xf3c449, logo: 0xffe6a8 }),
+  Object.freeze({ width: 82, fill: 0x8f2f2a, shade: 0x64201c, trim: 0xd75a3a, logo: 0xffe3d8 }),
+  Object.freeze({ width: 100, fill: 0x4a2a7a, shade: 0x321c55, trim: 0x9b5de5, logo: 0xece0ff }),
+  Object.freeze({ width: 90, fill: 0x14555e, shade: 0x0d3a41, trim: 0x66b7bf, logo: 0xdefaff })
 ]);
 
 // A photographers' pit and two camera positions behind the boards. Even a
@@ -102,8 +113,17 @@ const HOOP_STAGES = Object.freeze({
 // a flat circle looks like a UI sticker; leaning it back means the rim is a
 // genuine perspective ellipse whose near edge is larger than its far edge.
 const HOOP_TILT = 0.30;
-const HOOP_TUBE = 0.045;      // world-metre half-thickness of the rim
+const HOOP_TUBE = 0.05;       // world-metre half-thickness of the rim
 const HOOP_SEGMENTS = 52;
+
+// Extra world metres of slack on every gate opening. The authored radii are
+// generous now, but a gate the ball can only find on a knife edge is not a
+// challenge, it is a lockout - this is the last bit of give.
+const RING_FORGIVENESS = 0.22;
+
+// The thread itself: one continuous line drawn through the ball, every gate and
+// the finish. This is the level, not decoration - the gates are eyes on it.
+const THREAD_SAMPLES = 260;
 
 function mixColor(a, b, t) {
   const f = Phaser.Math.Clamp(t, 0, 1);
@@ -179,6 +199,11 @@ export class GameScene extends Phaser.Scene {
     this.targetArmed = true;
     this.ringVisuals = new Map();
     this.ringOrder = [];
+    this.threadGfx = null;
+    this.threadFarGfx = null;
+    this.threadPoints = [];
+    this.threadTimer = null;
+    this.threadFlow = 0;
     this.hazardVisuals = [];
     this.snowEmitter = null;
     this.windTxt = null;
@@ -209,6 +234,14 @@ export class GameScene extends Phaser.Scene {
     CAM.x = this.level.offsetX * 0.85;
     this.zGoal = CAM.ballDist + this.level.distance;
     this.zWall = CAM.ballDist + Math.min(WALL_DIST, this.level.distance * 0.55);
+    // Depth of the advertising hoardings, derived from where they are actually
+    // painted: their foot sits on the stadium/turf seam, so the depth that
+    // projects the ground to STADIUM_Y is the depth the boards stand at. Held
+    // clear of the net so a scored ball is contained before it can reach them.
+    this.zBoards = Math.max(
+      (CAM.height * CAM.focal) / (STADIUM_Y - CAM.horizonY),
+      this.zGoal + 2.45
+    );
     this.goalDimensions = getEffectiveGoalDimensions(this.level, { width: GOAL_W, height: GOAL_H });
     this.goalWidth = this.goalDimensions.width;
     this.goalHeight = this.goalDimensions.height;
@@ -240,6 +273,7 @@ export class GameScene extends Phaser.Scene {
     this.keeperContactChecked = new Set();
     this.netTouched = false;
     this.netSideRippled = false;
+    this.boardStruck = false;
     this.frameTouched = false;
     this.frameContacts = new Set();
     this.frameImpactT = null;
@@ -632,6 +666,13 @@ export class GameScene extends Phaser.Scene {
     this.hazardVisuals = [];
     this.ringVisuals?.forEach((v) => this.destroyRingVisual(v));
     this.ringVisuals?.clear();
+    this.threadTimer?.remove?.();
+    this.threadTimer = null;
+    this.threadGfx?.destroy?.();
+    this.threadGfx = null;
+    this.threadFarGfx?.destroy?.();
+    this.threadFarGfx = null;
+    this.threadPoints = [];
     this.targetGfx?.destroy?.();
     this.targetGfx = null;
     this.pitchGfx?.destroy?.();
@@ -752,14 +793,14 @@ export class GameScene extends Phaser.Scene {
   }
 
   drawSponsorBoards() {
-    const y = 83;
+    const y = BOARD_TOP_Y;
     const h = STADIUM_Y - y;
     const board = this.add.graphics().setDepth(1.45);
     const labels = [];
 
     board.fillStyle(PAL.ink, 1).fillRect(0, y - 2, GAME_W, h + 3);
-    // Start part-way into the first board so the sequence never begins on a
-    // seam, which is what made the old rhythm look machine-generated.
+    // Start part-way into the first board so the run never begins on a seam,
+    // which is what made the old rhythm look machine-generated.
     let x = -34;
     let index = 0;
     while (x < GAME_W) {
@@ -768,36 +809,19 @@ export class GameScene extends Phaser.Scene {
       board.fillStyle(spec.fill, 1).fillRect(x + 1, y, w - 2, h);
       board.fillStyle(spec.shade, 1).fillRect(x + 1, y + h - 4, w - 2, 3);
       board.fillStyle(spec.trim, 0.82).fillRect(x + 2, y + 1, w - 4, 1);
+      board.fillStyle(spec.trim, 0.5).fillRect(x + 3, y + h - 6, w - 6, 1);
       board.fillStyle(PAL.ink, 1).fillRect(x + w - 1, y - 1, 2, h + 1);
 
-      if (spec.style === 'split') {
-        // A colour block at one end - the cheapest way to make two boards of
-        // the same size read as two different advertisers.
-        board.fillStyle(spec.trim, 0.9).fillRect(x + 2, y + 2, 9, h - 5);
-        board.fillStyle(spec.shade, 0.85).fillRect(x + 2, y + 2, 9, 2);
-      } else if (spec.style === 'wordmark') {
-        board.fillStyle(spec.trim, 0.55).fillRect(x + 3, y + h - 6, w - 6, 1);
-      }
-
-      // Branding is only drawn when the whole mark fits on the board *and* on
-      // screen. A half-cut wordmark at the frame edge reads as a bug; a plain
-      // coloured board that runs off the edge reads as a stadium.
-      const artWidth = spec.style === 'logo' ? 66 : Math.max(24, spec.label.length * 5);
-      const centreX = spec.style === 'split' ? x + 6 + (w - 6) / 2 : x + w / 2;
-      const fits = centreX - artWidth / 2 >= 1 && centreX + artWidth / 2 <= GAME_W - 1;
-      if (fits && spec.style === 'logo' && this.textures.exists('calynx-logo-pixel')) {
+      // The mark is only drawn when it fits entirely on screen. A half-cut
+      // logo at the frame edge reads as a bug; a plain coloured board that
+      // runs off the edge reads as a stadium.
+      const centreX = x + w / 2;
+      if (centreX - 33 >= 1 && centreX + 33 <= GAME_W - 1 &&
+          this.textures.exists('calynx-logo-pixel')) {
         labels.push(this.add.image(centreX, y + h / 2, 'calynx-logo-pixel')
           .setDisplaySize(66, 20)
+          .setTint(spec.logo)
           .setDepth(1.5));
-      } else if (fits && spec.style !== 'logo') {
-        labels.push(bodyText(this, centreX, y + h / 2 - 0.5, spec.label, {
-          originX: 0.5,
-          originY: 0.5,
-          fontFamily: FONT,
-          fontSize: '6px',
-          color: spec.color,
-          letterSpacing: 0.4
-        }).setDepth(1.5));
       }
 
       x += w;
@@ -1124,6 +1148,105 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  // ----------------------------------------------------------------- thread
+
+  /**
+   * The route the ball has to take, as one object.
+   *
+   * Two gold circles floating in front of the goal told the player where the
+   * gates were but nothing about how to connect them, on a level whose whole
+   * premise is a single threaded line. This builds that line: a smooth 3D curve
+   * from the ball, through every gate centre in flight order, into the finish.
+   * The gates become eyes on the thread rather than two unrelated rings.
+   */
+  buildThreadPath() {
+    this.threadPoints = [];
+    if (!this.ringOrder?.length) return;
+
+    const knots = [{ x: this.level.offsetX, y: BALL_R, z: CAM.ballDist }];
+    for (const id of this.ringOrder) {
+      const geometry = this.ringVisuals.get(id)?.geometry;
+      if (geometry) knots.push({ x: geometry.x, y: geometry.y, z: geometry.z });
+    }
+    const finish = this.baseTarget
+      ? targetGeometry(this.baseTarget, this.goalWidth, this.goalHeight)
+      : { x: 0, y: this.goalHeight * 0.5 };
+    knots.push({ x: finish.x, y: finish.y, z: this.zGoal });
+    if (knots.length < 3) return;
+
+    // Catmull-Rom through the knots, with the ends duplicated so the curve
+    // starts at the ball and finishes on the goal line instead of overshooting.
+    const padded = [knots[0], ...knots, knots[knots.length - 1]];
+    const axis = (a, b, c, d, t, key) => {
+      const t2 = t * t;
+      const t3 = t2 * t;
+      return 0.5 * (
+        2 * b[key] +
+        (-a[key] + c[key]) * t +
+        (2 * a[key] - 5 * b[key] + 4 * c[key] - d[key]) * t2 +
+        (-a[key] + 3 * b[key] - 3 * c[key] + d[key]) * t3
+      );
+    };
+
+    const spans = padded.length - 3;
+    for (let i = 0; i <= THREAD_SAMPLES; i++) {
+      const u = (i / THREAD_SAMPLES) * spans;
+      const span = Math.min(Math.floor(u), spans - 1);
+      const t = u - span;
+      const [a, b, c, d] = padded.slice(span, span + 4);
+      const point = {
+        x: axis(a, b, c, d, t, 'x'),
+        y: axis(a, b, c, d, t, 'y'),
+        z: axis(a, b, c, d, t, 'z')
+      };
+      if (point.z <= 0.6) continue;
+      const screen = project(point.x, point.y, point.z);
+      this.threadPoints.push({ x: screen.x, y: screen.y, s: screen.s, z: point.z });
+    }
+  }
+
+  /**
+   * Redraw the thread for the current progress. Everything up to the gate the
+   * player still has to find is bright; beyond it the thread is a whisper, so
+   * the eye is pulled to the next thing to do rather than the whole route.
+   */
+  refreshThread() {
+    const near = this.threadGfx;
+    const far = this.threadFarGfx;
+    if (!near?.active || !far?.active) return;
+    near.clear();
+    far.clear();
+    if (!this.threadPoints?.length) return;
+
+    const crossed = new Set(this.ringProgress?.crossedIds || []);
+    const nextId = this.ringOrder?.find((id) => !crossed.has(id));
+    const nextZ = nextId
+      ? this.ringVisuals.get(nextId)?.geometry?.z ?? this.zGoal
+      : this.zGoal;
+    const flow = this.settings.reducedMotion ? 0 : this.threadFlow;
+
+    for (let i = 0; i < this.threadPoints.length; i++) {
+      const point = this.threadPoints[i];
+      // A short dark gap every few beads reads as a twisted thread and gives
+      // the flow animation something to travel along.
+      if ((i + flow) % 9 < 2) continue;
+      const gfx = point.z < this.zWall ? near : far;
+      const ahead = point.z > nextZ + 0.05;
+      // Beads are sized by depth so the thread tapers away from the ball like
+      // any other object in the scene rather than reading as a flat UI stroke.
+      const size = Math.max(2, Math.round(point.s * 0.05));
+      const alpha = ahead ? 0.5 : 1;
+      gfx.fillStyle(0x071018, alpha * 0.75);
+      gfx.fillRect(Math.round(point.x - size / 2) - 1, Math.round(point.y - size / 2) - 1, size + 2, size + 2);
+      gfx.fillStyle(ahead ? 0xb98f38 : PAL.gold, alpha);
+      gfx.fillRect(Math.round(point.x - size / 2), Math.round(point.y - size / 2), size, size);
+      if (!ahead && size > 2) {
+        gfx.fillStyle(0xfff3cd, 0.8);
+        gfx.fillRect(Math.round(point.x - size / 2), Math.round(point.y - size / 2), 1, 1);
+      }
+    }
+  }
+
   // ------------------------------------------------------------------ hoops
 
   /**
@@ -1200,21 +1323,9 @@ export class GameScene extends Phaser.Scene {
     front.clear();
     post.clear();
 
-    // Ground shadow and stand. A hoop hanging in mid-air with nothing holding
-    // it up is the single biggest reason these read as UI; a post and a shadow
-    // on the turf make them objects standing on the pitch.
-    const foot = project(geometry.x, 0, geometry.z);
-    const bottom = project(geometry.x, geometry.y - geometry.radius, geometry.z);
-    const shadowW = Math.max(3, geometry.radius * 1.7 * foot.s);
-    post.fillStyle(0x04070c, 0.34 * alpha);
-    post.fillEllipse(foot.x, foot.y, shadowW, Math.max(2, shadowW * 0.26));
-    const postW = Math.max(1, Math.round(0.07 * 2 * foot.s));
-    post.fillStyle(0x071018, 0.95 * alpha);
-    post.fillRect(Math.round(foot.x - postW / 2) - 1, Math.round(bottom.y), postW + 2, Math.round(foot.y - bottom.y));
-    post.fillStyle(0x2c3a4a, 0.95 * alpha);
-    post.fillRect(Math.round(foot.x - postW / 2), Math.round(bottom.y), postW, Math.round(foot.y - bottom.y));
-    post.fillStyle(stage.band, 0.9 * alpha);
-    post.fillRect(Math.round(foot.x - postW / 2 - 1), Math.round(foot.y) - 2, postW + 2, 2);
+    // No ground shadow and no post: the thread running through the eye is what
+    // ties it to the scene now. A shadow cast by a gate standing on nothing
+    // just reads as a stain on the pitch several metres away from it.
 
     // Cast shadow. Offset down and to the right of the rim only - filling the
     // opening would turn the gate into a lens and hide the keeper behind it.
@@ -1274,7 +1385,7 @@ export class GameScene extends Phaser.Scene {
 
       // The number plate is mounted on the post, not floating in the opening,
       // so it never competes with the ball passing through.
-      const plateY = centre.y + spread + Math.max(4, spread * 0.42);
+      const plateY = centre.y + spread * Math.cos(HOOP_TILT) + 5;
       const plate = this.add.graphics().setDepth(front.depth + 1);
       const plateW = 11;
       const plateH = 9;
@@ -1312,6 +1423,32 @@ export class GameScene extends Phaser.Scene {
       this.ringOrder.push(id);
     });
 
+    // Two layers, split at the wall. One flat graphics object would put the
+    // stretch of thread nearest the ball behind the defenders it passes in
+    // front of; the split keeps the route correctly occluded along its length.
+    this.threadGfx?.destroy?.();
+    this.threadFarGfx?.destroy?.();
+    this.threadGfx = this.ringOrder.length
+      ? this.add.graphics().setDepth(1000 - CAM.ballDist * 10 - 4)
+      : null;
+    this.threadFarGfx = this.ringOrder.length
+      ? this.add.graphics().setDepth(1000 - this.zGoal * 10 - 6)
+      : null;
+    this.buildThreadPath();
+    this.threadFlow = 0;
+    this.threadTimer?.remove?.();
+    this.threadTimer = null;
+    if (this.threadGfx && !this.settings.reducedMotion) {
+      this.threadTimer = this.time.addEvent({
+        delay: 90,
+        loop: true,
+        callback: () => {
+          this.threadFlow = (this.threadFlow + 1) % 9;
+          this.refreshThread();
+        }
+      });
+    }
+
     this.updateHoopSequence();
   }
 
@@ -1337,6 +1474,8 @@ export class GameScene extends Phaser.Scene {
       }
       if (visual.stage !== stage) this.setHoopStage(visual, stage);
     }
+
+    this.refreshThread();
 
     // Levels without hoops have nothing to sequence, so their corner stays
     // armed from the whistle.
@@ -2150,7 +2289,7 @@ export class GameScene extends Phaser.Scene {
             goalWidth: this.goalWidth,
             goalHeight: this.goalHeight,
             ballRadius: BALL_R,
-            forgiveness: 0.08
+            forgiveness: RING_FORGIVENESS
           }
         );
         if (this.ringProgress.newlyCrossedIds.length || this.ringProgress.newlyMissedIds.length) {
@@ -2167,11 +2306,64 @@ export class GameScene extends Phaser.Scene {
         }
       }
       if (this.ball.inNet) this.checkNetContact(vx, vy, vz);
+      else this.checkBoardRebound();
     }
     if (this.state === 'FLIGHT') {
       this.flightT += dt;
       this.checkFlight();
     }
+  }
+
+  /**
+   * Balls that miss the goal come back off the hoardings.
+   *
+   * Anything wide or past the post used to sail out of the world entirely. The
+   * boards are a physical backstop at `zBoards`, so a miss now thumps into the
+   * advertising and rebounds onto the pitch. Presentation only: the shot's
+   * outcome is already decided by the time the ball gets this far.
+   */
+  checkBoardRebound() {
+    const ball = this.ball;
+    if (!ball?.flying || this.boardStruck) return;
+    if (!ball.crossed(this.zBoards)) return;
+
+    const point = ball.pointAt(this.zBoards);
+    // Over the top of the hoarding and into the crowd: nothing to hit.
+    if (point.y > BOARD_HEIGHT) {
+      this.boardStruck = true;
+      return;
+    }
+
+    this.boardStruck = true;
+    ball.z = this.zBoards - (BALL_R + 0.02);
+    if (ball.prev) ball.prev.z = ball.z;
+    ball.vz = -Math.abs(ball.vz) * 0.44;
+    ball.vx *= 0.58;
+    ball.vy = ball.vy * 0.35 - 0.6;
+    ball.spin *= -0.3;
+
+    const screen = project(point.x, point.y, this.zBoards);
+    this.impact.explode(9, screen.x, screen.y);
+    this.playImpactShake(80, 0.6);
+    Audio.post('post');
+    this.flashBoard(screen.x, screen.y, this.zBoards);
+  }
+
+  // A short bright panel where the ball struck, so the hoarding reads as the
+  // thing that stopped it rather than the ball simply changing its mind.
+  flashBoard(screenX, screenY, z) {
+    if (this.settings.reducedMotion) return;
+    const width = Math.max(6, (CAM.focal / z) * 1.4);
+    const flash = this.add.rectangle(screenX, screenY, width, 8, 0xfff3c4, 0.85)
+      .setDepth(1000 - z * 10 + 1);
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      scaleY: 0.4,
+      duration: 260,
+      ease: 'Quad.easeOut',
+      onComplete: () => flash.destroy()
+    });
   }
 
   checkNetContact(vx, vy, vz) {
@@ -2359,6 +2551,19 @@ export class GameScene extends Phaser.Scene {
     this.impact.explode(contact.frame === 'crossbar' ? 14 : 11, screen.x, screen.y);
     this.playImpactShake(110, contact.frame === 'crossbar' ? 1.05 : 0.82);
     Audio.post(contact.frame);
+
+    // In off the post. The rebound parks the ball tangent to the frame and
+    // rewrites ball.prev to match, so if that lands behind the goal line the
+    // ordinary crossed(zGoal) test can never fire again - the goal went
+    // unscored and the ball carried on through the netting. Settle it here,
+    // at the contact, which is the only place that information still exists.
+    const settled = classifyReboundPosition(this.ball, this.zGoal, {
+      goalWidth: this.goalWidth,
+      goalHeight: this.goalHeight,
+      postRadius: POST_R,
+      ballRadius: BALL_R
+    });
+    if (settled === 'goal') this.resolve('GOAL', { x: this.ball.x, y: this.ball.y });
   }
 
   resolve(outcome, pt) {
@@ -2690,6 +2895,7 @@ export class GameScene extends Phaser.Scene {
     this.netFront?.setVisible(false);
     this.netTouched = false;
     this.netSideRippled = false;
+    this.boardStruck = false;
     this.netPhysics?.reset();
     if (this.netPhysics?.needsRedraw) this.netPhysics.draw(this.netBack, project, { alpha: 0.28 });
     this.ballSpr.setVisible(true);

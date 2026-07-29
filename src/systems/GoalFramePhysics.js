@@ -85,6 +85,35 @@ export function sweepGoalFrame(ball, zGoal, dimensions) {
   };
 }
 
+/**
+ * Where a ball ended up relative to the goal mouth after a frame rebound.
+ *
+ * `reboundFromGoalFrame` repositions the ball tangent to the post or bar it
+ * struck, and writes that position into `ball.prev` as well. When the contact
+ * was on the goal side of the plane - the classic in-off-the-post - the ball is
+ * left with both `z` and `prev.z` beyond `zGoal`, which permanently disables
+ * `Ball.crossed(zGoal)`: the goal-line test can never fire again, so the shot
+ * is never scored and the ball sails on through the netting. Callers use this
+ * to settle the outcome at the moment of contact instead.
+ *
+ * Returns 'goal' when the ball sits inside the mouth behind the line, 'behind'
+ * when it is past the line but outside the frame, and null while it is still in
+ * front of the line (the ordinary case, which `crossed()` handles).
+ */
+export function classifyReboundPosition(ball, zGoal, dimensions) {
+  if (!ball || !Number.isFinite(zGoal) || !Number.isFinite(ball.z)) return null;
+  if (ball.z <= zGoal + 1e-6) return null;
+
+  const geometry = goalMouthGeometry(dimensions);
+  // The ball has already been separated to rest tangent to the frame, so the
+  // outer mouth bounds are the correct discriminator here: an inside graze
+  // lands just within them, an outside graze just beyond.
+  const inside = Math.abs(ball.x) <= geometry.halfWidth &&
+    ball.y >= 0 &&
+    ball.y <= geometry.goalHeight;
+  return inside ? 'goal' : 'behind';
+}
+
 export function reboundFromGoalFrame(ball, point, contact, zGoal, restitution = 0.72) {
   const { geometry, frame } = contact;
   let nx = 0;

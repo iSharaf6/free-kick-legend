@@ -308,9 +308,13 @@ const RAW_LEVELS = [
     id: 'targets-07', cup: 'targets', name: 'Golden Thread', distance: 19, offsetX: 4.5, wall: 4, keeper: 0.5,
     objective: objective('ring-shot', 'Thread both hoops, then find the far corner', { ringsRequired: 2 }),
     target: TARGETS.topLeft, wind: wind(0.25, 0.05),
+    // Gate centres are sampled from a real scoring trajectory (vx -8.7, vy 6.8,
+    // vz 22, spin +0.35) rather than placed by eye. The authored-by-eye pair
+    // this replaces could only be threaded with maximum curl and a 5mm margin,
+    // and no shot that threaded them could also reach the top-left target.
     rings: [
-      ring('near-hoop', -0.1, 0.58, 0.45, 0.72),
-      ring('far-hoop', -0.48, 0.72, 0.76, 0.58, 1.5)
+      ring('near-hoop', 0.49, 0.54, 0.3, 0.95),
+      ring('far-hoop', -0.11, 0.8, 0.72, 0.85, 1.5)
     ],
     reward: reward(120), style: 'anticipator'
   }),
@@ -404,9 +408,12 @@ const RAW_LEVELS = [
     id: 'legend-01', cup: 'legend', name: 'Needlework', distance: 20, offsetX: -4, wall: 5, keeper: 0.62,
     objective: objective('ring-shot', 'Curve through both hoops into the far corner', { curveDirection: 'right', minimumCurve: 0.34, ringsRequired: 2 }),
     target: TARGETS.topRight,
+    // Sampled from a scoring trajectory that also satisfies this level's
+    // minimum right-hand curve (vx 5.7, vy 7.0, vz 22, spin +0.45); the
+    // previous pair needed maximum spin and left a 1mm margin.
     rings: [
-      ring('bend-gate', -0.15, 0.6, 0.48, 0.62),
-      ring('finish-gate', 0.52, 0.78, 0.8, 0.5, 1.6)
+      ring('bend-gate', -0.47, 0.6, 0.32, 0.9),
+      ring('finish-gate', 0.09, 0.84, 0.74, 0.8, 1.6)
     ],
     reward: reward(155), style: 'legend'
   }),

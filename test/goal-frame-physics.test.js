@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyGoalPlane, reboundFromGoalFrame, sweepGoalFrame } from '../src/systems/GoalFramePhysics.js';
+import {
+  classifyGoalPlane,
+  classifyReboundPosition,
+  reboundFromGoalFrame,
+  sweepGoalFrame
+} from '../src/systems/GoalFramePhysics.js';
+import { Ball } from '../src/objects/Ball.js';
 
 const dimensions = { goalWidth: 9, goalHeight: 3.1, postRadius: 0.13, ballRadius: 0.26 };
 
@@ -36,4 +42,52 @@ test('swept post contact is detected before the ball centre reaches the goal pla
   const hit = sweepGoalFrame(ball, 20, dimensions);
   assert.equal(hit?.contact.frame, 'post');
   assert.ok(hit.point.z < 20);
+});
+
+// Regression: a ball that clipped the inside of a post and continued into the
+// goal was never scored. reboundFromGoalFrame leaves both `z` and `prev.z`
+// behind the goal line, which permanently disables Ball.crossed(zGoal), so the
+// goal-line test never fired again and the ball flew on through the netting.
+test('an in-off-the-post rebound is recognised as a goal at the moment of contact', () => {
+  const zGoal = 20;
+  const ball = new Ball();
+  ball.setGoalBounds(dimensions.goalWidth, dimensions.goalHeight);
+  // Travelling forward, just past the plane, grazing the inside of the right post.
+  Object.assign(ball, { x: 4.3, y: 1.2, z: 20.05, vx: -1, vy: 0.4, vz: 22, spin: 0, flying: true });
+  ball.prev = { x: 4.32, y: 1.15, z: 19.9 };
+
+  const point = { x: 4.3, y: 1.2, z: 20.05 };
+  const contact = classifyGoalPlane(point, dimensions);
+  assert.equal(contact.frame, 'post');
+  reboundFromGoalFrame(ball, point, contact, zGoal);
+
+  assert.ok(ball.z > zGoal, 'the rebound leaves the ball behind the goal line');
+  assert.equal(ball.crossed(zGoal), false, 'crossed() is dead once prev is also behind the line');
+  assert.equal(classifyReboundPosition(ball, zGoal, dimensions), 'goal');
+});
+
+test('an outside-post rebound behind the line is not a goal', () => {
+  const zGoal = 20;
+  const ball = new Ball();
+  ball.setGoalBounds(dimensions.goalWidth, dimensions.goalHeight);
+  Object.assign(ball, { x: 4.7, y: 1.2, z: 20.05, vx: 1, vy: 0.4, vz: 18, spin: 0, flying: true });
+  ball.prev = { x: 4.68, y: 1.15, z: 19.9 };
+
+  const point = { x: 4.7, y: 1.2, z: 20.05 };
+  const contact = classifyGoalPlane(point, dimensions);
+  reboundFromGoalFrame(ball, point, contact, zGoal);
+  assert.equal(classifyReboundPosition(ball, zGoal, dimensions), 'behind');
+});
+
+test('an over-the-bar rebound behind the line is not a goal', () => {
+  const zGoal = 20;
+  const ball = { x: 0, y: 3.15, z: 20.05, vx: 0, vy: 1, vz: 20, spin: 0, prev: { x: 0, y: 3.1, z: 19.9 } };
+  const point = { x: 0, y: 3.15, z: 20.05 };
+  reboundFromGoalFrame(ball, point, classifyGoalPlane(point, dimensions), zGoal);
+  assert.equal(classifyReboundPosition(ball, zGoal, dimensions), 'behind');
+});
+
+test('a ball still in front of the goal line is left to the ordinary crossing test', () => {
+  const ball = { x: 0, y: 1.2, z: 19.4 };
+  assert.equal(classifyReboundPosition(ball, 20, dimensions), null);
 });
