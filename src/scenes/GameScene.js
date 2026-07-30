@@ -132,6 +132,13 @@ const HOOP_SEGMENTS = 52;
 // challenge, it is a lockout - this is the last bit of give.
 const RING_FORGIVENESS = 0.22;
 
+// Frames-worth of freeze on boot-to-ball contact, scaled by shot power.
+const HIT_STOP_SECONDS = 0.055;
+
+// The shot readout lives with the bottom chrome. Directly under the banner it
+// covered the goalmouth at the one moment the player wants to watch the net.
+const READOUT_Y = 231;
+
 // The thread itself: one continuous line drawn through the ball, every gate and
 // the finish. This is the level, not decoration - the gates are eyes on it.
 // The aim arc is a hint, not a road. It starts clear of the ball so the swipe
@@ -287,6 +294,7 @@ export class GameScene extends Phaser.Scene {
     this.accumulator = 0;
     this.simTime = 0;
     this.slowmoUsed = false;
+    this.hitStopT = 0;
     this.over = false;
     this.ballCaught = false;
     this.keeperContactChecked = new Set();
@@ -1865,6 +1873,13 @@ export class GameScene extends Phaser.Scene {
       fill: PAL.panel, border: PAL.goldDark, corner: PAL.gold
     });
     this.banner = titleText(this, GAME_W / 2, 52, '', '14px').setDepth(2100).setAlpha(0);
+    // Diagnostic line under the banner: the banner is the feeling, this is the
+    // reason. Both clear together when the next attempt starts.
+    this.shotReadoutPlate = this.add.graphics().setDepth(2095).setAlpha(0);
+    this.shotReadout = bodyText(this, GAME_W / 2, READOUT_Y + 6.5, '', {
+      originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '6px',
+      color: '#d7dfda', letterSpacing: 0.2
+    }).setDepth(2100).setAlpha(0);
     this.inputHint = crispText(this.add.text(GAME_W / 2, GAME_H - 34, '', {
       fontFamily: FONT, fontSize: '9px', color: '#f3e7c3',
       stroke: '#071018', strokeThickness: 3
@@ -2036,6 +2051,101 @@ export class GameScene extends Phaser.Scene {
       step.text.setColor(state === 'pending' ? '#8fa2ab' : stage.glyphColor);
       step.state = state;
     }
+  }
+
+  /**
+   * Say what the shot actually did, in the player's terms.
+   *
+   * Every number here already existed - power, spin and the gesture are all
+   * computed by the input mapping, and the goal-plane crossing is solved for
+   * the keeper read - but none of it was ever shown. A miss was just "OFF
+   * TARGET", which tells the player nothing they can act on. Reporting
+   * "78% POWER - 32% RIGHT CURL - TOO HIGH" turns the same failure into a
+   * correction they can make on the next attempt.
+   */
+  describeShot(outcome, point, rating) {
+    const shot = this.lastShot || {};
+    const parts = [];
+
+    const power = Math.round(Phaser.Math.Clamp(shot.power ?? 0, 0, 1) * 100);
+    parts.push(shot.powerCapped ? `${power}% POWER (CAPPED)` : `${power}% POWER`);
+
+    const spin = shot.spin ?? 0;
+    const curl = Math.round(Math.abs(spin) * 100);
+    if (curl < 6) parts.push('NO CURL');
+    else parts.push(`${curl}% ${spin > 0 ? 'RIGHT' : 'LEFT'} CURL`);
+
+    parts.push(this.describeOutcome(outcome, point, rating));
+    if (outcome === 'GOAL' && rating?.points) parts.push(`+${rating.points}`);
+    return parts.join('  ·  ');
+  }
+
+  /** The single most useful field: why the shot ended the way it did. */
+  describeOutcome(outcome, point, rating) {
+    const halfWidth = this.goalWidth / 2;
+    // For a shot stopped short, fall back to where it had been heading.
+    const plane = point && Number.isFinite(point.x) ? point : this.headingFor;
+
+    switch (outcome) {
+      case 'GOAL':
+        if (rating?.topCorner) return 'TOP CORNER';
+        return String(rating?.label || 'GOAL').toUpperCase();
+      case 'SAVE':
+        return 'KEEPER READ IT';
+      case 'CAUGHT':
+        return 'KEEPER HELD IT';
+      case 'WALL': {
+        if (!plane) return 'INTO THE WALL';
+        // Say which way out was available, not just that it failed.
+        const overBar = plane.y > this.goalHeight;
+        if (overBar) return 'INTO THE WALL · AND OVER';
+        return plane.y < 0.9 ? 'INTO THE WALL · GO OVER IT' : 'INTO THE WALL · BEND AROUND IT';
+      }
+      case 'POST':
+        return this.frameContacts.has('crossbar') ? 'OFF THE BAR' : 'OFF THE POST';
+      default: {
+        if (!plane) return 'NEVER GOT THERE · MORE POWER';
+        const high = plane.y > this.goalHeight;
+        const wide = Math.abs(plane.x) > halfWidth;
+        if (high && wide) return 'HIGH AND WIDE';
+        if (high) return plane.y > this.goalHeight + 1.2 ? 'WAY TOO HIGH' : 'JUST TOO HIGH';
+        if (wide) {
+          const margin = Math.abs(plane.x) - halfWidth;
+          const side = plane.x < 0 ? 'LEFT' : 'RIGHT';
+          return margin < 0.6 ? `INCHES WIDE ${side}` : `WIDE ${side}`;
+        }
+        return 'OFF TARGET';
+      }
+    }
+  }
+
+  showShotReadout(outcome, point, rating) {
+    const text = this.describeShot(outcome, point, rating);
+    const scored = outcome === 'GOAL';
+    if (!this.shotReadout) return;
+    this.tweens.killTweensOf([this.shotReadout, this.shotReadoutPlate]);
+
+    this.shotReadout.setText(text).setColor(scored ? '#f3c449' : '#d7dfda');
+    // The plate is redrawn to the text so it never sits half-empty or clips.
+    const width = Math.min(GAME_W - 16, Math.round(this.shotReadout.displayWidth) + 16);
+    this.shotReadoutPlate.clear();
+    drawPanel(this.shotReadoutPlate, Math.round(GAME_W / 2 - width / 2), READOUT_Y, width, 13, {
+      fill: PAL.panel, border: PAL.borderDark, corner: scored ? PAL.gold : PAL.goldDark, alpha: 0.94
+    });
+
+    const objects = [this.shotReadout, this.shotReadoutPlate];
+    objects.forEach((object) => object.setAlpha(0));
+    this.tweens.add({ targets: objects, alpha: 1, duration: 160, ease: 'Cubic.easeOut' });
+    this.tweens.add({
+      targets: objects, alpha: 0, delay: 1750, duration: 260, ease: 'Cubic.easeOut'
+    });
+  }
+
+  hideShotReadout() {
+    if (!this.shotReadout) return;
+    this.tweens.killTweensOf([this.shotReadout, this.shotReadoutPlate]);
+    this.shotReadout.setAlpha(0);
+    this.shotReadoutPlate.setAlpha(0);
   }
 
   showBanner(text, color = '#f0e8d0') {
@@ -2215,10 +2325,18 @@ export class GameScene extends Phaser.Scene {
     if (!this.settings.reducedMotion) {
       const contact = project(this.ball.x, 0, this.ball.z);
       this.turf?.explode(6 + Math.round(shot.power * 8), contact.x, contact.y);
-      this.playImpactShake(70, 0.4 + shot.power * 0.3);
+      this.playImpactShake(70, 0.5 + shot.power * 0.45);
+      // Hit-stop: the world holds for a couple of frames on the strike. It is
+      // the cheapest way to make contact land as an impact rather than the ball
+      // simply starting to move, and it scales with how hard it was struck.
+      this.hitStopT = HIT_STOP_SECONDS * (0.6 + shot.power * 0.4);
     }
     if (Math.abs(shot.spin) > 0.45) Audio.whoosh(Math.abs(shot.spin));
     this.ball.kick(shot.vx, shot.vy, shot.vz, shot.spin);
+    // Where this shot was headed before a wall or a keeper got involved. Solved
+    // once, from the launch state, so it already contains the curl.
+    const heading = this.ball.predictAt(this.zGoal);
+    this.headingFor = heading?.reached ? { x: heading.x, y: heading.y } : null;
     const wallContext = {
       seed: `${this.level.id}:${this.attempt}`,
       attempt: this.attempt,
@@ -2259,6 +2377,20 @@ export class GameScene extends Phaser.Scene {
     // shot at 30, 60, 120 Hz and after small browser stalls. The mode clock is
     // real-time based and intentionally pauses during result cards.
     const rawDt = Math.min(Math.max(delta, 0), 250) / 1000;
+
+    // Hit-stop takes precedence over everything: the world is stopped, briefly.
+    // The restore is not optional - simSpeed is the accumulator's multiplier, so
+    // leaving it at zero when the hold expires freezes the shot for good.
+    if (this.hitStopT > 0) {
+      this.hitStopT = Math.max(0, this.hitStopT - rawDt);
+      if (this.hitStopT > 0) {
+        this.simSpeed = 0;
+        this.drawBall();
+        this.drawAim();
+        return;
+      }
+      this.simSpeed = 1;
+    }
 
     // Timed bullet time: hold briefly, then ramp smoothly back to full speed.
     if (this.slowmoT > 0) {
@@ -2433,8 +2565,8 @@ export class GameScene extends Phaser.Scene {
       net.impact({
         x: ball.x,
         y: ball.y,
-        speed: Math.max(Math.hypot(vx, vy, vz), (this.netEntrySpeed || 0) * 0.7),
-        radius: 0.95
+        speed: Math.max(Math.hypot(vx, vy, vz), (this.netEntrySpeed || 0) * 0.7) * 1.35,
+        radius: 1.1
       });
       Audio.net();
       return;
@@ -2577,7 +2709,7 @@ export class GameScene extends Phaser.Scene {
       } else if (contact.inFrame) {
         this.resolve('GOAL', pt);
       } else {
-        this.resolve(this.frameTouched ? 'POST' : 'MISS');
+        this.resolve(this.frameTouched ? 'POST' : 'MISS', pt);
       }
       return;
     }
@@ -2632,6 +2764,8 @@ export class GameScene extends Phaser.Scene {
     PlatformService.gameplayStop();
     this.simSpeed = 1;
     this.slowmoT = 0;
+    // A result must never be left waiting behind a hit-stop.
+    this.hitStopT = 0;
     this.swipe.enabled = false;
 
     let shotRating = scoreShot({
@@ -2708,6 +2842,7 @@ export class GameScene extends Phaser.Scene {
         Audio.groan();
     }
 
+    this.showShotReadout(outcome, pt, shotRating);
     this.recordShotOutcome(outcome, shotRating);
 
     if (this.mode === 'arcade') {
@@ -2968,6 +3103,7 @@ export class GameScene extends Phaser.Scene {
       }
       keeper.draw();
     });
+    this.hideShotReadout();
     this.kicker?.cancelSequence().setPose('idle');
     this.buildWall();
     this.ringVisuals?.forEach((visual) => this.destroyRingVisual(visual));
@@ -2984,6 +3120,7 @@ export class GameScene extends Phaser.Scene {
     this.ballGhosts?.forEach((ghost) => ghost.spr.setVisible(false));
     this.simSpeed = 1;
     this.slowmoT = 0;
+    this.hitStopT = 0;
     this.aimGuideHidden = false;
     this.state = 'AIMING';
     this.swipe.enabled = true;
