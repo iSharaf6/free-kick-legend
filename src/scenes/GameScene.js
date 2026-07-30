@@ -41,6 +41,7 @@ import {
 } from '../ui.js';
 import { PAL } from '../pixelart.js';
 import { addCrowdTiers } from '../art/CrowdPanorama.js';
+import { buildPitchMarkingLayout, PITCH_MARKING_DIMENSIONS } from '../art/PitchMarkings.js';
 
 const ATTEMPTS = 3;
 const ARCADE_TIME = 60;
@@ -1009,24 +1010,11 @@ export class GameScene extends Phaser.Scene {
       m.lineBetween(snap(a.x), snap(a.y), snap(b.x), snap(b.y));
     };
 
-    const zg = this.zGoal;
-    // Goal line
-    line(-16, zg, 16, zg);
+    const layout = buildPitchMarkingLayout(this.zGoal);
+    layout.straight.forEach(({ from, to }) => line(from.x, from.z, to.x, to.z));
 
-    // 18-yard Penalty Box: extends 8.5m in front of goalLine (zg - 8.5m)
-    const boxZ = Math.max(5.8, zg - 8.5);
-    line(-7.5, zg, -7.5, boxZ);
-    line(7.5, zg, 7.5, boxZ);
-    line(-7.5, boxZ, 7.5, boxZ);
-
-    // 6-yard Box: extends 3.0m in front of goalLine (zg - 3.0m)
-    const sixZ = Math.max(5.8, zg - 3.0);
-    line(-3.5, zg, -3.5, sixZ);
-    line(3.5, zg, 3.5, sixZ);
-    line(-3.5, sixZ, 3.5, sixZ);
-
-    // Penalty spot (5.5m in front of goal line)
-    const spotZ = zg - 5.5;
+    // The spot and D use the same world-space depth as the box layout.
+    const spotZ = layout.penaltySpot.z;
     if (spotZ >= 5.8) {
       const spot = project(0, 0, spotZ);
       m.fillStyle(PAL.line, 0.85);
@@ -1039,9 +1027,9 @@ export class GameScene extends Phaser.Scene {
     m.lineStyle(1, PAL.line, 0.72);
     const arcPoints = [];
     for (let a = -0.8; a <= 0.8; a += 0.1) {
-      const px = Math.sin(a) * 4.5;
-      const pz = spotZ - Math.cos(a) * 4.5;
-      if (pz >= 5.8 && pz < boxZ) {
+      const px = Math.sin(a) * PITCH_MARKING_DIMENSIONS.penaltyArcRadius;
+      const pz = spotZ - Math.cos(a) * PITCH_MARKING_DIMENSIONS.penaltyArcRadius;
+      if (pz >= 5.8 && pz < layout.penaltyFrontZ) {
         arcPoints.push(project(px, 0, pz));
       }
     }
