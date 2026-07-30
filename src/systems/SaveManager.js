@@ -109,6 +109,15 @@ function normalizedStars(rawStars) {
   return stars;
 }
 
+// How much of the aiming layer is drawn. 'full' shows the predicted arc and the
+// goal-plane reticle, 'reduced' keeps only the short arc off the ball, and
+// 'off' leaves the player with the gesture line and the meters alone.
+export const AIM_ASSIST_MODES = Object.freeze(['full', 'reduced', 'off']);
+
+function aimAssist(value, fallback) {
+  return AIM_ASSIST_MODES.includes(value) ? value : fallback;
+}
+
 function defaultSettings() {
   return {
     muted: false,
@@ -116,7 +125,8 @@ function defaultSettings() {
     sfxVolume: 1,
     reducedMotion: false,
     screenShake: true,
-    highContrast: false
+    highContrast: false,
+    aimAssist: 'full'
   };
 }
 
@@ -129,7 +139,8 @@ function normalizedSettings(rawSettings) {
     sfxVolume: volume(rawSettings.sfxVolume, defaults.sfxVolume),
     reducedMotion: typeof rawSettings.reducedMotion === 'boolean' ? rawSettings.reducedMotion : defaults.reducedMotion,
     screenShake: typeof rawSettings.screenShake === 'boolean' ? rawSettings.screenShake : defaults.screenShake,
-    highContrast: typeof rawSettings.highContrast === 'boolean' ? rawSettings.highContrast : defaults.highContrast
+    highContrast: typeof rawSettings.highContrast === 'boolean' ? rawSettings.highContrast : defaults.highContrast,
+    aimAssist: aimAssist(rawSettings.aimAssist, defaults.aimAssist)
   };
 }
 

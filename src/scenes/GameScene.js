@@ -10,7 +10,7 @@ import { Wall } from '../objects/Wall.js';
 import { Goalkeeper } from '../objects/Goalkeeper.js';
 import { Kicker } from '../objects/Kicker.js';
 import { SwipeInput, computeShotFromPath } from '../systems/SwipeInput.js';
-import { SaveManager } from '../systems/SaveManager.js';
+import { AIM_ASSIST_MODES, SaveManager } from '../systems/SaveManager.js';
 import { PlatformService } from '../systems/PlatformService.js';
 import { Audio } from '../systems/AudioSynth.js';
 import { careerStars, isTopCorner, scoreShot, targetGeometry } from '../systems/ShotScoring.js';
@@ -136,6 +136,34 @@ const RING_FORGIVENESS = 0.22;
 // Frames-worth of freeze on boot-to-ball contact, scaled by shot power.
 const HIT_STOP_SECONDS = 0.055;
 
+// First-run coaching for match 01. SaveManager has carried a {completed, step}
+// tutorial record since the save format was written, and nothing ever set it -
+// the controls only existed in the README. One concept per attempt, each with a
+// ghost swipe the player can copy, and none of it blocks input.
+const TUTORIAL_STEPS = Object.freeze([
+  Object.freeze({
+    caption: 'SWIPE UP FROM THE BALL',
+    detail: 'Drag from the ball toward the goal, then let go.',
+    bow: 0,
+    reach: 88,
+    speed: 1
+  }),
+  Object.freeze({
+    caption: 'SWIPE FASTER FOR MORE POWER',
+    detail: 'The speed of the flick sets the power, not how far you drag.',
+    bow: 0,
+    reach: 96,
+    speed: 2.1
+  }),
+  Object.freeze({
+    caption: 'BOW THE SWIPE TO BEND IT',
+    detail: 'Curve your drag and the ball follows that curve.',
+    bow: 30,
+    reach: 92,
+    speed: 1.2
+  })
+]);
+
 // The shot readout lives with the bottom chrome. Directly under the banner it
 // covered the goalmouth at the one moment the player wants to watch the net.
 const READOUT_Y = 231;
@@ -224,6 +252,12 @@ export class GameScene extends Phaser.Scene {
     this.objectiveSteps = [];
     this.objectiveBrief = null;
     this.targetArmed = true;
+    this.tutorialGfx = null;
+    this.tutorialCaption = null;
+    this.tutorialDetail = null;
+    this.tutorialStep = 0;
+    this.tutorialDone = true;
+    this.tutorialPhase = 0;
     this.ringVisuals = new Map();
     this.ringOrder = [];
     this.threadGfx = null;
@@ -254,6 +288,7 @@ export class GameScene extends Phaser.Scene {
   create() {
     configureHdCamera(this);
     this.settings = SaveManager.getSettings?.() || {};
+    this.aimAssist = this.settings.aimAssist ?? 'full';
     Audio.setMuted(Boolean(this.settings.muted || PlatformService.shouldMuteAudio()));
     Audio.setVolume(this.settings.sfxVolume ?? 1);
     if (this.mode === 'daily') SaveManager.ensureDaily(this.dailyDate);
@@ -620,15 +655,36 @@ export class GameScene extends Phaser.Scene {
       wordWrap: { width: 250, useAdvancedWrap: true }
     }).setDepth(3501));
 
+    // Aim assist lives here because this is where a player already goes when the
+    // screen is telling them too much. Cycling is enough for three values.
+    const assistLabel = () => `AIM ASSIST · ${String(this.aimAssist).toUpperCase()}`;
+    const assistText = bodyText(this, GAME_W / 2, 131, assistLabel(), {
+      originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '7px', color: '#f3c449'
+    }).setDepth(3501);
+    objects.push(assistText);
+
     const actions = [
       { label: 'RESUME', color: PAL.blue, hover: PAL.blueHi, cb: () => this.closePauseMenu() },
+      {
+        label: 'AIM ASSIST',
+        color: PAL.panelHi,
+        hover: PAL.border,
+        cb: () => {
+          const next = AIM_ASSIST_MODES[(AIM_ASSIST_MODES.indexOf(this.aimAssist) + 1) % AIM_ASSIST_MODES.length];
+          this.aimAssist = next;
+          SaveManager.setSetting('aimAssist', next);
+          if (assistText.active) assistText.setText(assistLabel());
+        }
+      },
       { label: 'RESTART', color: PAL.goldDark, hover: PAL.gold, cb: () => this.restartCurrentLevel() },
       { label: 'MAIN MENU', color: PAL.panelHi, hover: PAL.border, cb: () => this.startScene('Menu') }
     ];
+    // Four buttons across the 300px panel: 68 wide on a 72px pitch, centred.
+    const first = GAME_W / 2 - ((actions.length - 1) * 72) / 2;
     actions.forEach((action, index) => {
-      objects.push(makeButton(this, 154 + index * 86, 162, 78, 27, action.label, action.cb, {
+      objects.push(makeButton(this, first + index * 72, 162, 68, 27, action.label, action.cb, {
         color: action.color, hover: action.hover, border: index === 0 ? PAL.goldDark : PAL.borderDark,
-        fontSize: action.label === 'MAIN MENU' ? '6px' : '7px', hitHeight: 32
+        fontSize: action.label.length > 7 ? '6px' : '7px', hitHeight: 32
       }).setDepth(3501));
     });
     objects.push(bodyText(this, GAME_W / 2, 198, 'TAB  RESUME    ·    R  RESTART    ·    ESC  MAIN MENU', {
@@ -726,6 +782,9 @@ export class GameScene extends Phaser.Scene {
     this.objectiveStripGfx = null;
     this.objectiveSteps = [];
     this.objectiveBrief = null;
+    this.tutorialGfx = null;
+    this.tutorialCaption = null;
+    this.tutorialDetail = null;
     this.attemptIcons = null;
     this.terminalOverlayObjects?.forEach((obj) => { if (obj?.active) obj.destroy(); });
     this.terminalOverlayObjects = [];
@@ -1815,6 +1874,7 @@ export class GameScene extends Phaser.Scene {
       }
 
       this.buildConditionChips(4 + subWidth + 4);
+      this.buildTutorial();
       this.buildObjectiveStrip();
     } else if (this.mode === 'daily') {
       bodyText(this, 38, 5.5, `DAILY KICK  ·  ${this.dailyDate}`, {
@@ -1979,8 +2039,10 @@ export class GameScene extends Phaser.Scene {
       ...this.objectiveSteps.map((step) => step.text)];
 
     // The full sentence still gets said - once, above the strip, then it goes
-    // away and gives the screen back.
-    const brief = this.level.objective?.label;
+    // away and gives the screen back. During the tutorial it is not said at
+    // all: the coaching copy occupies that line, and stacking a third sentence
+    // under it is the dump-everything-at-once problem this is here to avoid.
+    const brief = this.tutorialActive() ? null : this.level.objective?.label;
     if (brief) {
       this.objectiveBrief = bodyText(this, GAME_W / 2, plateY - 9, brief, {
         originX: 0.5, originY: 0.5, fontSize: '7px', color: '#d7dfda',
@@ -2039,6 +2101,108 @@ export class GameScene extends Phaser.Scene {
       step.text.setColor(state === 'pending' ? '#8fa2ab' : stage.glyphColor);
       step.state = state;
     }
+  }
+
+  // ---------------------------------------------------------------- tutorial
+
+  /**
+   * Match 01 teaches the swipe instead of assuming it.
+   *
+   * The tutorial only ever runs on the first career level, for a player who has
+   * not finished it, and it never takes control: the ghost swipe is a loop the
+   * player can copy or ignore, and it gets out of the way the moment they put a
+   * finger down. Each attempt advances one concept - direction, then power,
+   * then bend - so nothing arrives at the same time as anything else.
+   */
+  tutorialActive() {
+    return this.mode === 'career' && this.levelIndex === 0 && !this.tutorialDone;
+  }
+
+  buildTutorial() {
+    const record = SaveManager.getTutorial?.() ?? { completed: false, step: 0 };
+    this.tutorialDone = Boolean(record.completed);
+    this.tutorialStep = Phaser.Math.Clamp(record.step ?? 0, 0, TUTORIAL_STEPS.length - 1);
+    if (!this.tutorialActive()) return;
+
+    this.tutorialGfx = this.add.graphics().setDepth(1495);
+    this.tutorialPhase = 0;
+    this.tutorialCaption = bodyText(this, GAME_W / 2, READOUT_Y - 16, '', {
+      originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '8px', color: '#f3c449',
+      stroke: '#071018', strokeThickness: 3, letterSpacing: 0.3
+    }).setDepth(2000);
+    this.tutorialDetail = bodyText(this, GAME_W / 2, READOUT_Y - 6, '', {
+      originX: 0.5, originY: 0.5, fontSize: '7px', color: '#d7dfda',
+      stroke: '#071018', strokeThickness: 3
+    }).setDepth(2000);
+    this.refreshTutorialCopy();
+  }
+
+  refreshTutorialCopy() {
+    const step = TUTORIAL_STEPS[this.tutorialStep];
+    if (!step || !this.tutorialCaption) return;
+    this.tutorialCaption.setText(step.caption).setAlpha(1);
+    this.tutorialDetail.setText(step.detail).setAlpha(1);
+  }
+
+  /** The looping ghost swipe: a path to copy, drawn from the ball outward. */
+  drawTutorialGhost(delta) {
+    const gfx = this.tutorialGfx;
+    if (!gfx?.active) return;
+    gfx.clear();
+    const step = TUTORIAL_STEPS[this.tutorialStep];
+    // Hidden while the player is actually swiping - their own line is the one
+    // that matters, and two overlapping trails is exactly the clutter this is
+    // meant to avoid.
+    if (!step || this.state !== 'AIMING' || this.swipe?.activePath?.length) return;
+
+    if (!this.settings.reducedMotion) {
+      this.tutorialPhase = (this.tutorialPhase + delta * 0.00055 * step.speed) % 1.6;
+    } else {
+      this.tutorialPhase = 1;
+    }
+    const travel = Phaser.Math.Clamp(this.tutorialPhase, 0, 1);
+    const ball = project(this.ball.x, this.ball.y, this.ball.z);
+
+    const at = (t) => ({
+      x: ball.x + Math.sin(t * Math.PI) * step.bow,
+      y: ball.y - step.reach * t
+    });
+
+    // The trail behind the finger, fading toward the ball.
+    const drawn = Math.max(2, Math.round(travel * 26));
+    for (let i = 1; i <= drawn; i++) {
+      const point = at((i / drawn) * travel);
+      const fade = i / drawn;
+      gfx.fillStyle(0x071018, 0.34 * fade);
+      gfx.fillRect(Math.round(point.x) - 2, Math.round(point.y) - 2, 4, 4);
+      gfx.fillStyle(0xf3c449, 0.5 * fade);
+      gfx.fillRect(Math.round(point.x) - 1, Math.round(point.y) - 1, 2, 2);
+    }
+
+    // The hand itself: a chunky ring, so it reads as a pointer and not as ball.
+    const head = at(travel);
+    gfx.lineStyle(3, 0x071018, 0.8);
+    gfx.strokeCircle(head.x, head.y, 4);
+    gfx.lineStyle(1.5, 0xfff3cd, 0.95);
+    gfx.strokeCircle(head.x, head.y, 4);
+    gfx.fillStyle(0xfff3cd, 0.9);
+    gfx.fillRect(Math.round(head.x) - 1, Math.round(head.y) - 1, 2, 2);
+  }
+
+  /** One concept per attempt; scoring ends the lesson early. */
+  advanceTutorial(outcome) {
+    if (!this.tutorialActive()) return;
+    const last = this.tutorialStep >= TUTORIAL_STEPS.length - 1;
+    if (outcome === 'GOAL' || last) {
+      this.tutorialDone = true;
+      SaveManager.setTutorial?.({ completed: true, step: TUTORIAL_STEPS.length });
+      this.tutorialGfx?.clear();
+      [this.tutorialCaption, this.tutorialDetail].forEach((text) => text?.setAlpha(0));
+      return;
+    }
+    this.tutorialStep += 1;
+    SaveManager.setTutorial?.({ step: this.tutorialStep });
+    this.refreshTutorialCopy();
   }
 
   /**
@@ -2425,6 +2589,7 @@ export class GameScene extends Phaser.Scene {
 
     this.drawBall();
     this.drawAim();
+    this.drawTutorialGhost(delta);
   }
 
   simulate(dt, renderTime) {
@@ -2831,6 +2996,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.showShotReadout(outcome, pt, shotRating);
+    this.advanceTutorial(outcome);
     this.recordShotOutcome(outcome, shotRating);
 
     if (this.mode === 'arcade') {
@@ -3545,7 +3711,10 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Where this shot actually arrives. Drawn as a reticle on the goal plane so
-    // the wall, keeper and hoops can all be judged against it.
+    // the wall, keeper and hoops can all be judged against it. Reduced assist
+    // keeps the arc off the ball and stops here - the player reads the flight
+    // for themselves rather than being told the destination.
+    if (this.aimAssist === 'reduced') return;
     const landing = this.previewBall?.predictAt?.(this.zGoal);
     if (landing?.reached) {
       const hit = project(landing.x, landing.y, this.zGoal);
@@ -3625,7 +3794,9 @@ export class GameScene extends Phaser.Scene {
     this.aimGfx.setAlpha(Phaser.Math.Clamp(guideAlpha, 0.12, 1));
     this.meterUi?.forEach((label) => label.setAlpha(Phaser.Math.Clamp(guideAlpha + 0.18, 0.3, 1)));
 
-    if (!preview.aimGuideHidden) this.drawShotPreview(preview, guideAlpha, lineColor);
+    if (!preview.aimGuideHidden && this.aimAssist !== 'off') {
+      this.drawShotPreview(preview, guideAlpha, lineColor);
+    }
 
     // Dark keyline and bright segmented gesture give the swipe a readable,
     // broadcast-graphics feel over both grass and crowd.
