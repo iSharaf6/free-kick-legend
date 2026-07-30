@@ -85,47 +85,59 @@ test('moving and split walls derive poses from absolute elapsed time', () => {
   assert.ok(split.players[2].x > 0.6);
 });
 
-test('rushing wall starts once, clamps its travel and rewinds on reset', () => {
-  const wall = new Wall(sceneStub(), 2, 12, 0, {
-    config: {
-      type: 'rushing',
-      count: 2,
-      rushDistance: 2.4,
-      rushSpeed: 4,
-      trigger: 'strike'
+// Law 13 keeps the wall 9.15m off the ball until the kick is taken. A wall that
+// closes that distance is a foul, not a difficulty setting, so no authored type
+// may move a defender toward the kicker once the shot is struck.
+test('no wall type advances on the kicker after the strike', () => {
+  const configs = [
+    { type: 'standard', count: 3 },
+    { type: 'moving', count: 3, range: 1, speed: 1, phase: 0 },
+    { type: 'split', count: 4, gapWidth: 1.2, gapRange: 0.7, speed: 1 },
+    { type: 'deflector', count: 3, defenderIndex: 1, extensionChance: 1, extensionReach: 0.65 },
+    {
+      type: 'double',
+      count: 4,
+      rows: [
+        { count: 2, depthOffset: -0.5, lateralOffset: -0.2 },
+        { count: 2, depthOffset: 0.5, lateralOffset: 0.2 }
+      ]
+    },
+    // The retired rushing fields must not resurrect the behaviour by the back
+    // door: an unknown type falls back to a standard, stationary wall.
+    { type: 'rushing', count: 3, rushDistance: 2.4, rushSpeed: 4, trigger: 'strike' }
+  ];
+
+  for (const config of configs) {
+    const wall = new Wall(sceneStub(), config, 12, 0);
+    const authoredZs = wall.players.map((player) => player.z);
+    wall.onStrike({ seed: 8, targetX: 1.5 });
+
+    for (const elapsed of [0.05, 0.5, 1.5, 8]) {
+      wall.updateMechanic(elapsed);
+      assert.deepEqual(
+        wall.players.map((player) => player.z),
+        authoredZs,
+        `${config.type} wall changed depth ${elapsed}s after the strike`
+      );
+      closeTo(wall.z, 12);
     }
-  });
+  }
+});
+
+test('a struck wall registers one shot clock and rewinds on reset', () => {
+  const wall = new Wall(sceneStub(), 2, 12, 0);
 
   assert.equal(wall.onStrike({ seed: 8 }), true);
-  assert.equal(wall.onStrike({ seed: 9 }), false, 'one kick cannot trigger a second rush');
+  assert.equal(wall.onStrike({ seed: 9 }), false, 'one kick cannot start a second shot clock');
   wall.updateMechanic(0.5);
-  closeTo(wall.z, 10);
-  wall.updateMechanic(8);
-  closeTo(wall.z, 9.6);
-  assert.deepEqual(wall.getPlaneZs(), [9.6]);
+  closeTo(wall.strikeElapsed, 0.5);
+  assert.deepEqual(wall.getPlaneZs(), [12]);
 
   assert.equal(wall.reset(), wall);
   assert.equal(wall.struck, false);
-  assert.equal(wall.rushActive, false);
+  assert.equal(wall.strikeElapsed, 0);
   closeTo(wall.z, 12);
   assert.ok(wall.players.every((player) => player.z === 12));
-});
-
-test('flight-triggered rushing waits until the scene reports flight', () => {
-  const wall = new Wall(sceneStub(), {
-    type: 'rushing',
-    count: 3,
-    rushDistance: 2,
-    rushSpeed: 2,
-    trigger: 'flight'
-  }, 11, 0);
-
-  wall.onStrike({ phase: 'windup' });
-  wall.updateMechanic(0.6);
-  closeTo(wall.z, 11);
-  assert.equal(wall.onFlightStart(), true);
-  wall.updateMechanic(1.1);
-  closeTo(wall.z, 10);
 });
 
 test('double and stagger walls expose independent collision planes', () => {

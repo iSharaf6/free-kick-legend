@@ -121,10 +121,8 @@ export class Wall {
     this.mechanicElapsed = 0;
     this.struck = false;
     this.strikeElapsed = 0;
-    this.rushActive = false;
     this.deflectorActive = false;
     this._strikeStartedAt = 0;
-    this._rushStartedAt = 0;
     this._shotContext = null;
     this.rng = optionBag.rng;
     this.players = [];
@@ -180,8 +178,9 @@ export class Wall {
   }
 
   /**
-   * Mark the shot as struck. Rushing walls begin immediately when authored
-   * with trigger "strike"; flight-triggered walls wait for onFlightStart().
+   * Mark the shot as struck and start this wall's shot clock. The wall holds
+   * its authored distance from the ball for the whole flight; the only thing a
+   * strike decides is whether a deflector commits its leg.
    */
   onStrike(shotContext = {}) {
     if (this.struck) return false;
@@ -189,12 +188,6 @@ export class Wall {
     this.strikeElapsed = 0;
     this._strikeStartedAt = this.mechanicElapsed;
     this._shotContext = shotContext;
-    this.rushActive = this.style === 'rushing' && (
-      this.config.trigger === 'strike' ||
-      shotContext.phase === 'flight' ||
-      shotContext.inFlight === true
-    );
-    if (this.rushActive) this._rushStartedAt = this.mechanicElapsed;
 
     if (this.style === 'deflector') {
       const forced = shotContext.deflectorActive;
@@ -224,18 +217,6 @@ export class Wall {
     return true;
   }
 
-  onFlightStart(shotContext = {}) {
-    if (this.style !== 'rushing') return false;
-    if (!this.struck) {
-      const started = this.onStrike({ ...shotContext, phase: 'flight' });
-      return started && this.rushActive;
-    }
-    if (this.rushActive) return false;
-    this.rushActive = true;
-    this._rushStartedAt = this.mechanicElapsed;
-    return true;
-  }
-
   /**
    * Apply an authored pose at an absolute scene time. Movement derives from
    * elapsedSeconds rather than accumulated tweens/timers, so it is replay and
@@ -244,25 +225,13 @@ export class Wall {
   updateMechanic(elapsedSeconds, dt = 0, shotContext = {}) {
     const elapsed = Math.max(0, finite(elapsedSeconds, this.mechanicElapsed));
     if (shotContext.struck === true && !this.struck) this.onStrike(shotContext);
-    if (
-      this.style === 'rushing' &&
-      this.config.trigger === 'flight' &&
-      (shotContext.phase === 'flight' || shotContext.inFlight === true || shotContext.flightStarted === true)
-    ) {
-      this.onFlightStart(shotContext);
-    }
 
     this.mechanicElapsed = elapsed;
     this.strikeElapsed = this.struck
       ? Math.max(0, elapsed - this._strikeStartedAt)
       : 0;
-    const rushElapsed = this.rushActive
-      ? Math.max(0, elapsed - this._rushStartedAt)
-      : 0;
     const poses = getWallPoseOffsets(this.config, elapsed, {
       spacing: SPACING,
-      struck: this.rushActive,
-      strikeElapsed: rushElapsed,
       deflectorActive: this.deflectorActive
     });
 
@@ -280,9 +249,7 @@ export class Wall {
       player.role = pose.role;
       player.legExtension = pose.legExtension;
     }
-    this.z = this.style === 'rushing' && this.players[0]
-      ? this.players[0].z
-      : this.baseZ;
+    this.z = this.baseZ;
     return this;
   }
 
@@ -458,10 +425,8 @@ export class Wall {
     this.mechanicElapsed = 0;
     this.struck = false;
     this.strikeElapsed = 0;
-    this.rushActive = false;
     this.deflectorActive = false;
     this._strikeStartedAt = 0;
-    this._rushStartedAt = 0;
     this._shotContext = null;
     this.jumped = false;
     for (const player of this.players) {

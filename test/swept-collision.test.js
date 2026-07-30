@@ -95,7 +95,7 @@ test('relative sweep matches a static plane and interpolates every coordinate on
   closeTo(hit.z, 10);
 });
 
-test('relative sweep catches a rushing plane that finishes behind the old ball position', () => {
+test('relative sweep catches a closing keeper plane that finishes behind the old ball position', () => {
   const previousBall = { x: 0, y: 0.5, z: 10 };
   const currentBall = { x: 0.27, y: 0.77, z: 10.02 };
   const previousPlaneZ = 10.2;
@@ -135,25 +135,25 @@ test('relative sweep rejects non-crossings and already-passed planes', () => {
   assert.equal(sweepMovingZPlane(null, { x: 0, y: 0, z: 1 }, 1, 1), null);
 });
 
-test('rushing wall collision planes retain previous and current depths', () => {
+test('wall collision planes hold their authored depth for the whole flight', () => {
   const wall = new Wall(wallSceneStub(), {
-    type: 'rushing',
-    count: 3,
-    rushDistance: 3,
-    rushSpeed: 4,
-    trigger: 'strike'
+    type: 'double',
+    count: 4,
+    rows: [
+      { count: 2, depthOffset: -0.5, lateralOffset: -0.2 },
+      { count: 2, depthOffset: 0.5, lateralOffset: 0.2 }
+    ]
   }, 12, 0);
   wall.onStrike({ seed: 1 });
 
-  wall.updateMechanic(0.1);
-  let plane = wall.getCollisionPlanes()[0];
-  closeTo(plane.prevZ, 12);
-  closeTo(plane.z, 11.6);
-
-  wall.updateMechanic(0.2);
-  plane = wall.getCollisionPlanes()[0];
-  closeTo(plane.prevZ, 11.6);
-  closeTo(plane.z, 11.2);
+  for (const elapsed of [0.1, 0.3, 1.2]) {
+    wall.updateMechanic(elapsed);
+    const planes = wall.getCollisionPlanes();
+    assert.deepEqual(planes.map((plane) => plane.z), [11.5, 12.5]);
+    // prevZ still has to travel with each plane: the sweep reads it, and the
+    // sweeper keeper depends on the same contract.
+    assert.deepEqual(planes.map((plane) => plane.prevZ), [11.5, 12.5]);
+  }
 });
 
 test('sweeper update preserves its start-of-step collision depth', () => {
@@ -202,13 +202,13 @@ function makeMovingPlaneBall() {
   };
 }
 
-test('GameScene resolves a rushing wall through its relative swept plane', () => {
+test('GameScene resolves a wall row through the shared swept plane helper', () => {
   const ball = makeMovingPlaneBall();
   let outcome = null;
   let contactPoint = null;
   const wall = {
     centerX: 0,
-    getCollisionPlanes: () => [{ row: 0, prevZ: 10.2, z: 9.95 }],
+    getCollisionPlanes: () => [{ row: 0, prevZ: 10.01, z: 10.01 }],
     jump() {},
     contactAtZ(point) {
       contactPoint = point;
@@ -238,8 +238,8 @@ test('GameScene resolves a rushing wall through its relative swept plane', () =>
   }
 
   assert.equal(outcome, 'WALL');
-  closeTo(contactPoint.x, 0.2);
-  closeTo(contactPoint.y, 0.7);
+  closeTo(contactPoint.x, 0.135);
+  closeTo(contactPoint.y, 0.635);
   assert.equal(scene.wallPlanesChecked.has('row-0'), true);
 });
 

@@ -153,6 +153,24 @@ test('later cups cover every authored wall, weather and objective twist', () => 
   }
 });
 
+test('no career level authors a wall that advances on the kicker', () => {
+  assert.equal(WALL_TYPES.includes('rushing'), false, 'a charging wall is a Law 13 offence, not a wall type');
+
+  for (const level of LEVELS) {
+    for (const key of ['rushDistance', 'rushSpeed', 'trigger']) {
+      assert.equal(key in (level.wallConfig ?? {}), false, `${level.id} still carries wallConfig.${key}`);
+    }
+  }
+
+  const charging = {
+    ...LEVELS.find((level) => level.wallConfig?.type === 'moving'),
+    wallConfig: { type: 'rushing', count: 4, rushDistance: 2.4, rushSpeed: 4.2, trigger: 'strike' }
+  };
+  const errors = validateLevelDefinition(charging).join('\n');
+  assert.match(errors, /unknown wall type rushing/);
+  assert.match(errors, /wallConfig\.rushSpeed is not supported/);
+});
+
 test('seeded scenarios and RNG are deterministic while preserving RNG injection', () => {
   assert.deepEqual(randomScenario('2026-07-12'), randomScenario('2026-07-12'));
   assert.notDeepEqual(randomScenario('2026-07-12'), randomScenario('2026-07-13'));

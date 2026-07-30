@@ -17,8 +17,8 @@ function lerp(start, end, amount) {
  *
  *   ballZ(t) - planeZ(t) = 0
  *
- * This catches a rushing wall or sweeper moving through a slower ball even
- * when the plane's final Z is already behind the ball's previous Z.
+ * This catches a sweeper keeper closing on a slower ball even when the plane's
+ * final Z is already behind the ball's previous Z.
  * Returns null unless the point starts behind and finishes on/ahead of the
  * plane. All returned coordinates are interpolated at the same time fraction.
  */
@@ -51,4 +51,3 @@ export function sweepMovingZPlane(previousPoint, currentPoint, previousPlaneZ, c
     relativeEnd
   };
 }
-

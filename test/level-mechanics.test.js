@@ -90,12 +90,12 @@ test('slippery power jitter is continuous, seeded, bounded and replay-safe', () 
     amount: 0.11,
     frequency: 9,
     elapsedSeconds: 1.25,
-    seed: 'legend-07:attempt-2',
+    seed: 'pressure-10:attempt-2',
     maxPower: 0.72
   };
   const first = getJitteredPower(0.7, options);
   const repeated = getJitteredPower(0.7, options);
-  const anotherAttempt = getJitteredPower(0.7, { ...options, seed: 'legend-07:attempt-3' });
+  const anotherAttempt = getJitteredPower(0.7, { ...options, seed: 'pressure-10:attempt-3' });
   assert.deepEqual(first, repeated);
   assert.notEqual(first.noise, anotherAttempt.noise);
   assert.ok(first.power >= 0 && first.power <= 0.72);
@@ -313,7 +313,7 @@ test('keeper variants normalize into bounded explicit runtime instances', () => 
   assert.equal(boss.fakeChance, 0);
 });
 
-test('wall normalization and poses cover moving, split, rushing, double and deflector walls', () => {
+test('wall normalization and poses cover moving, split, double and deflector walls', () => {
   const moving = normalizeWallConfig({ type: 'moving', count: 3, range: 1, speed: 1, phase: 0 });
   const movingPoses = getWallPoseOffsets(moving, Math.PI / 2, { spacing: 0.5 });
   closeTo(movingPoses[1].x, 1);
@@ -326,12 +326,13 @@ test('wall normalization and poses cover moving, split, rushing, double and defl
   assert.ok(split[1].x < -0.6);
   assert.ok(split[2].x > 0.6);
 
-  const rushing = getWallPoseOffsets(
-    normalizeWallConfig({ type: 'rushing', count: 2, rushDistance: 2.4, rushSpeed: 4 }),
-    10,
-    { struck: true, strikeElapsed: 0.5 }
-  );
-  assert.equal(rushing[0].z, -2);
+  // The retired rushing wall normalizes to a standard one and keeps its depth,
+  // whatever advance timings a caller still passes in.
+  const retired = normalizeWallConfig({ type: 'rushing', count: 2, rushDistance: 2.4, rushSpeed: 4 });
+  assert.equal(retired.type, 'standard');
+  assert.equal('rushDistance' in retired, false);
+  const retiredPoses = getWallPoseOffsets(retired, 10, { struck: true, strikeElapsed: 0.5 });
+  assert.deepEqual(retiredPoses.map((pose) => pose.z), [0, 0]);
 
   const double = getWallPoseOffsets(normalizeWallConfig({
     type: 'double',

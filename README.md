@@ -7,7 +7,7 @@ A polished, portal-ready pixel football game built with Phaser 3 and Vite. Draw 
 ## What is included
 
 - 50 authored career matches across five cups, with stable-ID progression and escalating objectives: corner-only finishes, bank shots, ring threading, limited-power strikes, blind shots, numbered zones, and combo challenges.
-- Match hazards and defensive twists including rotating wind, fog, snow, glare, slippery run-ups, crowd pressure, moving/rushing/split/double walls, deflectors, compact goals, sweeper keepers, and two-keeper finals.
+- Match hazards and defensive twists including rotating wind, fog, snow, glare, slippery run-ups, crowd pressure, moving/split/double walls, deflectors, compact goals, sweeper keepers, and two-keeper finals. The wall shuffles, splits, staggers and stretches a leg out, but it never advances on the ball: under Law 13 it holds its distance until the kick is taken.
 - Fixed-step pseudo-3D ball physics at 120 Hz: full-velocity drag, Magnus curl, wind, grounded rolling, bounce, glancing post/crossbar rebounds, net damping, and frame-rate-invariant outcomes.
 - A gameplay-routed set of 28 practical goalkeeper actions: full/low/mid dives, fingertip tips, upper/low parries, low/mid catches, high claims, jump catches, front/side smothers, the spread and foot saves, secure side holds, and a centre get-up. The striker uses contact-timed run-up, strike, follow-through, recovery, and celebration animations.
 - Robust mouse/touch swipes with pointer isolation, smoothing, resampling, invalid-gesture feedback, and live power/curl presentation.
@@ -69,7 +69,7 @@ src/
 ├── objects/
 │   ├── Ball.js                 fixed-step pseudo-3D solver
 │   ├── Goalkeeper.js           deterministic keeper state machine/contact
-│   ├── Wall.js                 moving, rushing, split and staggered formations
+│   ├── Wall.js                 moving, split and staggered formations
 │   └── Kicker.js               contact-timed strike and celebration animation
 └── scenes/
     ├── BootScene.js            SDK init and generated texture atlas

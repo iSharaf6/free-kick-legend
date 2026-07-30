@@ -58,7 +58,9 @@ const ADVANCED_OBJECTIVES = new Set([
 ]);
 
 const KEEPER_TYPES = new Set(['line', 'sweeper', 'double', 'boss']);
-const WALL_TYPES = new Set(['standard', 'moving', 'rushing', 'split', 'double', 'deflector']);
+// Mirrors WALL_TYPES in data/levels.js. No entry advances the wall in depth;
+// under Law 13 the wall holds its distance until the kick is taken.
+const WALL_TYPES = new Set(['standard', 'moving', 'split', 'double', 'deflector']);
 
 function finite(value, fallback = 0) {
   const number = Number(value);
@@ -679,14 +681,6 @@ export function normalizeWallConfig(config, fallbackCount = 0) {
       phase: finite(config?.phase)
     });
   }
-  if (type === 'rushing') {
-    return Object.freeze({
-      ...base,
-      rushDistance: clamp(config?.rushDistance ?? 2.4, 0, 5),
-      rushSpeed: clamp(config?.rushSpeed ?? 4.2, 0.1, 9),
-      trigger: config?.trigger === 'flight' ? 'flight' : 'strike'
-    });
-  }
   if (type === 'split') {
     return Object.freeze({
       ...base,
@@ -742,8 +736,10 @@ function rowOffsets(count, spacing, center = 0) {
 /**
  * Produce defender pose offsets relative to the wall's authored center/z.
  *
- * For a rushing wall, negative z moves toward the kicker. Deflector reach is
- * returned as pose metadata; collision/render code decides the leg direction.
+ * Lateral movement is authored per type; depth offsets are fixed formation
+ * geometry, never a function of time, so no wall closes on the kicker.
+ * Deflector reach is returned as pose metadata; collision/render code decides
+ * the leg direction.
  */
 export function getWallPoseOffsets(config, elapsedSeconds = 0, runtime = {}) {
   const normalized = normalizeWallConfig(config, config?.count);
@@ -794,19 +790,13 @@ export function getWallPoseOffsets(config, elapsedSeconds = 0, runtime = {}) {
     const movingX = normalized.type === 'moving'
       ? Math.sin(time * normalized.speed + normalized.phase) * normalized.range
       : 0;
-    const rushingZ = normalized.type === 'rushing' && runtime.struck
-      ? -Math.min(
-          normalized.rushDistance,
-          Math.max(0, finite(runtime.strikeElapsed)) * normalized.rushSpeed
-        )
-      : 0;
     for (const [index, x] of rowOffsets(normalized.count, spacing, movingX).entries()) {
       const deflector = normalized.type === 'deflector' && index === normalized.defenderIndex;
       poses.push({
         index,
         row: 0,
         x,
-        z: rushingZ,
+        z: 0,
         role: deflector ? 'deflector' : 'wall',
         legExtension: deflector && runtime.deflectorActive ? normalized.extensionReach : 0
       });
@@ -815,4 +805,3 @@ export function getWallPoseOffsets(config, elapsedSeconds = 0, runtime = {}) {
 
   return frozenArray(poses.map((pose) => Object.freeze(pose)));
 }
-

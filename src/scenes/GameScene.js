@@ -2495,11 +2495,9 @@ export class GameScene extends Phaser.Scene {
       levelId: this.level.id,
       vx: shot.vx,
       targetX: this.ball.predictAt(this.zWall)?.x,
-      ball: this.ball,
-      inFlight: true
+      ball: this.ball
     };
     this.wall?.onStrike(wallContext);
-    this.wall?.onFlightStart(wallContext);
     this.keepers.forEach((keeper) => keeper.onShot(this.ball, this.zGoal));
   }
 

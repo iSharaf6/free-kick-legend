@@ -4,10 +4,14 @@
 
 export const LEVEL_SCHEMA_VERSION = 2;
 
+// A wall may shuffle sideways, split, stagger or stretch a leg out, because a
+// real wall does all of those. What it may never do is charge the ball: Law 13
+// keeps defenders 9.15m away until the kick is taken, so a defender advancing
+// on the striker is not a difficulty knob, it is a foul. There is deliberately
+// no wall type here that closes the distance.
 export const WALL_TYPES = Object.freeze([
   'standard',
   'moving',
-  'rushing',
   'split',
   'double',
   'deflector'
@@ -106,8 +110,8 @@ function rotatingWind(magnitude, period, options = {}) {
   });
 }
 
-// Wall distances/ranges are world metres. Oscillation speed is radians/second;
-// rushSpeed is metres/second and phase is radians.
+// Wall ranges are world metres, oscillation speed is radians/second and phase
+// is radians. No field moves the wall in depth - see WALL_TYPES.
 function wallConfig(type, count, options = {}) {
   return deepFreeze({ type, count, ...options });
 }
@@ -348,9 +352,12 @@ const RAW_LEVELS = [
     wallConfig: wallConfig('moving', 4, { range: 0.9, speed: 0.78, phase: 2.1 }), reward: reward(125), style: 'line-reader'
   }),
   makeLevel({
-    id: 'pressure-03', cup: 'pressure', name: 'Closing Down', distance: 18, offsetX: 5.5, wall: 4, keeper: 0.52,
-    objective: objective('curve', 'Bend it before the wall closes you down', { curveDirection: 'left', minimumCurve: 0.3 }),
-    wallConfig: wallConfig('rushing', 4, { rushDistance: 2.4, rushSpeed: 4.2, trigger: 'strike' }), reward: reward(125), style: 'line-reader'
+    id: 'pressure-03', cup: 'pressure', name: 'First Snowfall', distance: 18, offsetX: 5.5, wall: 4, keeper: 0.52,
+    objective: objective('curve', 'Bend it through the falling snow', { curveDirection: 'left', minimumCurve: 0.3 }),
+    // Light snow is the pressure here: the ball bleeds pace on the way in, so
+    // the curl has to be shaped early rather than trusted to arrive.
+    hazards: [hazard('snow', { drag: 0.045, trail: true, density: 0.34 })],
+    reward: reward(125), style: 'line-reader'
   }),
   makeLevel({
     id: 'pressure-04', cup: 'pressure', name: 'Into the Wind', distance: 21, offsetX: 0, wall: 5, keeper: 0.52,
@@ -448,12 +455,17 @@ const RAW_LEVELS = [
     keeperConfig: keeperConfig('double', { offsets: [-1.75, 1.75], skillScale: 0.82 }),
     reward: reward(190), style: 'legend'
   }),
+  // Level 47 used to stack a charging six-man wall on top of a slippery run-up,
+  // maximum range and a 0.35 curl demanded twice in a row. The charge was
+  // illegal to begin with, and once it is gone the rest of that stack is just
+  // an unclearable pile-up, so the level is rebuilt around one honest idea: a
+  // blizzard that steals pace from a shaped shot. The curl requirement, range
+  // and keeper skill all come down to leave a route that a good strike finds.
   makeLevel({
-    id: 'legend-07', cup: 'legend', name: 'No Standing Still', distance: 23, offsetX: -5, wall: 6, keeper: 0.77,
-    objective: objective('curve-streak', 'Score two curved goals before the rush', { goals: 2, consecutive: true, minimumCurve: 0.35 }), wind: wind(0.45, 0.14),
-    wallConfig: wallConfig('rushing', 6, { rushDistance: 2.8, rushSpeed: 5.2, trigger: 'strike' }),
-    hazards: [hazard('slippery', { powerJitter: 0.11, frequency: 10 })],
-    shotRules: shotRules({ powerJitter: 0.11 }),
+    id: 'legend-07', cup: 'legend', name: 'Snowbound', distance: 21, offsetX: -4, wall: 5, keeper: 0.7,
+    objective: objective('curve-streak', 'Score two curled goals through the blizzard', { goals: 2, consecutive: true, minimumCurve: 0.28 }),
+    wind: wind(0.3, 0.08),
+    hazards: [hazard('snow', { drag: 0.085, trail: true, density: 0.72 })],
     reward: reward(210), style: 'legend'
   }),
   makeLevel({
@@ -574,7 +586,11 @@ export function validateLevelDefinition(level) {
       if (rowCount !== level.wall) fail('double-wall row counts must match legacy wall');
     }
     if (level.wallConfig.type === 'split' && !(level.wallConfig.gapWidth > 0)) fail('split wall needs a positive gapWidth');
-    if (level.wallConfig.type === 'rushing' && !(level.wallConfig.rushSpeed > 0)) fail('rushing wall needs a positive rushSpeed');
+    // Reject the old rushing-wall fields by name. Dropping the type alone would
+    // let an authored `rushDistance` sit in the data looking supported.
+    for (const key of ['rushDistance', 'rushSpeed', 'trigger']) {
+      if (key in level.wallConfig) fail(`wallConfig.${key} is not supported: the wall may not advance on the kicker`);
+    }
   }
 
   if (level.goal) {
