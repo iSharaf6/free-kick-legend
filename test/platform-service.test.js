@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { PlatformAdapter } from '../src/systems/PlatformService.js';
 
 test('standalone platform adapter is fully no-op safe', async () => {
-  const platform = new PlatformAdapter();
+  const platform = new PlatformAdapter({ lifecycleSettleMs: 0, lifecycleMinIntervalMs: 0 });
   assert.equal(await platform.init({ sdk: null }), false);
   assert.equal(platform.isReady(), true);
   assert.equal(platform.isAvailable(), false);
@@ -41,7 +41,7 @@ test('platform adapter routes storage, lifecycle, progress and completed ads', a
       }
     }
   };
-  const platform = new PlatformAdapter();
+  const platform = new PlatformAdapter({ lifecycleSettleMs: 0, lifecycleMinIntervalMs: 0 });
   assert.equal(await platform.init({ sdk }), true);
   assert.equal(platform.getStorage(), data);
   assert.equal(platform.shouldMuteAudio(), true);
@@ -81,4 +81,43 @@ test('ad errors and thrown hooks resolve false without leaking failures', async 
   });
   assert.equal(shown, false);
   assert.equal(platform.getLastError(), expectedError);
+});
+
+test('rapid lifecycle churn is coalesced and SDK calls never overlap', async () => {
+  let releaseStart;
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const calls = [];
+  const sdk = {
+    environment: 'local',
+    init: async () => {},
+    game: {
+      gameplayStart: async () => {
+        calls.push('start');
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((resolve) => { releaseStart = resolve; });
+        inFlight--;
+      },
+      gameplayStop: async () => {
+        calls.push('stop');
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        inFlight--;
+      }
+    }
+  };
+  const platform = new PlatformAdapter({ lifecycleSettleMs: 0, lifecycleMinIntervalMs: 0 });
+  await platform.init({ sdk });
+
+  const starting = platform.gameplayStart();
+  await Promise.resolve();
+  const stopping = platform.gameplayStop();
+  const restarting = platform.gameplayStart();
+  releaseStart();
+  await Promise.all([starting, stopping, restarting]);
+
+  assert.deepEqual(calls, ['start']);
+  assert.equal(platform.isGameplayActive(), true);
+  assert.equal(maxInFlight, 1);
 });

@@ -297,6 +297,8 @@ export class Kicker {
     this.sequenceTimers.forEach((timer) => timer?.remove?.(false));
     this.sequenceTimers.length = 0;
     this.activeKick = null;
+    this.previewPending = false;
+    this.actionAnimationPaused = false;
     this.sprite?.anims?.stop?.();
     if (!this.destroyed) {
       // Only the action state is swept. The ambient loop lives on its own
@@ -313,6 +315,23 @@ export class Kicker {
       }
       this.applyTransform();
     }
+    return this;
+  }
+
+  // Phaser Scene clocks/tweens pause independently from Sprite animations.
+  // Keep the action clip on the same timeline so pausing during WINDUP cannot
+  // advance to the contact frame and silently drop the shot callback.
+  pauseAction() {
+    if (this.activeKick && this.sprite?.anims?.isPlaying) {
+      this.sprite.anims.pause?.();
+      this.actionAnimationPaused = true;
+    }
+    return this;
+  }
+
+  resumeAction() {
+    if (this.actionAnimationPaused) this.sprite?.anims?.resume?.();
+    this.actionAnimationPaused = false;
     return this;
   }
 
@@ -558,12 +577,19 @@ export class Kicker {
   // The lead-in timer is tracked like every other stage, so leaving the scene
   // mid-flourish cannot fire a callback into a torn-down scene.
   previewStrike(onComplete) {
+    if (this.previewPending || this.activeKick) return false;
     this.cancelSequence();
+    this.previewPending = true;
     const token = this.sequenceToken;
     this.pauseAmbient();
     this.setPose('ready');
     this._after(150, token, () => {
-      this.playKick({ onComplete });
+      this.playKick({
+        onComplete: () => {
+          this.previewPending = false;
+          onComplete?.();
+        }
+      });
     });
     return this;
   }

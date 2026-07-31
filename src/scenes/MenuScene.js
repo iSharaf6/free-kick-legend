@@ -257,12 +257,23 @@ export class MenuScene extends Phaser.Scene {
       }
     ).setDepth(230);
 
-    make(112, `CONTINUE  ·  LV ${String(continueIndex + 1).padStart(2, '0')}`, 'icon-play', () => {
+    let continueButton = null;
+    let continuePending = false;
+    continueButton = make(112, `CONTINUE  ·  LV ${String(continueIndex + 1).padStart(2, '0')}`, 'icon-play', () => {
+      if (continuePending) return;
+      continuePending = true;
+      continueButton?.setButtonEnabled(false);
+      continueButton?.buttonLabel?.setText('KICKING OFF...');
       const level = LEVELS[continueIndex];
       SaveManager.setLastPlayed?.({ mode: 'career', levelId: levelId(level, continueIndex) });
-      this.kicker.previewStrike(() => {
+      const started = this.kicker.previewStrike(() => {
         this.scene.start('Game', { mode: 'career', levelIndex: continueIndex });
       });
+      if (started === false) {
+        continuePending = false;
+        continueButton?.setButtonEnabled(true);
+        continueButton?.buttonLabel?.setText(`CONTINUE  ·  LV ${String(continueIndex + 1).padStart(2, '0')}`);
+      }
     }, PAL.green, PAL.greenHi);
 
     make(141, 'CAREER  ·  FIVE CUP TOUR', 'icon-cup', () => {

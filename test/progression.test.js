@@ -267,6 +267,11 @@ test('save validation clamps corrupt values and restores safe cosmetics/settings
   assert.equal(SaveManager.getLastPlayed().levelId, 'academy-01');
 });
 
+test('currency is clamped to a display-safe six-digit balance', () => {
+  SaveManager.addCoins(Number.MAX_SAFE_INTEGER);
+  assert.equal(SaveManager.getCoins(), 999_999);
+});
+
 test('career stars unlock sequentially and award clear/three-star coins only once', () => {
   assert.equal(SaveManager.setStars(0, 1), 1);
   assert.equal(SaveManager.getCoins(), LEVELS[0].reward.coins);
@@ -346,6 +351,18 @@ test('daily missions, streak rewards and replay protection persist', () => {
   assert.equal(next.streak, 2);
   assert.equal(next.reward, 75);
   assert.equal(SaveManager.getStats().dailyRuns, 2);
+});
+
+test('a scoreless daily attempt records the best without granting completion', () => {
+  const date = '2026-07-20';
+  const result = SaveManager.completeDaily(date, 0, false);
+
+  assert.equal(result.completed, false);
+  assert.equal(result.firstCompletion, false);
+  assert.equal(result.reward, 0);
+  assert.equal(SaveManager.getDaily().completed, false);
+  assert.equal(SaveManager.getStats().dailyRuns, 0);
+  assert.equal(SaveManager.getCoins(), 0);
 });
 
 test('achievement rewards can be claimed once after the stat threshold', () => {

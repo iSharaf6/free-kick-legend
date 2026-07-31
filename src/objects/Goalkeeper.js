@@ -260,21 +260,7 @@ export class Goalkeeper {
     this.hasOrganisedWall = false;
     this.standingSave = false;
     this.idlePhase = this._random() * Math.PI * 2;
-    this.hasAnimationAtlas = Boolean(scene.textures?.exists?.(KEEPER_ANIMATION_TEXTURE));
-    this.hasRecoveryAtlas = Boolean(scene.textures?.exists?.(KEEPER_RECOVERY_TEXTURE));
-    this.hasDiveMotionAtlas = Boolean(scene.textures?.exists?.(KEEPER_DIVE_MOTION_TEXTURE));
-    this.hasFootworkAtlas = Boolean(scene.textures?.exists?.(KEEPER_FOOTWORK_TEXTURE));
-    this.hasReturnAtlas = Boolean(scene.textures?.exists?.(KEEPER_RETURN_TEXTURE));
-    this.hasLowSaveAtlas = Boolean(scene.textures?.exists?.(KEEPER_LOW_SAVE_TEXTURE));
-    this.hasHandlingAtlas = Boolean(scene.textures?.exists?.(KEEPER_HANDLING_TEXTURE));
-    this.hasHighClaimAtlas = Boolean(scene.textures?.exists?.(KEEPER_HIGH_CLAIM_TEXTURE));
-    this.hasSituationalAtlas = Boolean(scene.textures?.exists?.(KEEPER_SITUATIONAL_TEXTURE));
-    this.hasSaveFamilyAtlas = Object.fromEntries(
-      Object.entries(SAVE_FAMILY_TEXTURES).map(([family, texture]) => [
-        family,
-        Boolean(scene.textures?.exists?.(texture))
-      ])
-    );
+    this.refreshTextureAvailability();
     const initialTexture = this.hasAnimationAtlas
       ? KEEPER_ANIMATION_TEXTURE
       : (scene.textures?.exists?.('keeper-hd') ? 'keeper-hd' : 'keeper');
@@ -285,6 +271,23 @@ export class Goalkeeper {
     this.ghost.setVisible?.(false);
     this.prevDraw = null;
     this.draw();
+  }
+
+  refreshTextureAvailability() {
+    const exists = (texture) => Boolean(this.scene?.textures?.exists?.(texture));
+    this.hasAnimationAtlas = exists(KEEPER_ANIMATION_TEXTURE);
+    this.hasRecoveryAtlas = exists(KEEPER_RECOVERY_TEXTURE);
+    this.hasDiveMotionAtlas = exists(KEEPER_DIVE_MOTION_TEXTURE);
+    this.hasFootworkAtlas = exists(KEEPER_FOOTWORK_TEXTURE);
+    this.hasReturnAtlas = exists(KEEPER_RETURN_TEXTURE);
+    this.hasLowSaveAtlas = exists(KEEPER_LOW_SAVE_TEXTURE);
+    this.hasHandlingAtlas = exists(KEEPER_HANDLING_TEXTURE);
+    this.hasHighClaimAtlas = exists(KEEPER_HIGH_CLAIM_TEXTURE);
+    this.hasSituationalAtlas = exists(KEEPER_SITUATIONAL_TEXTURE);
+    this.hasSaveFamilyAtlas = Object.fromEntries(
+      Object.entries(SAVE_FAMILY_TEXTURES).map(([family, texture]) => [family, exists(texture)])
+    );
+    return this;
   }
 
   _random() {

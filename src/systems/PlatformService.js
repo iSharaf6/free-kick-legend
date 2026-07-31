@@ -36,12 +36,24 @@ function callHook(hook, ...args) {
 }
 
 export class PlatformAdapter {
-  constructor() {
+  constructor({
+    now = () => Date.now(),
+    sleep = (delay) => new Promise((resolve) => setTimeout(resolve, delay)),
+    lifecycleSettleMs = 80,
+    lifecycleMinIntervalMs = 1000
+  } = {}) {
     this._sdk = null;
     this._ready = false;
     this._available = false;
     this._environment = 'standalone';
     this._gameplayActive = false;
+    this._gameplayDesired = false;
+    this._gameplayTransition = null;
+    this._lastGameplayTransitionAt = -Infinity;
+    this._now = now;
+    this._sleep = sleep;
+    this._lifecycleSettleMs = Math.max(0, lifecycleSettleMs);
+    this._lifecycleMinIntervalMs = Math.max(0, lifecycleMinIntervalMs);
     this._lastError = null;
   }
 
@@ -133,15 +145,46 @@ export class PlatformAdapter {
   }
 
   async gameplayStart() {
-    if (this._gameplayActive) return this._available;
-    this._gameplayActive = true;
-    return await this._invoke('game', 'gameplayStart');
+    return await this._requestGameplayState(true);
   }
 
   async gameplayStop() {
-    if (!this._gameplayActive) return this._available;
-    this._gameplayActive = false;
-    return await this._invoke('game', 'gameplayStop');
+    return await this._requestGameplayState(false);
+  }
+
+  async _requestGameplayState(active) {
+    this._gameplayDesired = Boolean(active);
+    if (!this._available) {
+      this._gameplayActive = this._gameplayDesired;
+      return false;
+    }
+    if (!this._gameplayTransition) {
+      this._gameplayTransition = this._flushGameplayState().finally(() => {
+        this._gameplayTransition = null;
+      });
+    }
+    return await this._gameplayTransition;
+  }
+
+  async _flushGameplayState() {
+    let result = this._available;
+    while (this._gameplayActive !== this._gameplayDesired) {
+      const quietPeriod = this._gameplayActive ? 0 : this._lifecycleSettleMs;
+      const throttle = Math.max(0,
+        this._lastGameplayTransitionAt + this._lifecycleMinIntervalMs - this._now()
+      );
+      const delay = Math.max(quietPeriod, throttle);
+      if (delay > 0) await this._sleep(delay);
+
+      // A quick pause/resume or visibility bounce can cancel itself while the
+      // debounce is pending. Do not send both calls to the portal.
+      if (this._gameplayActive === this._gameplayDesired) continue;
+      const target = this._gameplayDesired;
+      result = await this._invoke('game', target ? 'gameplayStart' : 'gameplayStop');
+      this._gameplayActive = target;
+      this._lastGameplayTransitionAt = this._now();
+    }
+    return result;
   }
 
   isGameplayActive() {

@@ -239,6 +239,24 @@ test('Tab is captured, prevents browser focus, and toggles the pause menu once',
   assert.equal(toggles, 1);
 });
 
+test('Time Attack clock continues through result feedback', () => {
+  const scene = Object.create(GameScene.prototype);
+  let displayed = null;
+  Object.assign(scene, {
+    mode: 'arcade',
+    over: false,
+    state: 'RESULT',
+    timeLeft: 12,
+    lastTickSecond: -1,
+    timerTxt: { setText: (value) => { displayed = value; } },
+    endArcade: noop
+  });
+
+  assert.equal(scene.updateArcadeClock(1.25), false);
+  assert.equal(scene.timeLeft, 10.75);
+  assert.equal(displayed, '11');
+});
+
 test('buildKeepers wires separate homes and scaled goal bounds into each keeper', () => {
   const makeSprite = () => {
     const sprite = {

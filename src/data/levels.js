@@ -194,7 +194,7 @@ const RAW_LEVELS = [
   }),
   makeLevel({
     id: 'academy-02', cup: 'academy', name: 'Find the Middle', distance: 14.5, offsetX: 0, wall: 0, keeper: 0.12,
-    objective: objective('target', 'Place the ball through the centre'), target: TARGETS.center, reward: reward(45), style: 'training'
+    objective: objective('target', 'Lift the ball through the centre', { attempts: 4 }), target: TARGETS.center, reward: reward(45), style: 'training'
   }),
   makeLevel({
     id: 'academy-03', cup: 'academy', name: 'Lift Off', distance: 15, offsetX: 0, wall: 2, keeper: 0.14,

@@ -42,6 +42,7 @@ import {
 import { PAL } from '../pixelart.js';
 import { addCrowdTiers } from '../art/CrowdPanorama.js';
 import { buildPitchMarkingLayout, PITCH_MARKING_DIMENSIONS } from '../art/PitchMarkings.js';
+import { queueKeeperSheets } from '../data/keeperAssets.js';
 
 const ATTEMPTS = 3;
 const ARCADE_TIME = 60;
@@ -167,6 +168,7 @@ const TUTORIAL_STEPS = Object.freeze([
 // The shot readout lives with the bottom chrome. Directly under the banner it
 // covered the goalmouth at the one moment the player wants to watch the net.
 const READOUT_Y = 231;
+const COACHING_HINT_Y = 197;
 
 // The thread itself: one continuous line drawn through the ball, every gate and
 // the finish. This is the level, not decoration - the gates are eyes on it.
@@ -489,12 +491,23 @@ export class GameScene extends Phaser.Scene {
 
     this.installKeyboardControls();
 
+    this.loadDeferredKeeperArt();
+
     Audio.whistle();
 
     // Debug hook for automated testing (window.__fkl.shootDebug(vx, vy, vz, spin));
     // dev-server only, stripped from production builds.
     if (import.meta.env?.DEV && globalThis.window) globalThis.window.__fkl = this;
     this.events.once('shutdown', this.shutdownSession, this);
+  }
+
+  loadDeferredKeeperArt() {
+    if (!queueKeeperSheets(this, { initial: false })) return;
+    this.load.once('complete', () => {
+      if (!this.sessionAlive) return;
+      this.keepers?.forEach((keeper) => keeper.refreshTextureAvailability?.());
+    });
+    this.load.start();
   }
 
   // ---------------------------------------------------------- session flow
@@ -637,6 +650,7 @@ export class GameScene extends Phaser.Scene {
     this.meterUi?.forEach((label) => label.setVisible(false));
     this.time.paused = true;
     this.tweens.pauseAll();
+    this.kicker?.pauseAction?.();
     PlatformService.gameplayStop();
 
     const objects = this.pauseOverlayObjects;
@@ -698,6 +712,7 @@ export class GameScene extends Phaser.Scene {
     this.destroyPauseOverlay();
     this.time.paused = false;
     this.tweens.resumeAll();
+    this.kicker?.resumeAction?.();
     this.state = returnState;
     this.pauseReturnState = null;
     this.swipe.enabled = returnState === 'AIMING';
@@ -2144,6 +2159,17 @@ export class GameScene extends Phaser.Scene {
     this.tutorialDetail.setText(step.detail).setAlpha(1);
   }
 
+  setTutorialCopyAlpha(alpha, duration = 0) {
+    const copy = [this.tutorialCaption, this.tutorialDetail].filter((item) => item?.active);
+    if (!copy.length) return;
+    this.tweens.killTweensOf(copy);
+    if (duration > 0) {
+      this.tweens.add({ targets: copy, alpha, duration, ease: 'Cubic.easeOut' });
+    } else {
+      copy.forEach((item) => item.setAlpha(alpha));
+    }
+  }
+
   /** The looping ghost swipe: a path to copy, drawn from the ball outward. */
   drawTutorialGhost(delta) {
     const gfx = this.tutorialGfx;
@@ -2356,6 +2382,7 @@ export class GameScene extends Phaser.Scene {
     // Aiming has begun: the striker loads into the ready stance. Until now he
     // has been standing, which is what the frame should show before any input.
     if (this.state === 'AIMING') this.kicker?.setPose('ready');
+    this.setTutorialCopyAlpha(0.12, 110);
     if (!this.objectiveUi) return;
     this.tweens.killTweensOf(this.objectiveUi);
     this.tweens.add({ targets: this.objectiveUi, alpha: 0.14, duration: 140, ease: 'Cubic.easeOut' });
@@ -2364,6 +2391,7 @@ export class GameScene extends Phaser.Scene {
   onSwipeEnd(valid) {
     if (valid || this.state !== 'AIMING') return;
     this.kicker?.setPose('idle');
+    this.setTutorialCopyAlpha(1, 140);
     if (!this.objectiveUi) return;
     this.tweens.killTweensOf(this.objectiveUi);
     this.tweens.add({ targets: this.objectiveUi, alpha: 1, duration: 160, ease: 'Cubic.easeOut' });
@@ -2371,11 +2399,11 @@ export class GameScene extends Phaser.Scene {
 
   showSwipeHintMessage(message) {
     if (!this.inputHint || this.state === 'OVERLAY') return;
-    this.inputHint.setText(message).setAlpha(1).setY(GAME_H - 30);
+    this.inputHint.setText(message).setAlpha(1).setY(COACHING_HINT_Y);
     this.tweens.killTweensOf(this.inputHint);
     this.tweens.add({
       targets: this.inputHint,
-      y: GAME_H - 35,
+      y: COACHING_HINT_Y - 5,
       alpha: 0,
       delay: 700,
       duration: 450,
@@ -2525,7 +2553,7 @@ export class GameScene extends Phaser.Scene {
     }
     // Physics runs at a fixed cadence so the same gesture produces the same
     // shot at 30, 60, 120 Hz and after small browser stalls. The mode clock is
-    // real-time based and intentionally pauses during result cards.
+    // real-time based, including result cards; only an explicit pause freezes it.
     const rawDt = Math.min(Math.max(delta, 0), 250) / 1000;
 
     // Hit-stop takes precedence over everything: the world is stopped, briefly.
@@ -2552,21 +2580,7 @@ export class GameScene extends Phaser.Scene {
       if (this.slowmoT === 0) this.simSpeed = 1;
     }
 
-    if (this.mode === 'arcade' && !this.over &&
-        this.state !== 'OVERLAY' && this.state !== 'RESULT') {
-      // Wall-clock seconds: cinematic slow motion never stretches the round.
-      this.timeLeft -= rawDt;
-      const secs = Math.max(Math.ceil(this.timeLeft), 0);
-      this.timerTxt.setText(`${secs}`);
-      if (secs <= 10 && secs !== this.lastTickSecond) {
-        this.lastTickSecond = secs;
-        Audio.tick();
-      }
-      if (this.timeLeft <= 0) {
-        this.endArcade();
-        return;
-      }
-    }
+    if (this.updateArcadeClock(rawDt)) return;
 
     this.accumulator += Math.min(rawDt, 0.12) * this.simSpeed;
     let steps = 0;
@@ -2588,6 +2602,22 @@ export class GameScene extends Phaser.Scene {
     this.drawBall();
     this.drawAim();
     this.drawTutorialGhost(delta);
+  }
+
+  updateArcadeClock(rawDt) {
+    if (this.mode !== 'arcade' || this.over || this.state === 'OVERLAY') return false;
+    // Wall-clock seconds: cinematic slow motion and result cards never stretch
+    // the advertised 60-second round. Explicit pause returns before this call.
+    this.timeLeft -= rawDt;
+    const secs = Math.max(Math.ceil(this.timeLeft), 0);
+    this.timerTxt?.setText(`${secs}`);
+    if (secs <= 10 && secs !== this.lastTickSecond) {
+      this.lastTickSecond = secs;
+      Audio.tick();
+    }
+    if (this.timeLeft > 0) return false;
+    this.endArcade();
+    return true;
   }
 
   simulate(dt, renderTime) {
@@ -3310,10 +3340,10 @@ export class GameScene extends Phaser.Scene {
     this.state = 'OVERLAY';
     this.swipe.enabled = false;
     PlatformService.gameplayStop();
-    const result = SaveManager.completeDaily(this.dailyDate, this.score);
+    const result = SaveManager.completeDaily(this.dailyDate, this.score, this.goals > 0);
     this.dailyCompletion = result;
     const buttons = [];
-    if (result.firstCompletion && result.reward > 0 && PlatformService.supportsAds()) {
+    if (result.completed && result.firstCompletion && result.reward > 0 && PlatformService.supportsAds()) {
       buttons.push({
         label: '2X COINS', color: PAL.green, hover: PAL.greenHi,
         cb: () => this.requestDailyBonus(result.reward)
@@ -3333,10 +3363,12 @@ export class GameScene extends Phaser.Scene {
       cb: () => this.startScene('Menu')
     });
 
-    const rewardLine = result.reward > 0
+    const rewardLine = !result.completed
+      ? 'LAND A GOAL TO COMPLETE TODAY\'S KICK'
+      : result.reward > 0
       ? `STREAK ${result.streak}  ·  +${result.reward} COINS`
       : `STREAK ${result.streak}  ·  DAILY REWARD CLAIMED`;
-    this.showOverlay('DAILY COMPLETE', [
+    this.showOverlay(result.completed ? 'DAILY COMPLETE' : 'DAILY ATTEMPT', [
       `SCORE ${this.score}  ·  BEST ${result.best}`,
       `${this.goals}/${this.maxAttempts} GOALS  ·  BEST SHOT ${this.bestShotScore}`,
       rewardLine
@@ -3397,6 +3429,7 @@ export class GameScene extends Phaser.Scene {
     });
     const lines = [
       `${this.lastShotRating?.label || 'Objective complete'}  •  ${this.bestShotScore} pts`,
+      `3★ MASTERY: ${Math.max(1, this.level.objective?.goals ?? 1)} SHOT${(this.level.objective?.goals ?? 1) === 1 ? '' : 'S'} · 2050+ PTS`,
       this.lastReward > 0 ? `+${this.lastReward} COINS EARNED` : 'BEST REWARD ALREADY CLAIMED'
     ];
     this.showOverlay('LEVEL CLEAR', lines, buttons, stars);

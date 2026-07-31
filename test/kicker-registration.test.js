@@ -61,6 +61,7 @@ function animatedSpriteStub(x, y, key) {
     for (const callback of listeners.get(event) || []) callback(...args);
   };
   sprite.anims = {
+    isPlaying: false,
     create(config) {
       clips.set(config.key, config);
       return config;
@@ -69,9 +70,12 @@ function animatedSpriteStub(x, y, key) {
     remove: (animationKey) => clips.delete(animationKey),
     play(animationKey) {
       sprite.playedAnimation = animationKey;
+      this.isPlaying = true;
       return sprite;
     },
-    stop() { sprite.stoppedAnimation = true; }
+    stop() { this.isPlaying = false; sprite.stoppedAnimation = true; },
+    pause() { this.isPlaying = false; sprite.pausedAnimation = true; },
+    resume() { this.isPlaying = true; sprite.resumedAnimation = true; }
   };
   sprite.play = (animationKey) => sprite.anims.play(animationKey);
   sprite.animationClips = clips;
@@ -282,4 +286,23 @@ test('cancelling an active Phaser clip invalidates late frame events', () => {
   assert.equal(contacts, 0);
   assert.equal(kicker.activeKick, null);
   assert.equal(kicker.sprite.stoppedAnimation, true);
+});
+
+test('pausing windup freezes and resumes the sprite contact timeline', () => {
+  const kicker = new Kicker(withTweenManager(sceneStub({ animated: true })), 120, 200, {
+    ambient: false
+  });
+  let contacts = 0;
+
+  kicker.playKick({ onContact: () => contacts++ });
+  kicker.pauseAction();
+  assert.equal(kicker.actionAnimationPaused, true);
+  assert.equal(kicker.sprite.pausedAnimation, true);
+  assert.equal(contacts, 0);
+
+  kicker.resumeAction();
+  assert.equal(kicker.actionAnimationPaused, false);
+  assert.equal(kicker.sprite.resumedAnimation, true);
+  kicker.sprite.advancePose('strike');
+  assert.equal(contacts, 1);
 });

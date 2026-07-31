@@ -18,7 +18,7 @@ export const SAVE_KEY = 'fkl-save-v2';
 export const LEGACY_SAVE_KEY = 'fkl-save-v1';
 export const SAVE_VERSION = 2;
 
-const MAX_CURRENCY = 999_999_999;
+const MAX_CURRENCY = 999_999;
 const MAX_STAT = 999_999_999_999;
 const LEVEL_BY_ID = new Map(LEVELS.map((level) => [level.id, level]));
 const LEVEL_INDEX_BY_ID = new Map(LEVELS.map((level, index) => [level.id, index]));
@@ -727,15 +727,30 @@ export const SaveManager = {
     return { success: true, reward: achievement.reward, coins: data.coins };
   },
 
-  completeDaily(date = utcDateKey(), score = 0) {
+  completeDaily(date = utcDateKey(), score = 0, qualified = true) {
     this.ensureDaily(date);
     const data = this.load();
     const safeScore = integer(score, 0);
     data.best.daily[date] = Math.max(data.best.daily[date] ?? 0, safeScore);
 
+    // An attempt still records a personal best, but a scoreless card is not a
+    // completion and must not advance the streak or grant its reward.
+    if (!qualified) {
+      this.save();
+      return {
+        completed: false,
+        firstCompletion: false,
+        reward: 0,
+        best: data.best.daily[date],
+        streak: data.daily.streak,
+        coins: data.coins
+      };
+    }
+
     if (data.daily.completed) {
       this.save();
       return {
+        completed: true,
         firstCompletion: false,
         reward: 0,
         best: data.best.daily[date],
@@ -761,6 +776,7 @@ export const SaveManager = {
     data.stats.dailyRuns = Math.min(data.stats.dailyRuns + 1, MAX_STAT);
     this.save();
     return {
+      completed: true,
       firstCompletion: true,
       reward,
       best: data.best.daily[date],

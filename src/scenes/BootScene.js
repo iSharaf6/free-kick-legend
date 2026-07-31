@@ -7,6 +7,7 @@ import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
 import { makePuppetTextures } from '../art/PuppetTextures.js';
 import { CROWD_PANORAMA } from '../data/crowdPanorama.js';
+import { queueKeeperSheets } from '../data/keeperAssets.js';
 
 const KICKER_POSES = {
   idle: MAPS.kickerIdle,
@@ -47,54 +48,7 @@ export class BootScene extends Phaser.Scene {
         this.load.image(`kicker-hd-${kit.id}-${pose}`, `${base}assets/hd/kicker-hd-${kit.id}-${pose}.png`);
       });
     });
-    this.load.spritesheet('keeper-anim-hd', `${base}assets/hd/keeper-animation-sheet-hd.png`, {
-      frameWidth: 320,
-      frameHeight: 280
-    });
-    this.load.spritesheet('keeper-dive-motion-hd', `${base}assets/hd/keeper-dive-motion-sheet-hd.png`, {
-      frameWidth: 320,
-      frameHeight: 280
-    });
-    this.load.spritesheet('keeper-footwork-hd', `${base}assets/hd/keeper-footwork-sheet-hd.png`, {
-      frameWidth: 320,
-      frameHeight: 280
-    });
-    this.load.spritesheet('keeper-return-hd', `${base}assets/hd/keeper-return-sheet-hd.png`, {
-      frameWidth: 320,
-      frameHeight: 280
-    });
-    this.load.spritesheet('keeper-low-save-hd', `${base}assets/hd/keeper-low-save-sheet-hd.png`, {
-      frameWidth: 320,
-      frameHeight: 280
-    });
-    this.load.spritesheet('keeper-handling-hd', `${base}assets/hd/keeper-handling-sheet-hd.png`, {
-      frameWidth: 320,
-      frameHeight: 280
-    });
-    this.load.spritesheet('keeper-high-claim-hd', `${base}assets/hd/keeper-high-claim-sheet-hd.png`, {
-      frameWidth: 320,
-      frameHeight: 360
-    });
-    for (const family of ['low-smother', 'mid-catch', 'upper-parry', 'top-tip', 'reflex-foot']) {
-      this.load.spritesheet(`keeper-${family}-hd`, `${base}assets/hd/keeper-${family}-sheet-hd.png`, {
-        frameWidth: 320,
-        frameHeight: 280
-      });
-    }
-    for (const sheet of [
-      'situational-punch',
-      'distribution',
-      'foot-distribution',
-      'reactions',
-      'practical-low',
-      'mid-dive',
-      'practical-recovery'
-    ]) {
-      this.load.spritesheet(`keeper-${sheet}-hd`, `${base}assets/hd/keeper-${sheet}-sheet-hd.png`, {
-        frameWidth: 320,
-        frameHeight: 280
-      });
-    }
+    queueKeeperSheets(this, { initial: true });
     this.load.image('defender-hd', `${base}assets/hd/defender-hd.png`);
     this.load.spritesheet('security-guards-hd', `${base}assets/hd/security-guards-sheet-hd.png`, {
       frameWidth: 88,

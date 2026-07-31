@@ -29,9 +29,16 @@ Requires Node.js 20.19 or newer.
 npm ci
 npm run dev       # http://localhost:5173
 npm test          # physics, input, save, progression, cosmetics, platform
+npm run test:e2e  # real Chromium viewport, input, pause and boot-payload gates
 npm run build     # production output in dist/
 npm run preview   # http://localhost:4173
 ```
+
+The first browser run also needs `npx playwright install chromium`. Use
+`npm run test:release` for the complete unit, production-build, and browser
+release gate. GitHub Pages runs that browser matrix before deploying `main`, so
+an agent does not need the Codex in-app browser backend to perform a legitimate
+automated playtest.
 
 ## Controls
 
@@ -53,6 +60,7 @@ src/
 ├── data/
 │   ├── levels.js               50 levels, five cups, targets, seeded arcade/daily
 │   ├── progression.js          daily missions, streak rewards, achievements
+│   ├── keeperAssets.js          boot/deferred goalkeeper atlas manifest
 │   ├── keeperMoveset.js         complete keeper animation catalog and frame maps
 │   └── cosmetics.js            visual-only kit, ball, and trail catalog
 ├── systems/
@@ -82,7 +90,7 @@ src/
 
 ## Portal release
 
-1. Run `npm test` and `npm run build`.
+1. Run `npm run test:release`.
 2. Zip the contents of the freshly generated `dist/` directory with `index.html` at the archive root. Do not wrap the files in another folder.
 3. Upload to the CrazyGames Developer Portal and test it in their preview environment.
 4. The official SDK v3 script is already included in `index.html`. `BootScene` waits for initialization, `PlatformService` uses CrazyGames Data when available, and `GameScene` reports gameplay start/stop and career completion.
