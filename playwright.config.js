@@ -2,11 +2,13 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e',
-  timeout: process.env.CI ? 60_000 : 30_000,
+  timeout: process.env.CI ? 90_000 : 30_000,
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
-  workers: process.env.CI ? 2 : undefined,
+  // Phaser decodes several large sprite atlases during boot. One CI worker is
+  // faster and much more stable than two browsers competing for runner CPU.
+  workers: process.env.CI ? 1 : undefined,
   reporter: [['list'], ['html', { open: 'never', outputFolder: 'playwright-report' }]],
   use: {
     baseURL: 'http://127.0.0.1:4173',

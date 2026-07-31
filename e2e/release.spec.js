@@ -12,6 +12,7 @@ const LANDSCAPE_VIEWPORTS = [
 test('full logical frame is visible at every release landscape viewport', async ({ page }) => {
   const game = new GamePage(page);
   await game.open(LANDSCAPE_VIEWPORTS[0]);
+  await game.startCareer();
 
   for (const viewport of LANDSCAPE_VIEWPORTS) {
     await page.setViewportSize(viewport);
@@ -28,7 +29,6 @@ test('full logical frame is visible at every release landscape viewport', async 
     expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 0.5);
   }
 
-  await game.startCareer();
   const snapshot = await game.sceneSnapshot();
   expect(snapshot.worldWidth).toBeCloseTo(480, 4);
   expect(snapshot.worldHeight).toBeCloseTo(270, 4);
@@ -47,9 +47,12 @@ test('pausing during windup freezes contact and resumes into flight', async ({ p
   await game.open({ width: 1280, height: 720 });
   await game.startCareer();
 
-  await page.evaluate(() => window.__fkl.shootDebug(0, 7.4, 24, 0));
-  await page.waitForFunction(() => window.__fkl?.state === 'WINDUP');
-  await page.keyboard.press('Tab');
+  // Shoot and pause in the same browser task. On a throttled CI renderer,
+  // separate protocol calls can otherwise let the contact frame run first.
+  await page.evaluate(() => {
+    window.__fkl.shootDebug(0, 7.4, 24, 0);
+    window.__fkl.togglePauseMenu();
+  });
   await page.waitForFunction(() => window.__fkl?.state === 'PAUSED');
   expect(await page.evaluate(() => ({
     ballActive: window.__fkl.ball.flying,

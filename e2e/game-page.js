@@ -54,7 +54,13 @@ export class GamePage {
   }
 
   async startCareer() {
-    await this.clickLogical(344, 112);
+    // Mechanics specs enter the scene directly so their setup is not coupled
+    // to the menu kicker's decorative preview timeline. The real Continue
+    // interaction and its re-entry guard are exercised in their own spec.
+    await this.page.evaluate(() => {
+      const menu = window.__game.scene.getScene('Menu');
+      menu.scene.start('Game', { mode: 'career', levelIndex: 0 });
+    });
     await this.page.waitForFunction(() => window.__fkl?.state === 'AIMING');
   }
 
