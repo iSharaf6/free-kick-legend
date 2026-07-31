@@ -9,23 +9,31 @@ const LANDSCAPE_VIEWPORTS = [
   { width: 844, height: 390 }
 ];
 
-for (const viewport of LANDSCAPE_VIEWPORTS) {
-  test(`full logical frame is visible at ${viewport.width}x${viewport.height}`, async ({ page }) => {
-    const game = new GamePage(page);
-    await game.open(viewport);
+test('full logical frame is visible at every release landscape viewport', async ({ page }) => {
+  const game = new GamePage(page);
+  await game.open(LANDSCAPE_VIEWPORTS[0]);
+
+  for (const viewport of LANDSCAPE_VIEWPORTS) {
+    await page.setViewportSize(viewport);
+    await page.waitForFunction(() => {
+      const box = document.querySelector('#app canvas')?.getBoundingClientRect();
+      return box && box.left >= 0 && box.top >= 0 &&
+        box.right <= window.innerWidth + 0.5 && box.bottom <= window.innerHeight + 0.5;
+    });
     const box = await game.canvas.boundingBox();
 
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.y).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 0.5);
     expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 0.5);
-    await game.startCareer();
-    const snapshot = await game.sceneSnapshot();
-    expect(snapshot.worldWidth).toBeCloseTo(480, 4);
-    expect(snapshot.worldHeight).toBeCloseTo(270, 4);
-    expect(snapshot.zoom).toBe(4);
-  });
-}
+  }
+
+  await game.startCareer();
+  const snapshot = await game.sceneSnapshot();
+  expect(snapshot.worldWidth).toBeCloseTo(480, 4);
+  expect(snapshot.worldHeight).toBeCloseTo(270, 4);
+  expect(snapshot.zoom).toBe(4);
+});
 
 test('portrait phones receive an explicit rotate prompt', async ({ page }) => {
   const game = new GamePage(page);

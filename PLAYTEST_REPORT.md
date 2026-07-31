@@ -6,7 +6,7 @@
 
 **Evidence:** [`playtest-evidence/release-2026-08-01/`](playtest-evidence/release-2026-08-01/)
 
-**Release gate:** 157 unit tests, 10 Chromium tests, production build
+**Release gate:** 157 unit tests, 6 Chromium scenarios, production build
 
 ## Verdict
 
