@@ -1,6 +1,11 @@
 import { test, expect } from '@playwright/test';
 import { GamePage } from './game-page.js';
 
+// Phaser asset decoding can be slower when this file shares a local runner
+// with the viewport and gameplay release specs. Keep the audio journeys' own
+// assertions deterministic instead of inheriting Playwright's 30s local cap.
+test.describe.configure({ timeout: 60_000 });
+
 async function musicState(page) {
   return await page.evaluate(() => window.__menuMusic.getState());
 }
@@ -103,7 +108,7 @@ test('gameplay fades the menu track and returning resumes its position', async (
   expect((await musicState(page)).instanceCount).toBe(1);
 });
 
-test('visibility recovery and the analyzed loop point reuse the same track', async ({ page }) => {
+test('visibility recovery and native full-track looping reuse the same track', async ({ page }) => {
   const game = new GamePage(page);
   await game.open({ width: 1280, height: 720 });
   await unlockMusic(page);
@@ -120,19 +125,25 @@ test('visibility recovery and the analyzed loop point reuse the same track', asy
   });
   await page.waitForFunction(() => !window.__menuMusic.audio.paused);
 
-  await page.evaluate(() => {
-    const music = window.__menuMusic;
-    music.audio.currentTime = music.getState().loopEnd - 0.03;
-  });
-  await page.waitForFunction(() => {
-    const state = window.__menuMusic.getState();
-    return state.currentTime >= state.loopStart && state.currentTime < state.loopStart + 1;
-  });
-  await page.waitForFunction(() => window.__menuMusic.getState().outputVolume > 0.29);
+  const duration = (await musicState(page)).duration;
+  expect(duration).toBeGreaterThan(173);
+  expect(duration).toBeLessThan(174);
+
+  // Cross the real encoded end-to-start boundary three times. This catches a
+  // paused/ended element, a scripted replacement instance, or a one-shot loop.
+  for (let crossing = 0; crossing < 3; crossing += 1) {
+    await page.evaluate((trackDuration) => {
+      window.__menuMusic.audio.currentTime = trackDuration - 0.12;
+    }, duration);
+    await page.waitForFunction(() => {
+      const state = window.__menuMusic.getState();
+      return state.currentTime < 1 && !state.paused;
+    });
+  }
 
   const looped = await musicState(page);
   expect(looped.instanceCount).toBe(1);
-  expect(looped.loopStart).toBeCloseTo(51.28, 2);
-  expect(looped.loopEnd).toBeCloseTo(166.48, 2);
+  expect(looped.loopMode).toBe('full-track');
+  expect(looped.nativeLoop).toBe(true);
   expect(looped.paused).toBe(false);
 });

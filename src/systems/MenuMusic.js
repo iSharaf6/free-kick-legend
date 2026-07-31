@@ -3,13 +3,7 @@ const BASE_URL = typeof import.meta.env?.BASE_URL === 'string' ? import.meta.env
 export const MENU_MUSIC = Object.freeze({
   src: `${BASE_URL}assets/audio/free-kick-legend-menu.mp3`,
   defaultVolume: 0.3,
-  // The source is 2:58.992. Analysis found a 150 BPM grid beginning near
-  // 0.08s and the authored fade beginning on the 166.48s bar line. Returning
-  // to 51.28s keeps the loop on an eight-bar phrase boundary at full energy.
-  loopStart: 51.28,
-  loopEnd: 166.48,
-  loopFadeOutMs: 48,
-  loopFadeInMs: 72,
+  loopMode: 'full-track',
   sceneFadeMs: 500,
   resumeFadeMs: 320
 });
@@ -32,8 +26,6 @@ export class MenuMusicController {
     this.outputVolume = 0;
     this.fadeFrame = null;
     this.fadeToken = 0;
-    this.loopFrame = null;
-    this.loopPending = false;
     this.instanceId = 0;
 
     this.createAudio = options.createAudio ?? (() => {
@@ -62,13 +54,6 @@ export class MenuMusicController {
       // live instead of waiting for that stale promise to settle.
       this.attemptPlay(MENU_MUSIC.resumeFadeMs, { gesture: true });
     };
-    this.onAudioPlay = () => this.startLoopMonitor();
-    this.onAudioPause = () => this.stopLoopMonitor();
-    this.onAudioEnded = () => {
-      if (!this.audio || !this.active || this.muted || this.hidden) return;
-      this.audio.currentTime = MENU_MUSIC.loopStart;
-      this.attemptPlay(MENU_MUSIC.loopFadeInMs);
-    };
   }
 
   configure({ muted = this.muted, musicVolume = this.volume } = {}) {
@@ -84,15 +69,15 @@ export class MenuMusicController {
 
     audio.src = MENU_MUSIC.src;
     audio.preload = 'auto';
-    audio.loop = false;
+    // The replacement theme was authored for a direct end-to-start loop.
+    // Native looping preserves the full recording and lets browsers honor its
+    // MP3 priming/remainder metadata without a scripted seek or extra fade.
+    audio.loop = true;
     audio.autoplay = false;
     audio.playsInline = true;
     audio.controls = false;
     audio.disableRemotePlayback = true;
     audio.volume = 0;
-    audio.addEventListener?.('play', this.onAudioPlay);
-    audio.addEventListener?.('pause', this.onAudioPause);
-    audio.addEventListener?.('ended', this.onAudioEnded);
     this.audio = audio;
     this.instanceId += 1;
     this.bindLifecycle();
@@ -133,7 +118,6 @@ export class MenuMusicController {
 
   enterMenu() {
     this.active = true;
-    this.loopPending = false;
     this.ensureAudio();
     if (!this.muted && !this.hidden) this.attemptPlay(MENU_MUSIC.resumeFadeMs);
     return this.getState();
@@ -141,7 +125,6 @@ export class MenuMusicController {
 
   leaveMenu(fadeMs = MENU_MUSIC.sceneFadeMs) {
     this.active = false;
-    this.loopPending = false;
     if (!this.audio || this.audio.paused) return this.getState();
     this.fadeTo(0, fadeMs, () => {
       if (!this.active && this.audio) this.audio.pause();
@@ -197,7 +180,6 @@ export class MenuMusicController {
 
   setMuted(muted) {
     this.muted = Boolean(muted);
-    this.loopPending = false;
     if (this.muted) {
       if (this.audio && !this.audio.paused) {
         this.fadeTo(0, 40, () => {
@@ -212,7 +194,6 @@ export class MenuMusicController {
 
   setVolume(value) {
     this.volume = clampVolume(value);
-    if (this.loopPending) return this.volume;
     if (this.audio && !this.audio.paused && this.active && !this.muted && !this.hidden) {
       this.fadeTo(this.volume, 60);
     }
@@ -221,7 +202,6 @@ export class MenuMusicController {
 
   handleVisibility(hidden) {
     this.hidden = Boolean(hidden);
-    this.loopPending = false;
     if (this.hidden) {
       this.cancelFade();
       this.setOutputVolume(0);
@@ -271,41 +251,6 @@ export class MenuMusicController {
     this.fadeFrame = this.requestFrame(step);
   }
 
-  startLoopMonitor() {
-    if (this.loopFrame !== null || !this.audio || this.audio.paused) return;
-    const check = () => {
-      this.loopFrame = null;
-      const audio = this.audio;
-      if (!audio || audio.paused || !this.active || this.muted || this.hidden) return;
-      const fadeLead = MENU_MUSIC.loopFadeOutMs / 1000;
-      if (!this.loopPending && audio.currentTime >= MENU_MUSIC.loopEnd - fadeLead) {
-        this.loopPending = true;
-        this.fadeTo(0, MENU_MUSIC.loopFadeOutMs, () => this.performLoop());
-        return;
-      }
-      this.loopFrame = this.requestFrame(check);
-    };
-    this.loopFrame = this.requestFrame(check);
-  }
-
-  stopLoopMonitor() {
-    if (this.loopFrame !== null) this.cancelFrame(this.loopFrame);
-    this.loopFrame = null;
-  }
-
-  performLoop() {
-    const audio = this.audio;
-    if (!audio || !this.active || this.muted || this.hidden) {
-      this.loopPending = false;
-      return;
-    }
-    const overrun = Math.max(0, audio.currentTime - MENU_MUSIC.loopEnd);
-    audio.currentTime = MENU_MUSIC.loopStart + Math.min(overrun, 0.12);
-    this.loopPending = false;
-    this.fadeTo(this.volume, MENU_MUSIC.loopFadeInMs);
-    this.startLoopMonitor();
-  }
-
   getState() {
     return {
       active: this.active,
@@ -318,8 +263,8 @@ export class MenuMusicController {
       autoplayBlocked: this.autoplayBlocked,
       instanceCount: this.audio ? 1 : 0,
       instanceId: this.instanceId,
-      loopStart: MENU_MUSIC.loopStart,
-      loopEnd: MENU_MUSIC.loopEnd,
+      loopMode: MENU_MUSIC.loopMode,
+      nativeLoop: this.audio?.loop ?? true,
       src: this.audio?.currentSrc || this.audio?.src || MENU_MUSIC.src
     };
   }
@@ -327,15 +272,11 @@ export class MenuMusicController {
   destroy() {
     this.active = false;
     this.cancelFade();
-    this.stopLoopMonitor();
     this.unbindUnlock();
     this.boundDocument?.removeEventListener?.('visibilitychange', this.onVisibilityChange);
     this.boundDocument = null;
     this.boundWindow = null;
     if (this.audio) {
-      this.audio.removeEventListener?.('play', this.onAudioPlay);
-      this.audio.removeEventListener?.('pause', this.onAudioPause);
-      this.audio.removeEventListener?.('ended', this.onAudioEnded);
       this.audio.pause?.();
       this.audio.removeAttribute?.('src');
       this.audio.load?.();

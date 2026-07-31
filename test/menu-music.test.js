@@ -31,7 +31,7 @@ class FakeAudio extends FakeTarget {
     super();
     this.paused = true;
     this.currentTime = 0;
-    this.duration = 178.992;
+    this.duration = 173.48;
     this.volume = 0;
     this.playCalls = 0;
     this.pauseCalls = 0;
@@ -107,7 +107,7 @@ test('the shipped menu soundtrack is the supplied MP3 byte-for-byte', async () =
   const bytes = await readFile(new URL('../public/assets/audio/free-kick-legend-menu.mp3', import.meta.url));
   assert.equal(
     createHash('sha256').update(bytes).digest('hex'),
-    '316d4335245b276789669b531b06c5f24ad29f2af455ec532cbc1f783b716bdc'
+    '5f02aa96a80e19a79cefcec6815a889a06c9f92e355328987b1c4dc5eee52afc'
   );
 });
 
@@ -175,7 +175,7 @@ test('an immediate first gesture supersedes an unsettled autoplay rejection', as
   assert.equal(controller.getState().instanceCount, 1);
 });
 
-test('mute, volume, visibility and the musical loop update the live instance', async () => {
+test('mute, volume, visibility and native full-track looping update the live instance', async () => {
   const { audio, clock, controller } = makeController();
   controller.enterMenu();
   await settle();
@@ -199,12 +199,7 @@ test('mute, volume, visibility and the musical loop update the live instance', a
   await settle();
   clock.advance(340);
   assert.equal(audio.paused, false);
-
-  audio.currentTime = MENU_MUSIC.loopEnd - 0.02;
-  controller.startLoopMonitor();
-  clock.advance(150);
-  assert.ok(audio.currentTime >= MENU_MUSIC.loopStart);
-  assert.ok(audio.currentTime < MENU_MUSIC.loopStart + 0.13);
-  clock.advance(100);
-  assert.ok(Math.abs(audio.volume - 0.18) < 0.001);
+  assert.equal(audio.loop, true);
+  assert.equal(controller.getState().loopMode, 'full-track');
+  assert.equal(controller.getState().nativeLoop, true);
 });
