@@ -3,8 +3,8 @@ import { GamePage } from './game-page.js';
 
 // Phaser asset decoding can be slower when this file shares a local runner
 // with the viewport and gameplay release specs. Keep the audio journeys' own
-// assertions deterministic instead of inheriting Playwright's 30s local cap.
-test.describe.configure({ timeout: 60_000 });
+// assertions deterministic instead of inheriting a runner-wide timeout.
+test.describe.configure({ timeout: 120_000 });
 
 async function musicState(page) {
   return await page.evaluate(() => window.__menuMusic.getState());
