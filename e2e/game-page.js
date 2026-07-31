@@ -41,8 +41,16 @@ export class GamePage {
   }
 
   async clickLogical(x, y) {
-    const point = await this.logicalPoint(x, y);
-    await this.page.mouse.click(point.x, point.y);
+    const box = await this.canvas.boundingBox();
+    expect(box).not.toBeNull();
+    // Locator clicks wait for the canvas to be visible, stable and unblocked;
+    // raw page.mouse clicks can race the loading overlay on slower CI runners.
+    await this.canvas.click({
+      position: {
+        x: (x / 480) * box.width,
+        y: (y / 270) * box.height
+      }
+    });
   }
 
   async startCareer() {
