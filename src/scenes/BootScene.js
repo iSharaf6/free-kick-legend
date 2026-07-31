@@ -5,6 +5,7 @@ import { getCosmeticsByCategory } from '../data/cosmetics.js';
 import { PlatformService } from '../systems/PlatformService.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
+import { MenuMusic } from '../systems/MenuMusic.js';
 import { makePuppetTextures } from '../art/PuppetTextures.js';
 import { CROWD_PANORAMA } from '../data/crowdPanorama.js';
 import { queueKeeperSheets } from '../data/keeperAssets.js';
@@ -82,8 +83,10 @@ export class BootScene extends Phaser.Scene {
       handedOff = true;
       try {
         const settings = SaveManager.reload().settings;
-        Audio.setMuted(Boolean(settings.muted || PlatformService.shouldMuteAudio()));
+        const muted = Boolean(settings.muted || PlatformService.shouldMuteAudio());
+        Audio.setMuted(muted);
         Audio.setVolume(settings.sfxVolume);
+        MenuMusic.configure({ muted, musicVolume: settings.musicVolume });
       } catch (error) {
         console.warn('[Boot] settings unavailable, continuing with defaults', error);
       }

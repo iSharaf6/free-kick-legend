@@ -6,6 +6,8 @@ import {
 } from '../ui.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
+import { MenuMusic } from '../systems/MenuMusic.js';
+import { PlatformService } from '../systems/PlatformService.js';
 import { LEVELS } from '../data/levels.js';
 import { PAL } from '../pixelart.js';
 import { Kicker } from '../objects/Kicker.js';
@@ -35,8 +37,11 @@ export class MenuScene extends Phaser.Scene {
     });
     this.drawComposition();
 
-    const muted = settings.muted ?? settings.audioMuted ?? false;
+    const muted = Boolean((settings.muted ?? settings.audioMuted ?? false) || PlatformService.shouldMuteAudio());
     Audio.setMuted(muted);
+    Audio.setVolume(settings.sfxVolume ?? 1);
+    MenuMusic.configure({ muted, musicVolume: settings.musicVolume });
+    MenuMusic.enterMenu();
 
     const unlocked = SaveManager.unlockedCount(LEVELS.length);
     const totalStars = SaveManager.getTotalStars?.()
@@ -162,6 +167,7 @@ export class MenuScene extends Phaser.Scene {
 
   toggleSound() {
     const muted = Audio.toggleMuted();
+    MenuMusic.setMuted(muted);
     SaveManager.setSetting?.('muted', muted);
     this.soundButton.buttonIcon?.setTexture(muted ? 'icon-mute' : 'icon-sound');
   }

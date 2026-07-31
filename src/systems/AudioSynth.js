@@ -19,7 +19,7 @@ class Synth {
       // Master bus: every voice routes through this gain so mute and volume
       // changes silence or rescale sounds that are already playing.
       this.master = this.ctx.createGain();
-      this.master.gain.value = this.muted ? 0 : 1;
+      this.master.gain.value = this.muted ? 0 : this.volume;
       this.master.connect(this.ctx.destination);
     }
     if (this.ctx.state === 'suspended') this.ctx.resume();
@@ -28,7 +28,7 @@ class Synth {
 
   _applyMasterGain() {
     if (!this.ctx || !this.master) return;
-    const target = this.muted ? 0 : 1;
+    const target = this.muted ? 0 : this.volume;
     this.master.gain.cancelScheduledValues(this.ctx.currentTime);
     // 10ms exponential approach: instant to the ear, no click on the way out.
     this.master.gain.setTargetAtTime(target, this.ctx.currentTime, 0.01);
@@ -61,6 +61,9 @@ class Synth {
 
   setVolume(value) {
     this.volume = Math.max(0, Math.min(1, Number(value) || 0));
+    // Volume lives on the SFX bus so changes also affect voices that are
+    // already ringing out rather than only the next synthesized sound.
+    this._applyMasterGain();
   }
 
   prepare() {
@@ -76,7 +79,7 @@ class Synth {
     osc.type = type;
     osc.frequency.setValueAtTime(freq, t0);
     osc.frequency.exponentialRampToValueAtTime(Math.max(end, 1), t0 + time);
-    gain.gain.setValueAtTime(vol * this.volume, t0);
+    gain.gain.setValueAtTime(vol, t0);
     gain.gain.exponentialRampToValueAtTime(0.0001, t0 + time);
     osc.connect(gain).connect(this.master ?? ctx.destination);
     osc.start(t0);
@@ -96,7 +99,7 @@ class Synth {
     filter.Q.value = 0.6;
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, t0);
-    gain.gain.linearRampToValueAtTime(vol * this.volume, t0 + rampUp);
+    gain.gain.linearRampToValueAtTime(vol, t0 + rampUp);
     gain.gain.exponentialRampToValueAtTime(0.0001, t0 + time);
     src.connect(filter).connect(gain).connect(this.master ?? ctx.destination);
     src.start(t0);

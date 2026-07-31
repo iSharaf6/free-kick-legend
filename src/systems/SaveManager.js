@@ -16,7 +16,7 @@ import { PlatformService } from './PlatformService.js';
 
 export const SAVE_KEY = 'fkl-save-v2';
 export const LEGACY_SAVE_KEY = 'fkl-save-v1';
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 const MAX_CURRENCY = 999_999;
 const MAX_STAT = 999_999_999_999;
@@ -121,7 +121,7 @@ function aimAssist(value, fallback) {
 function defaultSettings() {
   return {
     muted: false,
-    musicVolume: 0.7,
+    musicVolume: 0.3,
     sfxVolume: 1,
     reducedMotion: false,
     screenShake: true,
@@ -271,6 +271,12 @@ function normalizeSave(rawSave) {
     integer(rawSave.best?.arcade, 0)
   );
   const owned = normalizedOwned(rawSave.owned);
+  // v2 stored 0.7 as an unused placeholder before menu music existed. It was
+  // never user-configurable, so migrate only that exact legacy default to the
+  // real soundtrack's quieter 30% mix. Explicit custom values are preserved.
+  const settings = Number(rawSave.version) < SAVE_VERSION && rawSave.settings?.musicVolume === 0.7
+    ? { ...rawSave.settings, musicVolume: 0.3 }
+    : rawSave.settings;
   return {
     version: SAVE_VERSION,
     stars,
@@ -282,7 +288,7 @@ function normalizeSave(rawSave) {
     coins: integer(rawSave.coins, 0, MAX_CURRENCY),
     owned,
     equipped: normalizedEquipped(rawSave.equipped, owned),
-    settings: normalizedSettings(rawSave.settings),
+    settings: normalizedSettings(settings),
     stats: normalizedStats(rawSave.stats, stars),
     daily: normalizedDaily(rawSave.daily),
     lastPlayed: normalizedLastPlayed(rawSave.lastPlayed),

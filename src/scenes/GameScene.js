@@ -13,6 +13,7 @@ import { SwipeInput, computeShotFromPath } from '../systems/SwipeInput.js';
 import { AIM_ASSIST_MODES, SaveManager } from '../systems/SaveManager.js';
 import { PlatformService } from '../systems/PlatformService.js';
 import { Audio } from '../systems/AudioSynth.js';
+import { MenuMusic } from '../systems/MenuMusic.js';
 import { careerStars, isTopCorner, scoreShot, targetGeometry } from '../systems/ShotScoring.js';
 import {
   classifyGoalPlane,
@@ -293,6 +294,11 @@ export class GameScene extends Phaser.Scene {
     this.aimAssist = this.settings.aimAssist ?? 'full';
     Audio.setMuted(Boolean(this.settings.muted || PlatformService.shouldMuteAudio()));
     Audio.setVolume(this.settings.sfxVolume ?? 1);
+    MenuMusic.configure({
+      muted: Boolean(this.settings.muted || PlatformService.shouldMuteAudio()),
+      musicVolume: this.settings.musicVolume
+    });
+    MenuMusic.leaveMenu();
     if (this.mode === 'daily') SaveManager.ensureDaily(this.dailyDate);
     PlatformService.gameplayStart();
     CAM.x = this.level.offsetX * 0.85;
@@ -1836,6 +1842,7 @@ export class GameScene extends Phaser.Scene {
     this.muteButton = makeIconButton(this, 23, 5.5, 7,
       Audio.muted ? 'icon-mute' : 'icon-sound', () => {
         const muted = Audio.toggleMuted();
+        MenuMusic.setMuted(muted);
         SaveManager.setSetting('muted', muted);
         this.muteButton.buttonIcon?.setTexture(muted ? 'icon-mute' : 'icon-sound');
       }, {

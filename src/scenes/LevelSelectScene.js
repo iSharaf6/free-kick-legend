@@ -5,6 +5,7 @@ import {
   bodyText, drawPanel, addScanlines, sceneIntro, configureHdCamera, FONT
 } from '../ui.js';
 import { SaveManager } from '../systems/SaveManager.js';
+import { MenuMusic } from '../systems/MenuMusic.js';
 import { LEVELS, CUPS as CUP_DATA } from '../data/levels.js';
 import { PAL } from '../pixelart.js';
 
@@ -30,6 +31,7 @@ export class LevelSelectScene extends Phaser.Scene {
 
   create() {
     configureHdCamera(this);
+    MenuMusic.enterMenu();
     this.add.image(0, 0, 'stadium-menu').setOrigin(0).setDepth(0);
     const wash = this.add.graphics().setDepth(1);
     wash.fillStyle(PAL.ink, 0.76);

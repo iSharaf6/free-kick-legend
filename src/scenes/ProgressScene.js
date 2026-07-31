@@ -15,6 +15,7 @@ import {
 import { PAL } from '../pixelart.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
+import { MenuMusic } from '../systems/MenuMusic.js';
 import { DAILY_STREAK_REWARDS, utcDateKey } from '../data/progression.js';
 
 const PAGE_SIZE = 4;
@@ -35,6 +36,7 @@ export class ProgressScene extends Phaser.Scene {
 
   create() {
     configureHdCamera(this);
+    MenuMusic.enterMenu();
     this.date = utcDateKey();
     SaveManager.ensureDaily(this.date);
     this.reducedMotion = SaveManager.getSettings().reducedMotion;

@@ -4,7 +4,11 @@ const SDK_STUB = `
   window.CrazyGames = { SDK: {
     environment: 'local',
     init: async () => true,
-    data: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    data: {
+      getItem: (key) => localStorage.getItem(key),
+      setItem: (key, value) => localStorage.setItem(key, value),
+      removeItem: (key) => localStorage.removeItem(key)
+    },
     game: {
       settings: {},
       loadingStart: async () => {}, loadingStop: async () => {},

@@ -7,6 +7,7 @@ import { LockerScene } from './scenes/LockerScene.js';
 import { ProgressScene } from './scenes/ProgressScene.js';
 import { GameScene } from './scenes/GameScene.js';
 import { PuppetLabScene } from './scenes/PuppetLabScene.js';
+import { MenuMusic } from './systems/MenuMusic.js';
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,
@@ -59,4 +60,7 @@ const game = new Phaser.Game({
 });
 
 // Debug handle used by automated playtests; stripped from production builds.
-if (import.meta.env.DEV) window.__game = game;
+if (import.meta.env.DEV) {
+  window.__game = game;
+  window.__menuMusic = MenuMusic;
+}

@@ -6,6 +6,7 @@ import {
 } from '../ui.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
+import { MenuMusic } from '../systems/MenuMusic.js';
 import {
   COSMETIC_CATEGORIES, getCosmetic, getCosmeticsByCategory
 } from '../data/cosmetics.js';
@@ -42,6 +43,7 @@ export class LockerScene extends Phaser.Scene {
 
   create() {
     configureHdCamera(this);
+    MenuMusic.enterMenu();
     this.add.image(0, 0, 'stadium-menu').setOrigin(0).setDepth(0);
     const wash = this.add.graphics().setDepth(1);
     wash.fillStyle(PAL.ink, 0.72);

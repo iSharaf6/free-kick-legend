@@ -234,7 +234,7 @@ test('v1 numeric stars migrate to stable IDs without granting duplicate rewards'
   assert.equal(SaveManager.unlockedCount(LEVELS.length), 3);
 
   const migrated = JSON.parse(storage.getItem(SAVE_KEY));
-  assert.equal(migrated.version, 2);
+  assert.equal(migrated.version, 3);
   assert.equal(migrated.stars['academy-01'], 3);
   assert.equal(migrated.rewardClaims['academy-01'].threeStar, true);
 });
@@ -265,6 +265,19 @@ test('save validation clamps corrupt values and restores safe cosmetics/settings
   assert.equal(SaveManager.getSettings().sfxVolume, 0);
   assert.equal(SaveManager.getSettings().reducedMotion, true);
   assert.equal(SaveManager.getLastPlayed().levelId, 'academy-01');
+});
+
+test('the unused v2 music default migrates to the soundtrack mix level', () => {
+  storage.setItem(SAVE_KEY, JSON.stringify({
+    version: 2,
+    settings: { muted: false, musicVolume: 0.7, sfxVolume: 1 }
+  }));
+  SaveManager.configureStorage(storage);
+
+  assert.equal(SaveManager.getSettings().musicVolume, 0.3);
+  SaveManager.setSetting('musicVolume', 0.7);
+  assert.equal(SaveManager.getSettings().musicVolume, 0.7);
+  assert.equal(JSON.parse(storage.getItem(SAVE_KEY)).version, 3);
 });
 
 test('currency is clamped to a display-safe six-digit balance', () => {
