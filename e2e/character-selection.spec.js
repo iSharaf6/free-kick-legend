@@ -69,4 +69,59 @@ test('a selected striker persists from the locker through menu and gameplay', as
     body: await page.screenshot(),
     contentType: 'image/png'
   });
+
+  const action = await page.evaluate(() => new Promise((resolve) => {
+    const kicker = window.__fkl.kicker;
+    const poses = [];
+    let contacts = 0;
+    let startedPose = null;
+    const onFrame = (animation, frame) => {
+      if (animation?.key !== 'kicker-action') return;
+      poses.push(String(frame?.textureKey || '').split('-').pop());
+    };
+    kicker.sprite.on('animationupdate', onFrame);
+    kicker.setPose('idle').playKick({
+      onContact: () => contacts++,
+      onComplete: () => {
+        kicker.sprite.off('animationupdate', onFrame);
+        resolve({
+          poses,
+          startedPose,
+          contacts,
+          finalPose: kicker.pose,
+          finalTexture: kicker.sprite.texture.key
+        });
+      }
+    });
+    startedPose = kicker.pose;
+  }));
+  expect(action.startedPose).toBe('ready');
+  expect(action.poses).toEqual(['windup', 'strike', 'follow', 'recover', 'watch']);
+  expect(action.contacts).toBe(1);
+  expect(action.finalPose).toBe('watch');
+  expect(action.finalTexture).toBe('kicker-hd-character-islam-sharaf-kit-home-watch');
+  await testInfo.attach('islam-sharaf-gameplay-watch', {
+    body: await page.screenshot(),
+    contentType: 'image/png'
+  });
+
+  const scaleCheck = await page.evaluate(() => {
+    const kicker = window.__fkl.kicker;
+    kicker.setCharacter('character-mica').setPose('idle');
+    const micaScale = kicker.visualScale;
+    kicker.setCharacter('character-power-striker').setPose('idle');
+    return {
+      micaScale,
+      malikScale: kicker.visualScale,
+      characterScale: kicker.characterScale,
+      texture: kicker.sprite.texture.key
+    };
+  });
+  expect(scaleCheck.characterScale).toBe(1.14);
+  expect(scaleCheck.malikScale / scaleCheck.micaScale).toBeCloseTo(1.14, 5);
+  expect(scaleCheck.texture).toBe('kicker-hd-character-power-striker-kit-home-idle');
+  await testInfo.attach('malik-rook-gameplay-scale', {
+    body: await page.screenshot(),
+    contentType: 'image/png'
+  });
 });

@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Build every non-Mica player/kit/pose texture from approved base art.
+"""Build every selectable player/kit/pose texture from approved base art.
 
 Each player owns one identity strip in the home palette. Kits remain a separate
 concern: this builder palette-swaps the authored navy/gold cloth into the six
-runtime kit palettes. The approved idle is stored independently and deliberately
-replaces frame zero, so image-generation drift can never alter a signed-off
-silhouette while producing the motion frames.
+runtime kit palettes. Every strip is normalized with one shared scale and one
+bottom-centre anchor so added anticipation/recovery frames never resize or hop.
 """
 
 from __future__ import annotations
@@ -21,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = ROOT / "assets/source/players"
 OUT = ROOT / "public/assets/hd"
 
-POSES = ("idle", "ready", "strike", "follow", "celebrate")
+POSES = ("idle", "ready", "windup", "strike", "follow", "recover", "watch", "celebrate")
 FRAME_SIZE = 256
 CONTENT_BASELINE = 247
 CONTENT_MARGIN = 8
@@ -30,25 +29,27 @@ CONTENT_MARGIN = 8
 @dataclass(frozen=True)
 class PlayerSource:
     source: Path
-    approved_idle: Path
     idle_height: int
+    starter: bool = False
 
 
 PLAYERS = {
+    "character-mica": PlayerSource(
+        source=SOURCE_ROOT / "mica-vale/source-strip-v3-alpha.png",
+        idle_height=232,
+        starter=True,
+    ),
     "character-power-striker": PlayerSource(
-        source=SOURCE_ROOT / "power-striker/source-strip-v1-alpha.png",
-        approved_idle=SOURCE_ROOT / "power-striker/approved-idle-v1-alpha.png",
-        idle_height=240,
+        source=SOURCE_ROOT / "power-striker/source-strip-v3-alpha.png",
+        idle_height=244,
     ),
     "character-agile-winger": PlayerSource(
-        source=SOURCE_ROOT / "agile-winger/source-strip-v1-alpha.png",
-        approved_idle=SOURCE_ROOT / "agile-winger/approved-idle-v1-alpha.png",
+        source=SOURCE_ROOT / "agile-winger/source-strip-v3-alpha.png",
         idle_height=205,
     ),
     "character-islam-sharaf": PlayerSource(
-        source=SOURCE_ROOT / "islam-sharaf/source-strip-v2-alpha.png",
-        approved_idle=SOURCE_ROOT / "islam-sharaf/approved-idle-v2-alpha.png",
-        idle_height=228,
+        source=SOURCE_ROOT / "islam-sharaf/source-strip-v3-alpha.png",
+        idle_height=232,
     ),
 }
 
@@ -67,15 +68,18 @@ def rgb(color: int) -> tuple[int, int, int]:
     return ((color >> 16) & 255, (color >> 8) & 255, color & 255)
 
 
-def largest_component(image: Image.Image, threshold: int = 8) -> Image.Image:
-    """Keep the connected player and discard generation debris near a slot."""
+def connected_components(
+    image: Image.Image,
+    threshold: int = 8,
+) -> list[tuple[tuple[int, int, int, int], int, Image.Image]]:
+    """Return isolated alpha components with their bounds and pixel counts."""
     source = image.convert("RGBA")
     alpha = source.getchannel("A")
     width, height = source.size
     alpha_pixels = alpha.load()
     source_pixels = source.load()
     seen = bytearray(width * height)
-    components: list[list[tuple[int, int]]] = []
+    components: list[tuple[tuple[int, int, int, int], int, Image.Image]] = []
 
     for y in range(height):
         for x in range(width):
@@ -100,36 +104,32 @@ def largest_component(image: Image.Image, threshold: int = 8) -> Image.Image:
                             continue
                         seen[neighbor] = 1
                         stack.append((nx, ny))
-            components.append(component)
-
-    if not components:
-        raise ValueError("No player pixels were detected in a generated frame")
-    component = max(components, key=len)
-    left = min(x for x, _ in component)
-    right = max(x for x, _ in component)
-    top = min(y for _, y in component)
-    bottom = max(y for _, y in component)
-    isolated = Image.new("RGBA", (right - left + 1, bottom - top + 1), (0, 0, 0, 0))
-    pixels = isolated.load()
-    for x, y in component:
-        pixels[x - left, y - top] = source_pixels[x, y]
-    return isolated
+            left = min(px for px, _ in component)
+            right = max(px for px, _ in component)
+            top = min(py for _, py in component)
+            bottom = max(py for _, py in component)
+            isolated = Image.new("RGBA", (right - left + 1, bottom - top + 1), (0, 0, 0, 0))
+            pixels = isolated.load()
+            for px, py in component:
+                pixels[px - left, py - top] = source_pixels[px, py]
+            components.append(((left, top, right + 1, bottom + 1), len(component), isolated))
+    return components
 
 
 def extract_frames(strip: Image.Image) -> list[Image.Image]:
-    step = strip.width / len(POSES)
-    frames = []
-    for index in range(len(POSES)):
-        left = round(index * step)
-        right = round((index + 1) * step)
-        frames.append(largest_component(strip.crop((left, 0, right, strip.height))))
-    return frames
+    # Generated actors sometimes extend beyond their nominal slot. Detect the
+    # eight complete bodies across the whole strip before ordering them by x;
+    # fixed slot crops would amputate a wide backswing or airborne follow pose.
+    components = sorted(connected_components(strip), key=lambda component: component[1], reverse=True)
+    actors = components[:len(POSES)]
+    if len(actors) != len(POSES):
+        raise ValueError(f"Expected {len(POSES)} player figures, found {len(actors)}")
+    actors.sort(key=lambda component: (component[0][0] + component[0][2]) / 2)
+    return [component[2] for component in actors]
 
 
 def fit_frame(frame: Image.Image, scale: float) -> Image.Image:
     """Scale one pose onto a fixed canvas while preserving the common baseline."""
-    limit = FRAME_SIZE - CONTENT_MARGIN
-    scale = min(scale, limit / frame.width, limit / frame.height)
     width = max(1, round(frame.width * scale))
     height = max(1, round(frame.height * scale))
     sprite = frame.resize((width, height), Image.Resampling.NEAREST)
@@ -143,14 +143,14 @@ def fit_frame(frame: Image.Image, scale: float) -> Image.Image:
 def normalize_player(source: PlayerSource) -> list[Image.Image]:
     generated = extract_frames(Image.open(source.source).convert("RGBA"))
     generated_idle = generated[0]
-    identity_scale = source.idle_height / generated_idle.height
-    frames = [fit_frame(frame, identity_scale) for frame in generated]
-
-    # Lock frame zero back to the accepted Phase-2 idle. Its scale derives from
-    # the same target height, so the animation retains a coherent body scale.
-    approved_idle = largest_component(Image.open(source.approved_idle).convert("RGBA"))
-    frames[0] = fit_frame(approved_idle, source.idle_height / approved_idle.height)
-    return frames
+    width_limit = FRAME_SIZE - CONTENT_MARGIN * 2
+    height_limit = CONTENT_BASELINE - CONTENT_MARGIN
+    scale = min(
+        source.idle_height / generated_idle.height,
+        width_limit / max(frame.width for frame in generated),
+        height_limit / max(frame.height for frame in generated),
+    )
+    return [fit_frame(frame, scale) for frame in generated]
 
 
 def recolor_kit(image: Image.Image, primary: int, trim: int) -> Image.Image:
@@ -187,7 +187,11 @@ def main() -> None:
         frames = normalize_player(source)
         for pose, frame in zip(POSES, frames, strict=True):
             for kit_id, (primary, trim) in KITS.items():
-                output = OUT / f"kicker-hd-{character_id}-{kit_id}-{pose}.png"
+                output = OUT / (
+                    f"kicker-hd-{kit_id}-{pose}.png"
+                    if source.starter
+                    else f"kicker-hd-{character_id}-{kit_id}-{pose}.png"
+                )
                 recolor_kit(frame, primary, trim).save(output, optimize=True)
 
 

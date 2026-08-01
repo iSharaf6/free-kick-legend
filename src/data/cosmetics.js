@@ -30,6 +30,7 @@ export const COSMETICS = Object.freeze([
     description: 'The original number 17 and free-kick specialist.',
     archetype: 'Balanced', dominantFoot: 'right', personality: 'Composed',
     silhouette: 'Average athletic build with a compact, square ready stance.',
+    renderScale: 1,
     number: 17, price: 0, rarity: 'common', unlock: { type: 'starter', value: 0 }
   }),
   item({
@@ -37,6 +38,7 @@ export const COSMETICS = Object.freeze([
     description: 'A broad number 9 whose planted stance and full-body rotation radiate power.',
     number: 9, archetype: 'Power Striker', dominantFoot: 'right', personality: 'Fearless',
     silhouette: 'Tall and muscular, with a wide base, heavy shoulders and forceful movement.',
+    renderScale: 1.14,
     price: 0, rarity: 'rare', unlock: { type: 'starter', value: 0 }
   }),
   item({
@@ -44,13 +46,15 @@ export const COSMETICS = Object.freeze([
     description: 'A quick number 7 with elastic footwork and a sharp, airborne follow-through.',
     number: 7, archetype: 'Agile Winger', dominantFoot: 'right', personality: 'Playful',
     silhouette: 'Shorter and lean, with staggered feet, narrow shoulders and springy movement.',
+    renderScale: 1,
     price: 0, rarity: 'uncommon', unlock: { type: 'starter', value: 0 }
   }),
   item({
     id: 'character-islam-sharaf', category: 'character', name: 'Islam Sharaf',
-    description: 'A technical number 10 with precise footwork and an elegant wrapped finish.',
+    description: 'A lean, technical number 10 with precise footwork and a controlled wrapped finish.',
     number: 10, archetype: 'Technical Creator', dominantFoot: 'right', personality: 'Assured',
-    silhouette: 'Lean with a relaxed S-curve stance, angular face and distinctive curly crown.',
+    silhouette: 'Lean-muscular V-taper with squared shoulders, planted feet and a focused upfield posture.',
+    renderScale: 1,
     price: 0, rarity: 'legendary', unlock: { type: 'starter', value: 0 }
   }),
 

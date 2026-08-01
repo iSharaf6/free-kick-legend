@@ -100,7 +100,7 @@ For other portals, the bridge falls back to local storage and no-op lifecycle/ad
 
 Useful official references: [SDK setup](https://docs.crazygames.com/sdk/intro/), [game lifecycle](https://docs.crazygames.com/sdk/game/), [data storage](https://docs.crazygames.com/sdk/data/), and [advertisement requirements](https://docs.crazygames.com/requirements/ads/).
 
-The keeper, original kicker, ball, and defender HD sources are preserved in `assets/source/`; their optimized transparent runtime frames live in `public/assets/hd/` and can be rebuilt with `scripts/build_hd_sprites.py`. Islam Sharaf's selectable striker set has its own reproducible pipeline in `scripts/build_striker_sprites.py`. The checked-in pitch and crowd panorama are separate generated release assets and are not rebuilt by those scripts. The practical save generation and packing contract is documented in `assets/source/KEEPER-PRACTICAL-SAVES-V2-PROMPT.md`; the wider situational/distribution/reaction source contract remains in `assets/source/KEEPER-COMPLETE-MOVESET-V1-PROMPT.md`.
+The keeper, ball, defender and player HD sources are preserved in `assets/source/`; their optimized transparent runtime frames live in `public/assets/hd/`. Keeper and defender assets are rebuilt with `scripts/build_hd_sprites.py`; every selectable striker's eight-pose, six-kit set is rebuilt with `scripts/build_striker_sprites.py`. The checked-in pitch and crowd panorama are separate generated release assets and are not rebuilt by those scripts. The practical save generation and packing contract is documented in `assets/source/KEEPER-PRACTICAL-SAVES-V2-PROMPT.md`; the wider situational/distribution/reaction source contract remains in `assets/source/KEEPER-COMPLETE-MOVESET-V1-PROMPT.md`.
 
 ## Tuning
 

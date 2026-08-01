@@ -16,7 +16,7 @@ const KICKER_POSES = {
   strike: MAPS.kickerStrike,
   celebrate: MAPS.kickerCelebrate
 };
-const HD_KICKER_POSES = ['idle', 'ready', 'strike', 'follow', 'celebrate'];
+const HD_KICKER_POSES = ['idle', 'ready', 'windup', 'strike', 'follow', 'recover', 'watch', 'celebrate'];
 
 const HOME_KIT = { B: 0x17365d, C: PAL.gold, D: 0x0e2038, Y: 0xf8f8f4 };
 // Hard ceiling on the boot screen, whatever the platform SDK decides to do.

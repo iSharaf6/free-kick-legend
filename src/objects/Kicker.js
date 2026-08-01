@@ -2,14 +2,10 @@ import { STARTER_COSMETICS, getCosmetic, kickerHdTextureKey } from '../data/cosm
 
 // Presentation striker shared by the menu, locker and match scenes.
 //
-// Registration is the whole story here. The authored HD poses are all 256px
-// tall and share a content baseline at y=247, but their canvases grow to the
-// right as the kicking leg extends: idle is 108px wide, ready 160, strike 215,
-// follow 213, celebrate 144. Pinning the canvas centre (origin 0.5) therefore
-// teleports the torso up to 28 source pixels between consecutive poses, which
-// at match scale is a visible sideways lurch on every frame change. Each pose
-// instead declares the source column its shoulders occupy, so the body core
-// stays welded to one spot and only the limbs travel.
+// Every authored HD pose is normalized onto the same 256px canvas, common
+// bottom-centre anchor and shared per-player scale. Texture changes can therefore
+// carry anticipation, contact, recovery and watch poses without teleporting the
+// body core or resizing a character between frames.
 //
 // The second rule: exactly one writer per transform property. Ambient breathing
 // and the kick sequence both used to tween the sprite directly while setPose()
@@ -17,37 +13,33 @@ import { STARTER_COSMETICS, getCosmetic, kickerHdTextureKey } from '../data/cosm
 // Motion is now accumulated into two plain state objects and composed in
 // applyTransform(), which is the only function that touches the sprite.
 
-const POSE_SEQUENCE = ['idle', 'ready', 'strike', 'follow', 'celebrate'];
+const POSE_SEQUENCE = ['idle', 'ready', 'windup', 'strike', 'follow', 'recover', 'watch', 'celebrate'];
 
-// originX = shoulderColumnCentre / canvasWidth, measured from the shipped art.
-// originY = contentBaseline / canvasHeight, so the boots meet the pitch instead
-// of floating on the 9px of transparent padding every frame carries.
-const HD_POSE_ANCHOR = Object.freeze({
-  idle: Object.freeze({ originX: 48.0 / 108, originY: 247 / 256 }),
-  ready: Object.freeze({ originX: 81.0 / 160, originY: 247 / 256 }),
-  strike: Object.freeze({ originX: 80.0 / 215, originY: 247 / 256 }),
-  follow: Object.freeze({ originX: 84.0 / 213, originY: 247 / 256 }),
-  celebrate: Object.freeze({ originX: 70.5 / 144, originY: 247 / 256 })
-});
 const FALLBACK_ANCHOR = Object.freeze({ originX: 0.5, originY: 1 });
-const SELECTABLE_CHARACTER_ANCHOR = Object.freeze({ originX: 0.5, originY: 247 / 256 });
+const HD_ANCHOR = Object.freeze({ originX: 0.5, originY: 247 / 256 });
 
 // Source pixels per rendered logical pixel for the 256px-tall HD art.
 const HD_SCALE_RATIO = 0.106;
 
-const KICK_TIMELINE = Object.freeze({
-  plant: 55,     // weight drops onto the standing foot
-  contact: 155,  // boot meets ball - authoritative impulse frame
-  follow: 245,   // leg swings through
-  recover: 440,  // back to the ready stance
-  complete: 560  // recovery transform and clip finish together
+const ACTION_HOLDS = Object.freeze({
+  ready: 72,
+  windup: 118,
+  strike: 84,
+  follow: 108,
+  recover: 128,
+  watch: 142
+});
+const MOTION_TEMPO = Object.freeze({
+  'character-mica': 1,
+  'character-power-striker': 1.12,
+  'character-agile-winger': 0.82,
+  'character-islam-sharaf': 0.94
 });
 const KICK_ANIMATION_KEY = 'kicker-action';
 
-function anchorFor(pose, isHd, characterId) {
+function anchorFor(pose, isHd) {
   if (!isHd) return FALLBACK_ANCHOR;
-  if (characterId !== STARTER_COSMETICS.character) return SELECTABLE_CHARACTER_ANCHOR;
-  return HD_POSE_ANCHOR[pose] || HD_POSE_ANCHOR.idle;
+  return HD_ANCHOR;
 }
 
 function poseFromTexture(textureKey) {
@@ -59,6 +51,25 @@ function characterIdOrDefault(characterId) {
   return getCosmetic(characterId)?.category === 'character'
     ? characterId
     : STARTER_COSMETICS.character;
+}
+
+function characterScaleFor(characterId) {
+  const scale = Number(getCosmetic(characterId)?.renderScale ?? 1);
+  return Number.isFinite(scale) && scale > 0 ? scale : 1;
+}
+
+function actionTimingFor(characterId) {
+  const tempo = MOTION_TEMPO[characterId] ?? 1;
+  const holds = Object.fromEntries(
+    Object.entries(ACTION_HOLDS).map(([pose, duration]) => [pose, Math.round(duration * tempo)])
+  );
+  let elapsed = 0;
+  const at = {};
+  for (const pose of ['ready', 'windup', 'strike', 'follow', 'recover', 'watch']) {
+    elapsed += holds[pose];
+    at[pose] = elapsed;
+  }
+  return Object.freeze({ holds: Object.freeze(holds), at: Object.freeze(at), complete: elapsed });
 }
 
 export class Kicker {
@@ -88,11 +99,12 @@ export class Kicker {
 
     const texture = this.textureFor(this.pose);
     this.isHd = texture.startsWith('kicker-hd-');
-    this.visualScale = this.scale * (this.isHd ? HD_SCALE_RATIO : 1);
+    this.characterScale = characterScaleFor(this.characterId);
+    this.visualScale = this.scale * (this.isHd ? HD_SCALE_RATIO : 1) * this.characterScale;
 
     this.shadow = scene.add.image(x, y, 'shadow')
       .setOrigin(0.5, 0.5)
-      .setScale(this.scale * 1.28, this.scale * 0.7)
+      .setScale(this.scale * this.characterScale * 1.28, this.scale * this.characterScale * 0.7)
       .setAlpha(opts.shadowAlpha ?? 0.42)
       .setDepth(this.depth);
 
@@ -119,6 +131,11 @@ export class Kicker {
 
   // ------------------------------------------------------------- appearance
 
+  refreshVisualScale() {
+    this.characterScale = characterScaleFor(this.characterId);
+    this.visualScale = this.scale * (this.isHd ? HD_SCALE_RATIO : 1) * this.characterScale;
+  }
+
   textureFor(pose) {
     const hd = kickerHdTextureKey(this.characterId, this.kitId, pose);
     if (this.scene.textures.exists(hd)) return hd;
@@ -134,8 +151,8 @@ export class Kicker {
     if (this.destroyed || !this.sprite) return this;
     const texture = this.textureFor(this.pose);
     this.isHd = texture.startsWith('kicker-hd-');
-    this.visualScale = this.scale * (this.isHd ? HD_SCALE_RATIO : 1);
-    const anchor = anchorFor(this.pose, this.isHd, this.characterId);
+    this.refreshVisualScale();
+    const anchor = anchorFor(this.pose, this.isHd);
     // Order matters: origin before position, so the new anchor is honoured by
     // the transform written on the very same frame the texture changes.
     this.sprite.setTexture(texture);
@@ -149,8 +166,8 @@ export class Kicker {
     this.pose = POSE_SEQUENCE.includes(pose) ? pose : 'idle';
     const texture = this.sprite.texture?.key || this.textureFor(this.pose);
     this.isHd = texture.startsWith('kicker-hd-');
-    this.visualScale = this.scale * (this.isHd ? HD_SCALE_RATIO : 1);
-    const anchor = anchorFor(this.pose, this.isHd, this.characterId);
+    this.refreshVisualScale();
+    const anchor = anchorFor(this.pose, this.isHd);
     this.sprite.setOrigin(anchor.originX, anchor.originY);
     this.applyTransform();
     return this;
@@ -161,12 +178,9 @@ export class Kicker {
     if (!anims?.create || !this.sprite?.on) return false;
 
     if (anims.exists?.(KICK_ANIMATION_KEY)) anims.remove?.(KICK_ANIMATION_KEY);
-    const frameSpecs = [
-      ['ready', KICK_TIMELINE.contact],
-      ['strike', KICK_TIMELINE.follow - KICK_TIMELINE.contact],
-      ['follow', KICK_TIMELINE.recover - KICK_TIMELINE.follow],
-      ['ready', KICK_TIMELINE.complete - KICK_TIMELINE.recover]
-    ];
+    const timing = actionTimingFor(this.characterId);
+    const frameSpecs = ['ready', 'windup', 'strike', 'follow', 'recover', 'watch']
+      .map((pose) => [pose, timing.holds[pose]]);
     const frames = frameSpecs.map(([pose, duration]) => ({
       key: this.textureFor(pose),
       frame: '__BASE',
@@ -238,7 +252,10 @@ export class Kicker {
       const lift = Math.max(0, -act.lift);
       const tighten = Math.max(0.62, 1 - lift * 0.035);
       this.shadow.setPosition(this.x + act.lunge * 0.45, this.y);
-      this.shadow.setScale(this.scale * 1.28 * tighten, this.scale * 0.7 * tighten);
+      this.shadow.setScale(
+        this.scale * this.characterScale * 1.28 * tighten,
+        this.scale * this.characterScale * 0.7 * tighten
+      );
     }
   }
 
@@ -403,7 +420,7 @@ export class Kicker {
     if (!source?.texture) return;
     const anchor = snapshot
       ? { originX: source.originX, originY: source.originY }
-      : anchorFor(this.pose, this.isHd, this.characterId);
+      : anchorFor(this.pose, this.isHd);
     if (!this.ghost || !this.ghost.scene) {
       this.ghost = this.scene.add.image(0, 0, source.texture);
     }
@@ -426,22 +443,44 @@ export class Kicker {
     });
   }
 
-  enterStrikeFrame(action) {
+  enterWindupFrame(action) {
     if (!action || action.phase !== 'ready') return;
+    action.phase = 'windup';
+    this.adoptAnimatedPose('windup');
+    if (!action.reducedMotion) {
+      this._tweenAct({
+        lunge: -3.6,
+        lift: 0.8,
+        duration: action.timing.holds.windup,
+        ease: 'Cubic.easeIn'
+      }, action.token);
+    }
+    action.previousVisual = this.snapshotSprite();
+  }
+
+  enterStrikeFrame(action) {
+    if (!action) return;
+    // A badly delayed render may deliver contact without the wind-up update.
+    // Advance through it synchronously so the state machine and callback stay
+    // deterministic while the visible strike frame remains authoritative.
+    if (action.phase === 'ready') this.enterWindupFrame(action);
+    if (action.phase !== 'windup') return;
     action.phase = 'strike';
     if (!action.reducedMotion) this._spawnGhost(action.previousVisual);
     this.adoptAnimatedPose('strike');
-    this.actState.squashX = action.reducedMotion ? 1 : 1.12;
-    this.actState.squashY = action.reducedMotion ? 1 : 0.94;
-    this.actState.lunge = action.reducedMotion ? 0 : 0.6;
+    this.actState.squashX = action.reducedMotion ? 1 : 1.1;
+    this.actState.squashY = action.reducedMotion ? 1 : 0.95;
+    this.actState.lunge = action.reducedMotion ? 0 : 0.8;
     this.actState.lift = action.reducedMotion ? 0 : -0.4;
     this.applyTransform();
     if (!action.reducedMotion) {
       this._tweenAct({
+        lunge: 1.1,
+        lift: 0,
         squashX: 1,
         squashY: 1,
-        duration: 95,
-        ease: 'Quad.easeOut'
+        duration: action.timing.holds.strike,
+        ease: 'Cubic.easeOut'
       }, action.token);
     }
     if (!action.contactFired) {
@@ -457,9 +496,9 @@ export class Kicker {
     this.adoptAnimatedPose('follow');
     if (!action.reducedMotion) {
       this._tweenAct({
-        lunge: 2.6,
+        lunge: 2.8,
         lift: 0,
-        duration: 150,
+        duration: action.timing.holds.follow,
         ease: 'Cubic.easeOut'
       }, action.token);
     }
@@ -469,14 +508,35 @@ export class Kicker {
   enterRecoveryFrame(action) {
     if (!action || action.phase !== 'follow') return;
     action.phase = 'recover';
-    this.adoptAnimatedPose('ready');
+    this.adoptAnimatedPose('recover');
     if (!action.reducedMotion) {
       this._tweenAct({
-        lunge: 0,
+        lunge: 1.8,
         lift: 0,
         squashX: 1,
         squashY: 1,
-        duration: KICK_TIMELINE.complete - KICK_TIMELINE.recover,
+        duration: action.timing.holds.recover,
+        ease: 'Sine.easeOut'
+      }, action.token);
+    } else {
+      this.actState.lunge = 0;
+      this.actState.lift = 0;
+      this.applyTransform();
+    }
+    action.previousVisual = this.snapshotSprite();
+  }
+
+  enterWatchFrame(action) {
+    if (!action || action.phase !== 'recover') return;
+    action.phase = 'watch';
+    this.adoptAnimatedPose('watch');
+    if (!action.reducedMotion) {
+      this._tweenAct({
+        lunge: 1.2,
+        lift: 0,
+        squashX: 1,
+        squashY: 1,
+        duration: action.timing.holds.watch,
         ease: 'Sine.easeOut'
       }, action.token);
     } else {
@@ -492,19 +552,26 @@ export class Kicker {
     if (!action || action.token !== this.sequenceToken || this.destroyed) return;
     const textureKey = frame?.textureKey || frame?.key || frame?.frame?.texture?.key || this.sprite?.texture?.key;
     const pose = poseFromTexture(textureKey);
-    if (pose === 'strike') this.enterStrikeFrame(action);
+    if (pose === 'windup') this.enterWindupFrame(action);
+    else if (pose === 'strike') this.enterStrikeFrame(action);
     else if (pose === 'follow') this.enterFollowFrame(action);
-    else if (pose === 'ready' && action.phase === 'follow') this.enterRecoveryFrame(action);
+    else if (pose === 'recover') this.enterRecoveryFrame(action);
+    else if (pose === 'watch') this.enterWatchFrame(action);
   }
 
   finishActionAnimation() {
     const action = this.activeKick;
     if (!action || action.token !== this.sequenceToken || this.destroyed) return;
+    if (action.phase === 'ready') this.enterWindupFrame(action);
     if (!action.contactFired) this.enterStrikeFrame(action);
     if (action.phase === 'strike') this.enterFollowFrame(action);
     if (action.phase === 'follow') this.enterRecoveryFrame(action);
+    if (action.phase === 'recover') this.enterWatchFrame(action);
     this.activeKick = null;
-    this.actState.lunge = 0;
+    // Hold the watch pose after the clip has completed. GameScene changes the
+    // pose only when the shot is resolved, so every striker visibly tracks the
+    // ball instead of snapping back to a generic ready frame mid-flight.
+    this.actState.lunge = action.reducedMotion ? 0 : 1.2;
     this.actState.lift = 0;
     this.actState.squashX = 1;
     this.actState.squashY = 1;
@@ -515,8 +582,7 @@ export class Kicker {
 
   // The contact callback is the authoritative kick frame: GameScene applies the
   // ball impulse there, so boot and ball can never drift apart. Every stage
-  // moves the same state object, so the run-up reads as one connected motion
-  // instead of four competing setPosition() writes.
+  // moves the same state object, so the run-up reads as one connected motion.
   playKick({ onContact, onComplete, reducedMotion = this.reducedMotion } = {}) {
     this.cancelSequence();
     const token = this.sequenceToken;
@@ -526,6 +592,7 @@ export class Kicker {
     const action = {
       token,
       phase: 'ready',
+      timing: actionTimingFor(this.characterId),
       reducedMotion: Boolean(reducedMotion),
       contactFired: false,
       onContact,
@@ -536,13 +603,13 @@ export class Kicker {
 
     if (this.hasPlayableActionAnimation()) {
       if (!action.reducedMotion) {
-        this.actState.lunge = -2.2;
+        this.actState.lunge = -1.4;
         this.applyTransform();
         action.previousVisual = this.snapshotSprite();
         this._tweenAct({
-          lunge: -3.4,
-          lift: 0.8,
-          duration: KICK_TIMELINE.plant + 60,
+          lunge: -2.4,
+          lift: 0.5,
+          duration: action.timing.holds.ready,
           ease: 'Quad.easeIn'
         }, token);
       }
@@ -552,47 +619,64 @@ export class Kicker {
     }
 
     if (reducedMotion) {
-      this._after(KICK_TIMELINE.contact, token, () => {
+      this._after(action.timing.at.ready, token, () => {
+        this.setPose('windup');
+        this.enterWindupFrame(action);
+      });
+      this._after(action.timing.at.windup, token, () => {
         this.setPose('strike');
         this.enterStrikeFrame(action);
       });
-      this._after(KICK_TIMELINE.follow, token, () => {
+      this._after(action.timing.at.strike, token, () => {
         this.setPose('follow');
         this.enterFollowFrame(action);
       });
-      this._after(KICK_TIMELINE.recover, token, () => {
-        this.setPose('ready');
+      this._after(action.timing.at.follow, token, () => {
+        this.setPose('recover');
         this.enterRecoveryFrame(action);
       });
-      this._after(KICK_TIMELINE.complete, token, () => this.finishActionAnimation());
+      this._after(action.timing.at.recover, token, () => {
+        this.setPose('watch');
+        this.enterWatchFrame(action);
+      });
+      this._after(action.timing.complete, token, () => this.finishActionAnimation());
       return this;
     }
 
     // Load: weight settles back and down before the strike.
-    this.actState.lunge = -2.2;
+    this.actState.lunge = -1.4;
     this.applyTransform();
     this._tweenAct({
-      lunge: -3.4,
-      lift: 0.8,
-      duration: KICK_TIMELINE.plant + 60,
+      lunge: -2.4,
+      lift: 0.5,
+      duration: action.timing.holds.ready,
       ease: 'Quad.easeIn'
     }, token);
 
-    this._after(KICK_TIMELINE.contact, token, () => {
+    this._after(action.timing.at.ready, token, () => {
+      this.setPose('windup');
+      this.enterWindupFrame(action);
+    });
+
+    this._after(action.timing.at.windup, token, () => {
       this.setPose('strike');
       this.enterStrikeFrame(action);
     });
 
-    this._after(KICK_TIMELINE.follow, token, () => {
+    this._after(action.timing.at.strike, token, () => {
       this.setPose('follow');
       this.enterFollowFrame(action);
     });
 
-    this._after(KICK_TIMELINE.recover, token, () => {
-      this.setPose('ready');
+    this._after(action.timing.at.follow, token, () => {
+      this.setPose('recover');
       this.enterRecoveryFrame(action);
     });
-    this._after(KICK_TIMELINE.complete, token, () => this.finishActionAnimation());
+    this._after(action.timing.at.recover, token, () => {
+      this.setPose('watch');
+      this.enterWatchFrame(action);
+    });
+    this._after(action.timing.complete, token, () => this.finishActionAnimation());
     return this;
   }
 

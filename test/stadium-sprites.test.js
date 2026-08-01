@@ -29,12 +29,16 @@ test('CALYNX board mark keeps its compact pixel-sprite dimensions', () => {
 
 test('every authored selectable player ships a complete fixed-canvas striker pose set', () => {
   const kits = ['home', 'crimson', 'emerald', 'sunrise', 'monochrome', 'royal'];
-  const players = ['power-striker', 'agile-winger', 'islam-sharaf'];
+  const players = ['mica', 'power-striker', 'agile-winger', 'islam-sharaf'];
+  const poses = ['idle', 'ready', 'windup', 'strike', 'follow', 'recover', 'watch', 'celebrate'];
   for (const player of players) {
     for (const kit of kits) {
-      for (const pose of ['idle', 'ready', 'strike', 'follow', 'celebrate']) {
+      for (const pose of poses) {
+        const basename = player === 'mica'
+          ? `kicker-hd-kit-${kit}-${pose}.png`
+          : `kicker-hd-character-${player}-kit-${kit}-${pose}.png`;
         const dimensions = pngDimensions(new URL(
-          `../public/assets/hd/kicker-hd-character-${player}-kit-${kit}-${pose}.png`,
+          `../public/assets/hd/${basename}`,
           import.meta.url
         ));
         assert.deepEqual(dimensions, { width: 256, height: 256 });

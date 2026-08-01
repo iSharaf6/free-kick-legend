@@ -65,6 +65,11 @@ test('pausing during windup freezes contact and resumes into flight', async ({ p
 });
 
 test('specialist keeper atlases are deferred until gameplay', async ({ page }) => {
+  // The selectable-player V3 set adds enough individual pose requests to fill
+  // Chromium's small default Resource Timing buffer before deferred gameplay
+  // assets arrive. Expand the observation buffer before navigation so this
+  // assertion measures network behavior instead of silently dropping entries.
+  await page.addInitScript(() => performance.setResourceTimingBufferSize(1000));
   const game = new GamePage(page);
   await game.open({ width: 1280, height: 720 });
   const bootKeeperAssets = await page.evaluate(() => performance.getEntriesByType('resource')

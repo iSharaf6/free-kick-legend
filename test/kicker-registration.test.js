@@ -2,12 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Kicker } from '../src/objects/Kicker.js';
 
-// The authored HD poses share a 256px canvas height and a content baseline at
-// y=247, but their widths grow rightward as the kicking leg extends:
-// idle 108, ready 160, strike 215, follow 213, celebrate 144.
-const POSE_WIDTH = { idle: 108, ready: 160, strike: 215, follow: 213, celebrate: 144 };
-// Source column each pose's shoulders occupy, measured from the shipped art.
-const SHOULDER_COLUMN = { idle: 48, ready: 81, strike: 80, follow: 84, celebrate: 70.5 };
+// Every V3 frame is normalized to one fixed canvas and content baseline. That
+// turns texture swaps into stable animation frames instead of registration
+// jumps caused by pose-dependent image bounds.
+const POSES = ['idle', 'ready', 'windup', 'strike', 'follow', 'recover', 'watch', 'celebrate'];
 
 function imageStub(x, y, key) {
   return {
@@ -24,11 +22,11 @@ function imageStub(x, y, key) {
     rotation: 0,
     visible: true,
     scene: {},
-    width: POSE_WIDTH[String(key).split('-').pop()] ?? 100,
+    width: 256,
     height: 256,
     setTexture(next) {
       this.texture = { key: next };
-      this.width = POSE_WIDTH[String(next).split('-').pop()] ?? 100;
+      this.width = 256;
       return this;
     },
     setOrigin(ox, oy) { this.originX = ox; this.originY = oy; return this; },
@@ -124,65 +122,6 @@ function withTweenManager(scene) {
   return scene;
 }
 
-// Left edge of the drawn sprite in world space.
-function leftEdge(sprite) {
-  return sprite.x - sprite.originX * sprite.width * sprite.scaleX;
-}
-
-// World x of the shoulder column for the current pose. If registration is
-// correct this is identical for every pose, because the body core does not move
-// when only the limbs change.
-function shoulderWorldX(kicker) {
-  const sprite = kicker.sprite;
-  return leftEdge(sprite) + SHOULDER_COLUMN[kicker.pose] * sprite.scaleX;
-}
-
-test('every pose anchors its shoulder column to the same world position', () => {
-  const kicker = new Kicker(withTweenManager(sceneStub()), 120, 200, {
-    kitId: 'kit-home',
-    scale: 4.8,
-    ambient: false
-  });
-
-  const anchors = Object.keys(POSE_WIDTH).map((pose) => {
-    kicker.setPose(pose);
-    return { pose, x: shoulderWorldX(kicker) };
-  });
-
-  const first = anchors[0].x;
-  for (const { pose, x } of anchors) {
-    assert.ok(
-      Math.abs(x - first) < 0.001,
-      `${pose} shoulder column drifted to ${x}, expected ${first}`
-    );
-  }
-});
-
-// Regression guard for the original defect: with a shared 0.5 origin the strike
-// pose sat ~14 logical pixels left of the ready pose at menu scale, which read
-// as the striker lurching sideways on every frame change.
-test('the ready to strike transition no longer teleports the body sideways', () => {
-  const kicker = new Kicker(withTweenManager(sceneStub()), 120, 200, {
-    kitId: 'kit-home',
-    scale: 4.8,
-    ambient: false
-  });
-
-  kicker.setPose('ready');
-  const ready = shoulderWorldX(kicker);
-  kicker.setPose('strike');
-  const strike = shoulderWorldX(kicker);
-
-  assert.ok(Math.abs(strike - ready) < 0.001);
-
-  // Sanity: a naive centre origin really would have moved it a long way, so the
-  // assertion above is meaningful rather than vacuously true.
-  const scale = kicker.visualScale;
-  const naiveReady = 120 - 0.5 * POSE_WIDTH.ready * scale + SHOULDER_COLUMN.ready * scale;
-  const naiveStrike = 120 - 0.5 * POSE_WIDTH.strike * scale + SHOULDER_COLUMN.strike * scale;
-  assert.ok(Math.abs(naiveStrike - naiveReady) > 10);
-});
-
 test('all poses share one ground baseline', () => {
   const kicker = new Kicker(withTweenManager(sceneStub()), 120, 200, {
     kitId: 'kit-home',
@@ -190,7 +129,7 @@ test('all poses share one ground baseline', () => {
     ambient: false
   });
 
-  for (const pose of Object.keys(POSE_WIDTH)) {
+  for (const pose of POSES) {
     kicker.setPose(pose);
     // originY pins the authored content baseline, so the boots land on
     // kicker.y for every pose regardless of canvas padding.
@@ -199,8 +138,9 @@ test('all poses share one ground baseline', () => {
   }
 });
 
-test('selectable characters keep one shared centre and foot anchor across every pose set', () => {
+test('selectable characters keep one fixed canvas, centre and foot anchor across every pose set', () => {
   for (const characterId of [
+    'character-mica',
     'character-power-striker',
     'character-agile-winger',
     'character-islam-sharaf'
@@ -212,14 +152,33 @@ test('selectable characters keep one shared centre and foot anchor across every 
       ambient: false
     });
 
-    for (const pose of Object.keys(POSE_WIDTH)) {
+    for (const pose of POSES) {
       kicker.setPose(pose);
-      assert.equal(kicker.sprite.texture.key, `kicker-hd-${characterId}-kit-home-${pose}`);
+      const expected = characterId === 'character-mica'
+        ? `kicker-hd-kit-home-${pose}`
+        : `kicker-hd-${characterId}-kit-home-${pose}`;
+      assert.equal(kicker.sprite.texture.key, expected);
+      assert.equal(kicker.sprite.width, 256);
+      assert.equal(kicker.sprite.height, 256);
       assert.equal(kicker.sprite.originX, 0.5);
       assert.equal(kicker.sprite.originY, 247 / 256);
       assert.equal(kicker.sprite.y, 200);
     }
   }
+});
+
+test('Malik Rook is visibly larger without changing the shared gameplay scale', () => {
+  const scene = withTweenManager(sceneStub());
+  const mica = new Kicker(scene, 120, 200, {
+    characterId: 'character-mica', kitId: 'kit-home', scale: 4.8, ambient: false
+  });
+  const malik = new Kicker(scene, 120, 200, {
+    characterId: 'character-power-striker', kitId: 'kit-home', scale: 4.8, ambient: false
+  });
+
+  assert.equal(mica.scale, malik.scale, 'base gameplay presentation scale stays identical');
+  assert.ok(malik.visualScale > mica.visualScale * 1.13);
+  assert.equal(malik.characterScale, 1.14);
 });
 
 test('cancelling a kick sweeps the action state but never the ambient loop', () => {
@@ -274,7 +233,7 @@ test('the Phaser sprite clip owns frame timing and never skips contact', () => {
   assert.equal(clip.skipMissedFrames, false);
   assert.deepEqual(
     clip.frames.map(({ duration }) => duration),
-    [155, 90, 195, 120]
+    [72, 118, 84, 108, 128, 142]
   );
 
   let contacts = 0;
@@ -286,15 +245,18 @@ test('the Phaser sprite clip owns frame timing and never skips contact', () => {
   assert.equal(kicker.sprite.playedAnimation, 'kicker-action');
   assert.equal(kicker.sequenceTimers.length, 0, 'the Phaser path does not schedule parallel pose timers');
 
+  kicker.sprite.advancePose('windup');
+  assert.equal(contacts, 0, 'the ball cannot launch during anticipation');
   kicker.sprite.advancePose('strike');
   kicker.sprite.advancePose('strike');
   assert.equal(contacts, 1, 'repeated animationupdate events cannot double-kick the ball');
   assert.equal(kicker.pose, 'strike');
 
   kicker.sprite.advancePose('follow');
-  kicker.sprite.advancePose('ready');
+  kicker.sprite.advancePose('recover');
+  kicker.sprite.advancePose('watch');
   kicker.sprite.emit('animationcomplete', { key: 'kicker-action' });
-  assert.equal(kicker.pose, 'ready');
+  assert.equal(kicker.pose, 'watch', 'the striker keeps tracking the ball after the clip');
   assert.equal(completes, 1);
   assert.equal(kicker.activeKick, null);
   assert.equal(kicker.ambient, undefined, 'ambient:false remains disabled after recovery');
