@@ -111,5 +111,7 @@ test('live swipe copy clears the gesture and feedback lanes', async ({ page }) =
     window.__fkl.showSwipeHintMessage('AIM HIGHER');
     return { hintY: window.__fkl.inputHint.y, readoutY: window.__fkl.shotReadout.y };
   });
-  expect(lanes.readoutY - lanes.hintY).toBeGreaterThan(30);
+  // The reference HUD puts the detailed shot readout first and the larger,
+  // actionable coaching line below it, immediately above the objective bar.
+  expect(lanes.hintY - lanes.readoutY).toBeGreaterThan(12);
 });
