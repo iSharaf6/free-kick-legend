@@ -216,7 +216,7 @@ test('a cancelled sequence resets the action offsets to neutral', () => {
 
   assert.deepEqual(
     { ...kicker.actState },
-    { lunge: 0, lift: 0, squashX: 1, squashY: 1 }
+    { lunge: 0, lift: 0, tilt: 0, squashX: 1, squashY: 1 }
   );
   assert.equal(kicker.sprite.x, 120);
 });
@@ -233,7 +233,7 @@ test('the Phaser sprite clip owns frame timing and never skips contact', () => {
   assert.equal(clip.skipMissedFrames, false);
   assert.deepEqual(
     clip.frames.map(({ duration }) => duration),
-    [72, 118, 84, 108, 128, 142]
+    [44, 78, 52, 68, 82, 92]
   );
 
   let contacts = 0;

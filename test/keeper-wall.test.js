@@ -84,6 +84,27 @@ test('double keepers preserve separate home positions through idle, return and r
   assert.equal(right.x, 1.75);
 });
 
+test('next-attempt reset clears save state without teleporting the keeper', () => {
+  const keeper = new Goalkeeper(sceneStub(), 0.62, CAM.ballDist + 18, {
+    seed: 31,
+    homeX: 0
+  });
+  keeper.x = 2.1;
+  keeper.state = 'land';
+  keeper.grounded = true;
+
+  keeper.resetForNextAttempt();
+  assert.equal(keeper.x, 2.1);
+  assert.equal(keeper.state, 'return');
+  assert.equal(keeper.grounded, false);
+
+  for (let elapsed = 0; elapsed < 3 && keeper.state !== 'idle'; elapsed += PHYS.fixedStep) {
+    keeper.update(PHYS.fixedStep);
+  }
+  assert.equal(keeper.state, 'idle');
+  assert.equal(keeper.x, keeper.homeX);
+});
+
 test('keeper prediction and movement honor the active smaller goal dimensions', () => {
   const goalZ = CAM.ballDist + 18;
   const keeper = new Goalkeeper(sceneStub(), 1, goalZ, {

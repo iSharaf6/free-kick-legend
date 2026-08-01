@@ -10,6 +10,7 @@ import { Wall } from '../objects/Wall.js';
 import { Goalkeeper } from '../objects/Goalkeeper.js';
 import { Kicker } from '../objects/Kicker.js';
 import { SwipeInput, computeShotFromPath } from '../systems/SwipeInput.js';
+import { applyLoadoutToShot, resolveLoadoutGameplay } from '../systems/LoadoutGameplay.js';
 import { AIM_ASSIST_MODES, SaveManager } from '../systems/SaveManager.js';
 import { PlatformService } from '../systems/PlatformService.js';
 import { Audio } from '../systems/AudioSynth.js';
@@ -376,10 +377,6 @@ export class GameScene extends Phaser.Scene {
     this.drawRings();
     this.buildHazardVisuals();
 
-    this.ball = new Ball();
-    this.ball.reset(this.level.offsetX);
-    this.ball.setGoalBounds(this.goalWidth, this.goalHeight);
-    this.ball.setWind(this.currentWind);
     const savedLoadout = SaveManager.getEquippedCosmetics?.() || SaveManager.load?.().equipped || {};
     this.loadout = {
       character: savedLoadout.character || 'character-mica',
@@ -387,12 +384,24 @@ export class GameScene extends Phaser.Scene {
       ball: savedLoadout.ball || 'ball-classic',
       trail: savedLoadout.trail || 'trail-none'
     };
+    this.loadoutGameplay = resolveLoadoutGameplay(this.loadout);
+    this.ball = new Ball({
+      physics: this.loadoutGameplay.ballPhysics,
+      windEffect: this.loadoutGameplay.windEffect
+    });
+    this.ball.reset(this.level.offsetX);
+    this.ball.setGoalBounds(this.goalWidth, this.goalHeight);
+    this.ball.setWind(this.currentWind);
     const trailCosmetic = getCosmetic(this.loadout.trail);
     this.trailStyle = {
       enabled: trailCosmetic?.particle !== 'none',
+      mode: trailCosmetic?.particle ?? 'none',
       start: trailCosmetic?.palette?.start ?? 0xffffff,
-      end: trailCosmetic?.palette?.end ?? 0xffffff
+      end: trailCosmetic?.palette?.end ?? 0xffffff,
+      samples: trailCosmetic?.utility?.samples ?? 10,
+      opacity: trailCosmetic?.utility?.opacity ?? 0.14
     };
+    this.ballVisualScale = this.loadoutGameplay.visualScale;
     this.ballTexture = this.loadout.ball === 'ball-classic' && this.textures.exists('ball-classic-hd')
       ? 'ball-classic-hd'
       : (this.textures.exists(this.loadout.ball) ? this.loadout.ball : 'ball');
@@ -448,7 +457,10 @@ export class GameScene extends Phaser.Scene {
     // The predicted arc sits under the HUD but over the pitch, and is drawn by
     // the same solver the shot will use - wind and curl included.
     this.previewGfx = this.add.graphics().setDepth(1490);
-    this.previewBall = new Ball();
+    this.previewBall = new Ball({
+      physics: this.loadoutGameplay.ballPhysics,
+      windEffect: this.loadoutGameplay.windEffect
+    });
     this.aimGfx = this.add.graphics().setDepth(1500);
 
     // Turf kicked up at contact. Small, short-lived and green: it belongs to
@@ -989,11 +1001,13 @@ export class GameScene extends Phaser.Scene {
       // Anchored to the same goal-line extent the pitch markings use. The
       // camera pans with the free-kick spot, so on offset levels one corner is
       // legitimately out of frame - skip it rather than clamp it into view.
-      const base = project(side * 16, 0, this.zGoal);
+      const base = project(side * PITCH_MARKING_DIMENSIONS.fieldHalfWidth, 0, this.zGoal);
       if (base.x < -8 || base.x > GAME_W + 8) continue;
       const height = Math.max(10, base.s * 1.55);
       const flag = this.add.image(base.x, base.y, 'corner-flag')
-        .setOrigin(0.5, 1)
+        // The pole is at x=2 in the 12px texture. Anchoring its centre, rather
+        // than the texture centre, keeps the pole planted when the flag flips.
+        .setOrigin(2 / 12, 1)
         .setDisplaySize(height * 0.5, height)
         .setDepth(1000 - this.zGoal * 10 - 4)
         .setFlipX(windX < 0)
@@ -1897,7 +1911,17 @@ export class GameScene extends Phaser.Scene {
         }).setDepth(2000);
       }
 
-      this.buildConditionChips(4 + subWidth + 4);
+      const styleX = 4 + subWidth + 4;
+      const styleLabel = `${this.loadoutGameplay.ability} · ${this.loadoutGameplay.ballFeel}`.toUpperCase();
+      const styleWidth = Math.min(112, styleLabel.length * 2.25 + 10);
+      const stylePlate = this.add.graphics().setDepth(1988);
+      drawPanel(stylePlate, styleX, 11.5, styleWidth, 8, {
+        fill: 0x153d3a, border: PAL.borderDark, corner: PAL.greenHi, alpha: 0.92
+      });
+      bodyText(this, styleX + styleWidth / 2, 15.5, styleLabel, {
+        originX: 0.5, fontSize: '4px', color: '#82d9c8', letterSpacing: 0.18
+      }).setDepth(2000);
+      this.buildConditionChips(styleX + styleWidth + 4);
       this.buildTutorial();
       this.buildObjectiveStrip();
     } else if (this.mode === 'daily') {
@@ -2254,7 +2278,7 @@ export class GameScene extends Phaser.Scene {
     const shot = this.lastShot || {};
     const parts = [];
 
-    const power = Math.round(Phaser.Math.Clamp(shot.power ?? 0, 0, 1) * 100);
+    const power = Math.round(Phaser.Math.Clamp(shot.power ?? 0, 0, 1.2) * 100);
     parts.push(shot.powerCapped ? `${power}% POWER (CAPPED)` : `${power}% POWER`);
 
     const spin = shot.spin ?? 0;
@@ -2282,6 +2306,7 @@ export class GameScene extends Phaser.Scene {
       case 'CAUGHT':
         return 'KEEPER HELD IT';
       case 'WALL': {
+        if (this.lastWallKnockdown) return 'THUNDERSTRIKE · WALL FLATTENED';
         if (!plane) return 'INTO THE WALL';
         // Say which way out was available, not just that it failed.
         const overBar = plane.y > this.goalHeight;
@@ -2478,6 +2503,8 @@ export class GameScene extends Phaser.Scene {
     const guideMode = this.level.shotRules?.aimGuide || this.level.objective?.guideMode || 'always';
     shot.aimGuideHidden = guideMode === 'hide-on-run-up' || guideMode === 'commit';
     shot.guideCommitted = shot.aimGuideHidden;
+    Object.assign(shot, applyLoadoutToShot(shot, this.loadoutGameplay, maxPower));
+    shot.powerCapped ||= effectivePower > shot.power + 1e-6;
     return shot;
   }
 
@@ -2522,6 +2549,7 @@ export class GameScene extends Phaser.Scene {
     }
     if (Math.abs(shot.spin) > 0.45) Audio.whoosh(Math.abs(shot.spin));
     this.ball.kick(shot.vx, shot.vy, shot.vz, shot.spin);
+    this.lastWallKnockdown = false;
     // Where this shot was headed before a wall or a keeper got involved. Solved
     // once, from the launch state, so it already contains the curl.
     const heading = this.ball.predictAt(this.zGoal);
@@ -2807,7 +2835,8 @@ export class GameScene extends Phaser.Scene {
         if (this.wallClearanceY == null) this.wallClearanceY = pt.y;
         const wallContact = this.wall.contactAtZ(pt, plane.z);
         if (!wallContact) continue;
-        this.wall.impact(wallContact, pt, ball);
+        this.lastWallKnockdown = Boolean(this.lastShot?.wallKnockdown);
+        this.wall.impact(wallContact, pt, ball, { collapse: this.lastWallKnockdown });
         ball.vz *= -0.25;
         ball.vx = -ball.vx * 0.32 + Math.sign(pt.x - (this.wall.centerX || 0) || 1) * 0.9;
         ball.vy = Math.min(ball.vy * 0.4 + 1.5, 5);
@@ -2992,7 +3021,7 @@ export class GameScene extends Phaser.Scene {
         this.schedule(180, () => this.kicker?.celebrate(720));
         this.schedule(150, () => this.keepers.forEach((keeper) => keeper.reactToGoal()));
         const spos = project(pt.x, pt.y, this.zGoal);
-        this.confetti.explode(60, spos.x, spos.y);
+        this.confetti.explode(this.trailStyle.mode === 'confetti' ? 92 : 48, spos.x, spos.y);
         this.showBanner(isTopCorner ? 'TOP BINS' : shotRating.grade === 'S' ? 'WORLD CLASS' : 'GOAL', '#f2c832');
         Audio.goal();
         this.playCrowdGoal();
@@ -3020,7 +3049,7 @@ export class GameScene extends Phaser.Scene {
         Audio.groan();
         break;
       case 'WALL':
-        this.showBanner('BLOCKED!', '#ff8a65');
+        this.showBanner(this.lastWallKnockdown ? 'WALL FLATTENED!' : 'BLOCKED!', this.lastWallKnockdown ? '#f2c832' : '#ff8a65');
         Audio.groan();
         break;
       case 'POST':
@@ -3283,8 +3312,8 @@ export class GameScene extends Phaser.Scene {
     this.ballSpr.setVisible(true);
     this.shadowSpr.setVisible(true);
     this.keepers.forEach((keeper) => {
-      keeper.reset();
-      keeper.x = keeper.homeX;
+      if (keeper.resetForNextAttempt) keeper.resetForNextAttempt();
+      else keeper.reset();
       keeper.z = keeper.fklBaseZ;
       if (this.keeperConfig.type === 'boss') {
         keeper.skill = Math.min(
@@ -3617,7 +3646,8 @@ export class GameScene extends Phaser.Scene {
     const depth = 1000 - b.z * 10;
     // The ball is the subject of the shot, so it is allowed to read a little
     // larger than strict projection - just not so large it out-masses a player.
-    const ballScale = ((pos.s * BALL_R * 2) / (this.ballSpr.texture.source[0]?.width || 12)) * 0.66;
+    const visualScale = this.ballVisualScale ?? 1;
+    const ballScale = ((pos.s * BALL_R * 2) / (this.ballSpr.texture.source[0]?.width || 12)) * 0.66 * visualScale;
     this.ballSpr
       .setPosition(pos.x, pos.y)
       .setScale(ballScale)
@@ -3626,7 +3656,7 @@ export class GameScene extends Phaser.Scene {
 
     // Keyline and specular. Both are drawn from the projected radius so they
     // stay welded to the ball at every depth.
-    const radius = Math.max(1.2, pos.s * BALL_R * 0.66 * (this.ballRadiusFraction ?? 1));
+    const radius = Math.max(1.2, pos.s * BALL_R * 0.66 * (this.ballRadiusFraction ?? 1) * visualScale);
     if (this.ballOutlineGfx) {
       this.ballOutlineGfx.clear().setDepth(depth - 0.5)
         .fillStyle(0x071018, 0.8)
@@ -3667,7 +3697,7 @@ export class GameScene extends Phaser.Scene {
     const k = Phaser.Math.Clamp(1 - b.y * 0.1, 0.3, 1);
     // Sized from the ball's *visible* width, so it sits just proud of the ball
     // instead of spreading a slab of dark turf under it.
-    const shadowWidth = sh.s * BALL_R * 2 * 0.66 * (this.ballRadiusFraction ?? 1) * 1.2 * k;
+    const shadowWidth = sh.s * BALL_R * 2 * 0.66 * (this.ballRadiusFraction ?? 1) * 1.2 * visualScale * k;
     this.shadowSpr
       .setPosition(sh.x, sh.y)
       .setScale(shadowWidth / 10)
@@ -3679,7 +3709,7 @@ export class GameScene extends Phaser.Scene {
       const snowTrail = Boolean(this.hazardMap.get('snow')?.trail);
       if (b.flying) {
         this.trailPts.push({ x: pos.x, y: pos.y, r: Math.max(pos.s * BALL_R, 1) });
-        const maxTrail = this.trailStyle.enabled || snowTrail ? 24 : 10;
+        const maxTrail = snowTrail && !this.trailStyle.enabled ? 24 : this.trailStyle.samples;
         if (this.trailPts.length > maxTrail) this.trailPts.shift();
       }
       this.trailGfx.clear().setDepth(depth - 2);
@@ -3690,8 +3720,39 @@ export class GameScene extends Phaser.Scene {
         const color = snowTrail && !this.trailStyle.enabled
           ? mixColor(0xb9d8ef, 0xffffff, f)
           : mixColor(this.trailStyle.end, this.trailStyle.start, f);
-        this.trailGfx.fillStyle(color, f * (this.trailStyle.enabled || snowTrail ? 0.52 : 0.14));
-        this.trailGfx.fillRect(this.trailPts[i].x - sz / 2, this.trailPts[i].y - sz / 2, sz, sz);
+        const alpha = f * (snowTrail && !this.trailStyle.enabled ? 0.52 : this.trailStyle.opacity);
+        const trailX = this.trailPts[i].x;
+        const trailY = this.trailPts[i].y;
+        this.trailGfx.fillStyle(color, alpha);
+        if (this.trailStyle.mode === 'diamond') {
+          this.trailGfx.fillTriangle(trailX, trailY - sz, trailX + sz, trailY, trailX, trailY + sz);
+          this.trailGfx.fillTriangle(trailX, trailY - sz, trailX - sz, trailY, trailX, trailY + sz);
+        } else if (this.trailStyle.mode === 'aurora') {
+          const previous = this.trailPts[i - 1];
+          if (previous) {
+            const dx = trailX - previous.x;
+            const dy = trailY - previous.y;
+            const length = Math.max(0.001, Math.hypot(dx, dy));
+            const nx = -dy / length;
+            const ny = dx / length;
+            const offset = Math.max(0.65, sz * 0.42);
+            const width = Math.max(1, sz * 0.24);
+            this.trailGfx.lineStyle(width, color, alpha);
+            this.trailGfx.lineBetween(
+              previous.x + nx * offset, previous.y + ny * offset,
+              trailX + nx * offset, trailY + ny * offset
+            );
+            this.trailGfx.lineStyle(width, mixColor(this.trailStyle.start, this.trailStyle.end, f), alpha * 0.82);
+            this.trailGfx.lineBetween(
+              previous.x - nx * offset, previous.y - ny * offset,
+              trailX - nx * offset, trailY - ny * offset
+            );
+          }
+        } else {
+          const powerScale = this.trailStyle.mode === 'square' ? 0.7 + (this.lastShot?.power ?? 0.7) * 0.65 : 1;
+          const drawSize = sz * powerScale;
+          this.trailGfx.fillRect(trailX - drawSize / 2, trailY - drawSize / 2, drawSize, drawSize);
+        }
       }
     }
   }
@@ -3704,7 +3765,7 @@ export class GameScene extends Phaser.Scene {
    * WIND readout mean something: change the gesture and the preview visibly
    * bends with the conditions instead of decorating the HUD.
    */
-  previewTrajectory(shot, fraction = 0.55) {
+  previewTrajectory(shot, fraction = shot?.previewFraction ?? 0.55) {
     const sim = this.previewBall;
     if (!sim) return [];
     sim.setGoalBounds(this.goalWidth, this.goalHeight);

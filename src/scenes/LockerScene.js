@@ -86,11 +86,11 @@ export class LockerScene extends Phaser.Scene {
     }).setDepth(104);
     titleText(this, 59, 18, 'MATCHDAY LOCKER', '14px', '#f3e7c3')
       .setOrigin(0, 0.5).setDepth(104);
-    bodyText(this, 246, 18, 'STYLE ONLY  ·  NO STAT BOOSTS', {
+    bodyText(this, 292, 18, 'PLAY STYLES  ·  KITS STAY COSMETIC', {
       originX: 0.5,
-      fontSize: '6px',
+      fontSize: '5px',
       color: '#8fa2ab',
-      letterSpacing: 0.35
+      letterSpacing: 0.26
     }).setDepth(104);
     this.coinChip = makeStatChip(this, 425, 18, 80, 'icon-coin', formatCompact(SaveManager.getCoins()), {
       height: 21,
@@ -204,7 +204,8 @@ export class LockerScene extends Phaser.Scene {
       ? 'ball-classic-hd'
       : (this.textures.exists(ballId) ? ballId : 'ball-classic');
     const ball = this.add.image(160, 211, ballKey).setDepth(143);
-    ball.setScale(19 / (ball.texture.source[0]?.width || 12));
+    const ballGameplay = getCosmetic(ballId)?.gameplay;
+    ball.setScale((19 / (ball.texture.source[0]?.width || 12)) * (ballGameplay?.visualScale ?? 1));
     this.contentLayer.add(ball);
     this.previewTween = this.tweens.add({
       targets: ball,
@@ -220,12 +221,12 @@ export class LockerScene extends Phaser.Scene {
       ? selected.id
       : SaveManager.getEquippedCosmetic('trail');
     const trail = getCosmetic(trailId);
-    if (trail?.particle !== 'none') {
+    if (trail) {
       const line = this.add.graphics().setDepth(140);
       for (let i = 0; i < 9; i++) {
         const p = i / 8;
         const color = i % 2 ? trail.palette.start : trail.palette.end;
-        line.fillStyle(color, 0.18 + p * 0.72);
+        line.fillStyle(color, (0.08 + p * 0.72) * (trail.utility?.opacity ?? 0.2));
         const size = Math.max(1, Math.ceil(p * 3));
         line.fillRect(120 + i * 4, 217 - i * 1.1, size, size);
       }
@@ -252,12 +253,12 @@ export class LockerScene extends Phaser.Scene {
       color: css(rarity),
       letterSpacing: 0.45
     });
-    const description = bodyText(this, 221, 108, selected.description, {
+    const description = bodyText(this, 221, selected.category === 'character' ? 102 : 108, selected.description, {
       originY: 0,
-      fontSize: '7px',
+      fontSize: selected.category === 'character' ? '6px' : '7px',
       color: '#aab9ba',
       wordWrap: { width: 235, useAdvancedWrap: true },
-      lineSpacing: 2
+      lineSpacing: selected.category === 'character' ? 1 : 2
     });
     this.contentLayer.add([name, rarityText, description]);
 
@@ -265,7 +266,7 @@ export class LockerScene extends Phaser.Scene {
       const playerMeta = bodyText(
         this,
         221,
-        130,
+        126,
         `${selected.archetype.toUpperCase()}  ·  ${selected.dominantFoot.toUpperCase()} FOOT  ·  ${selected.personality.toUpperCase()}`,
         {
           fontSize: '6px',
@@ -276,15 +277,30 @@ export class LockerScene extends Phaser.Scene {
       this.contentLayer.add(playerMeta);
     }
 
+    const style = selected.gameplay
+      ? `${selected.gameplay.ability || selected.gameplay.feel}  ·  ${selected.gameplay.summary}`
+      : selected.utility
+        ? `${selected.utility.label}  ·  ${selected.utility.summary}`
+        : 'VISUAL IDENTITY  ·  NO GAMEPLAY MODIFIER';
+    const styleText = bodyText(this, 221, selected.category === 'character' ? 140 : 130, style.toUpperCase(), {
+      fontSize: '6px',
+      color: '#82d9c8',
+      wordWrap: { width: 232, useAdvancedWrap: true },
+      lineSpacing: 1,
+      letterSpacing: 0.12
+    });
+    this.contentLayer.add(styleText);
+
+    const compact = items.length > 6;
     items.forEach((item, index) => {
-      const x = 231 + index * 43;
-      this.contentLayer.add(this.makeCosmeticTile(x, 157, item, item.id === selected.id));
+      const x = compact ? 225 + index * 33 : 231 + index * 43;
+      this.contentLayer.add(this.makeCosmeticTile(x, 166, item, item.id === selected.id, compact));
     });
 
     const owned = SaveManager.ownsCosmetic(selected.id);
     const equipped = SaveManager.getEquippedCosmetic(selected.category) === selected.id;
     const gate = this.unlockGate(selected);
-    const requirement = bodyText(this, 221, 190, this.requirementText(selected, owned, gate), {
+    const requirement = bodyText(this, 221, 202, this.requirementText(selected, owned, gate), {
       fontSize: '7px',
       color: gate.available || owned ? '#f3c449' : '#d8866e',
       letterSpacing: 0.25
@@ -322,11 +338,11 @@ export class LockerScene extends Phaser.Scene {
     this.contentLayer.add(action);
   }
 
-  makeCosmeticTile(x, y, item, selected) {
+  makeCosmeticTile(x, y, item, selected, compact = false) {
     const owned = SaveManager.ownsCosmetic(item.id);
     const gate = this.unlockGate(item);
     const rarity = RARITY_COLORS[item.rarity] ?? PAL.border;
-    const button = makeButton(this, x, y, 38, 39, '', () => {
+    const button = makeButton(this, x, y, compact ? 29 : 38, compact ? 34 : 39, '', () => {
       this.selectedId = item.id;
       this.renderContent();
     }, {
@@ -334,8 +350,8 @@ export class LockerScene extends Phaser.Scene {
       hover: 0x2b4557,
       border: selected ? PAL.gold : rarity,
       selected,
-      hitWidth: 41,
-      hitHeight: 43
+      hitWidth: compact ? 31 : 41,
+      hitHeight: compact ? 37 : 43
     });
 
     let texture;
@@ -345,15 +361,15 @@ export class LockerScene extends Phaser.Scene {
     else if (item.category === 'ball') texture = item.id;
     else texture = `icon-${item.id}`;
     const preview = this.add.image(0, -2, this.textures.exists(texture) ? texture : CATEGORY_META[item.category].icon)
-      .setScale(item.category === 'character' ? 0.11 : item.category === 'ball' ? 1.15 : 1);
+      .setScale(item.category === 'character' ? 0.11 : item.category === 'ball' ? (compact ? 0.88 : 1.15) : 1);
     button.add(preview);
 
     if (owned) {
-      button.add(this.add.image(12, 12, 'icon-check').setScale(0.42));
+      button.add(this.add.image(compact ? 9 : 12, compact ? 10 : 12, 'icon-check').setScale(0.42));
     } else if (!gate.available) {
-      button.add(this.add.image(12, 12, 'icon-lock').setScale(0.44).setAlpha(0.78));
+      button.add(this.add.image(compact ? 9 : 12, compact ? 10 : 12, 'icon-lock').setScale(0.44).setAlpha(0.78));
     } else {
-      button.add(this.add.image(12, 12, 'icon-coin').setScale(0.42));
+      button.add(this.add.image(compact ? 9 : 12, compact ? 10 : 12, 'icon-coin').setScale(0.42));
     }
     return button;
   }

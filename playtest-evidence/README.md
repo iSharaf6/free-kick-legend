@@ -20,3 +20,18 @@ Captured on 30 July 2026 with the Codex in-app Chromium browser. Images are inte
 | `baseline/25-time-attack-cropped.jpg` | Local / 1920×1080 | Time Attack is affected by the same systemic framing issue |
 
 The portrait and landscape mobile captures use responsive viewport emulation, not a physical phone. Coarse-pointer behavior, browser chrome, safe areas, and touch feel therefore remain follow-up requirements.
+
+## Publish-polish pass — 2 August 2026
+
+These captures use the repository-owned Playwright Chromium runner at 1280×720.
+
+| File | What it demonstrates |
+|---|---|
+| `polish-final/locker-malik.png` | Player ability and trade-off are readable before equipping |
+| `polish-final/locker-basketball.png` | Basketball size, unlock gate, and rebound identity |
+| `polish-final/locker-golf.png` | Golf-ball scale and fast/high-curl identity |
+| `polish-final/locker-aurora.png` | Prestige trail now advertises its curl-reading utility |
+| `polish-final/aurora-flight.png` | Aurora renders the complete bend as two restrained ribbons |
+| `polish-final/gameplay-malik.png` | Ability and ball feel are present in the live HUD; corner flags use projected pitch anchors |
+| `polish-final/wall-collapse.png` | Thunderstrike drives one defender through the authored collapse sheet |
+| `polish-final/keeper-return.png` | Keeper begins the next attempt from the prior landing position instead of teleporting home |

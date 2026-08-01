@@ -1,5 +1,37 @@
 # Free Kick Legend — Release Remediation Report
 
+## Publish-polish addendum — 2 August 2026
+
+**Evidence:** [`playtest-evidence/polish-final/`](playtest-evidence/polish-final/)
+
+**Release gate:** 171 unit tests, production build, 10 Chromium journeys
+
+The loadout and motion pass is complete and the repository release gate is
+green. The browser run additionally verified a real Malik shot at 112% power,
+the `WALL FLATTENED!` result and collapse atlas, two projected corner flags,
+the Aurora twin-ribbon flight path, and a non-teleporting keeper return.
+
+- Players now have explicit techniques: balanced aim, Thunderstrike power and
+  wall knockdown, extra curl, or wind-resistant control. The live HUD and
+  Locker disclose every trade-off.
+- Basketball and golf-ball loadouts join the six football designs, with
+  deterministic gravity, drag, Magnus, rebound, rolling, size, and launch-feel
+  profiles. The collision envelope remains regulation-sized for level fairness.
+- Trails now function as flight-analysis rewards: pace spacing, power-reactive
+  blocks, bounce-path diamonds, goal reward, or a complete two-line curl trace.
+- Striker timing is compacted to an observed ~0.84 seconds, uses continuous
+  eased translation/lean across pose swaps, removes whole-body idle inflation,
+  and gives each player a different celebration cadence.
+- Keeper retries clear save state without resetting the root position; the
+  return atlas carries the keeper home during the next aiming phase.
+- Corner flags are planted by the pole pixel at the shared projected pitch
+  width instead of rotating around the texture centre.
+
+This pass still does not claim a manual human completion of every one of the 50
+career matches. It does establish that the production build, regression suite,
+real input journeys, loadout persistence, and requested live animation states
+are release-clean.
+
 **Remediation date:** 1 August 2026
 
 **Target branch:** `main`

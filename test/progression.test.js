@@ -202,7 +202,7 @@ test('daily challenge and mission rotation are deterministic and fair', () => {
   assert.deepEqual(missions, getDailyMissions('2026-07-14'));
 });
 
-test('cosmetics are unique, visual-only and include a valid starter per category', () => {
+test('cosmetics are unique, readable and include a valid starter per category', () => {
   assert.equal(new Set(COSMETICS.map((cosmetic) => cosmetic.id)).size, COSMETICS.length);
   for (const category of COSMETIC_CATEGORIES) {
     const starter = getCosmetic(STARTER_COSMETICS[category]);
@@ -213,11 +213,17 @@ test('cosmetics are unique, visual-only and include a valid starter per category
   }
 
   for (const cosmetic of COSMETICS) {
-    assert.equal(cosmetic.visualOnly, true);
     assert.equal('power' in cosmetic, false);
     assert.equal('accuracy' in cosmetic, false);
     assert.equal('multiplier' in cosmetic, false);
   }
+
+  assert.ok(getCosmeticsByCategory('kit').every((cosmetic) => cosmetic.visualOnly));
+  assert.ok(getCosmeticsByCategory('character').every((cosmetic) => cosmetic.gameplay?.ability));
+  assert.ok(getCosmeticsByCategory('ball').every((cosmetic) => cosmetic.gameplay?.physics));
+  assert.ok(getCosmeticsByCategory('trail').every((cosmetic) => cosmetic.utility?.summary));
+  assert.ok(getCosmetic('ball-basketball'));
+  assert.ok(getCosmetic('ball-golf'));
 
   const players = getCosmeticsByCategory('character');
   assert.equal(new Set(players.map((player) => player.archetype)).size, players.length);
@@ -325,7 +331,7 @@ test('career stars unlock sequentially and award clear/three-star coins only onc
   assert.equal(SaveManager.unlockedCount(LEVELS.length), 2);
 });
 
-test('coins purchase and equip cosmetics without exposing gameplay power', () => {
+test('coins purchase and equip deterministic play-style cosmetics', () => {
   SaveManager.addCoins(300);
   assert.equal(SaveManager.purchaseCosmetic('ball-ocean'), true);
   assert.equal(SaveManager.getCoins(), 120);

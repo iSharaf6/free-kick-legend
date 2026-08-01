@@ -15,7 +15,7 @@ test('a selected striker persists from the locker through menu and gameplay', as
   await page.waitForFunction(() => window.__game?.scene?.isActive('Locker'));
   await game.clickLogical(64, 51);
   await page.waitForFunction(() => window.__game.scene.getScene('Locker').category === 'character');
-  await game.clickLogical(360, 157);
+  await game.clickLogical(360, 166);
   await page.waitForFunction(() => window.__game.scene.getScene('Locker').selectedId === 'character-islam-sharaf');
   await game.clickLogical(339, 232);
   await page.waitForFunction(() => {

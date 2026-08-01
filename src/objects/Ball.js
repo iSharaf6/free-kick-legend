@@ -25,12 +25,26 @@ function windVector(value = PHYS.wind) {
   };
 }
 
+const PHYSICS_MULTIPLIERS = Object.freeze([
+  'gravity', 'drag', 'magnus', 'spinDecay', 'rollingDrag', 'bounce', 'impactFriction'
+]);
+
+function physicsProfile(value = {}) {
+  const profile = {};
+  for (const key of PHYSICS_MULTIPLIERS) {
+    profile[key] = clamp(finite(value?.[key], 1), 0.2, 2);
+  }
+  return profile;
+}
+
 // Deterministic pseudo-3D ball model. update() remains compatible with the
 // scene's variable render delta, but divides it into bounded physics steps.
 // A scene with its own fixed accumulator can call step() once per fixed tick.
 export class Ball {
   constructor(options = {}) {
     this.wind = windVector(options.wind);
+    this.windEffect = clamp(finite(options.windEffect, 1), 0, 2);
+    this.physics = physicsProfile(options.physics);
     this.goalWidth = GOAL_W;
     this.goalHeight = GOAL_H;
     const goalBounds = options.goalBounds ?? options;
@@ -73,6 +87,16 @@ export class Ball {
     this.wind = typeof value === 'object'
       ? windVector(value)
       : windVector({ x: value, y, z });
+    return this;
+  }
+
+  setWindEffect(value = 1) {
+    this.windEffect = clamp(finite(value, 1), 0, 2);
+    return this;
+  }
+
+  setPhysicsProfile(value = {}) {
+    this.physics = physicsProfile(value);
     return this;
   }
 
@@ -197,20 +221,21 @@ export class Ball {
   }
 
   _integrateAirborne(dt) {
-    const relX = this.vx - this.wind.x;
-    const relY = this.vy - this.wind.y;
-    const relZ = this.vz - this.wind.z;
+    const relX = this.vx - this.wind.x * this.windEffect;
+    const relY = this.vy - this.wind.y * this.windEffect;
+    const relZ = this.vz - this.wind.z * this.windEffect;
 
     // Sidespin is angular velocity around the vertical axis. omega x velocity
     // produces lateral curl plus a small physically-consistent forward term.
-    const magnusX = this.spin * PHYS.magnus * relZ;
-    const magnusZ = -this.spin * PHYS.magnus * relX;
+    const magnusX = this.spin * PHYS.magnus * this.physics.magnus * relZ;
+    const magnusZ = -this.spin * PHYS.magnus * this.physics.magnus * relX;
 
-    this.vx += (-PHYS.drag * relX + magnusX) * dt;
-    this.vy += (-PHYS.gravity - PHYS.drag * relY) * dt;
-    this.vz += (-PHYS.drag * relZ + magnusZ) * dt;
+    const drag = PHYS.drag * this.physics.drag;
+    this.vx += (-drag * relX + magnusX) * dt;
+    this.vy += (-PHYS.gravity * this.physics.gravity - drag * relY) * dt;
+    this.vz += (-drag * relZ + magnusZ) * dt;
 
-    const spinDamping = Math.exp(-PHYS.spinDecay * dt);
+    const spinDamping = Math.exp(-PHYS.spinDecay * this.physics.spinDecay * dt);
     this.spin *= spinDamping;
 
     if (this.inNet) {
@@ -232,11 +257,12 @@ export class Ball {
     this.y = BALL_R;
     this.vy = 0;
 
-    const dampingRate = PHYS.rollingDrag + (this.inNet ? PHYS.netDrag : 0);
+    const rollingDrag = PHYS.rollingDrag * this.physics.rollingDrag;
+    const dampingRate = rollingDrag + (this.inNet ? PHYS.netDrag : 0);
     const damping = Math.exp(-dampingRate * dt);
     this.vx *= damping;
     this.vz *= damping;
-    this.spin *= Math.exp(-(PHYS.spinDecay + PHYS.rollingDrag * 0.5) * dt);
+    this.spin *= Math.exp(-(PHYS.spinDecay * this.physics.spinDecay + rollingDrag * 0.5) * dt);
 
     this.x += this.vx * dt;
     this.z += this.vz * dt;
@@ -252,12 +278,13 @@ export class Ball {
 
   _resolveGroundContact() {
     this.y = BALL_R;
-    this.vx *= PHYS.impactFriction;
-    this.vz *= PHYS.impactFriction;
-    this.spin *= PHYS.impactFriction;
+    const impactFriction = clamp(PHYS.impactFriction * this.physics.impactFriction, 0, 1);
+    this.vx *= impactFriction;
+    this.vz *= impactFriction;
+    this.spin *= impactFriction;
 
     if (this.vy < -PHYS.groundImpactMin) {
-      this.vy *= -PHYS.bounce;
+      this.vy *= -clamp(PHYS.bounce * this.physics.bounce, 0, 0.92);
       this.grounded = false;
     } else {
       this.vy = 0;
@@ -333,7 +360,11 @@ export class Ball {
   }
 
   _predictionClone() {
-    const sim = new Ball({ wind: this.wind });
+    const sim = new Ball({
+      wind: this.wind,
+      windEffect: this.windEffect,
+      physics: this.physics
+    });
     sim.x = this.x;
     sim.y = this.y;
     sim.z = this.z;

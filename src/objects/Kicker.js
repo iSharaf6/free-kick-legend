@@ -22,18 +22,28 @@ const HD_ANCHOR = Object.freeze({ originX: 0.5, originY: 247 / 256 });
 const HD_SCALE_RATIO = 0.106;
 
 const ACTION_HOLDS = Object.freeze({
-  ready: 72,
-  windup: 118,
-  strike: 84,
-  follow: 108,
-  recover: 128,
-  watch: 142
+  // Phaser is configured to preserve every contact frame under a hitch, so
+  // these holds are intentionally compact. The eased body offsets continue
+  // across texture swaps and carry the movement; the poses are punctuation,
+  // not a six-step slideshow.
+  ready: 44,
+  windup: 78,
+  strike: 52,
+  follow: 68,
+  recover: 82,
+  watch: 92
 });
 const MOTION_TEMPO = Object.freeze({
   'character-mica': 1,
   'character-power-striker': 1.12,
   'character-agile-winger': 0.82,
   'character-islam-sharaf': 0.94
+});
+const CELEBRATION_MOTION = Object.freeze({
+  'character-mica': Object.freeze({ lift: -4.2, lunge: 0.8, duration: 230 }),
+  'character-power-striker': Object.freeze({ lift: -2.4, lunge: 1.8, duration: 260 }),
+  'character-agile-winger': Object.freeze({ lift: -6.2, lunge: 2.2, duration: 205 }),
+  'character-islam-sharaf': Object.freeze({ lift: -3.8, lunge: 1.1, duration: 235 })
 });
 const KICK_ANIMATION_KEY = 'kicker-action';
 
@@ -95,7 +105,7 @@ export class Kicker {
     // Ambient breathing and the kick sequence own separate state objects, so
     // cancelling a kick can never destroy the idle loop and vice versa.
     this.idleState = { bob: 0, swell: 0 };
-    this.actState = { lunge: 0, lift: 0, squashX: 1, squashY: 1 };
+    this.actState = { lunge: 0, lift: 0, tilt: 0, squashX: 1, squashY: 1 };
 
     const texture = this.textureFor(this.pose);
     this.isHd = texture.startsWith('kicker-hd-');
@@ -247,6 +257,7 @@ export class Kicker {
       scale * act.squashX * (1 + idle.swell),
       scale * act.squashY * (1 - idle.swell * 0.5)
     );
+    this.sprite.setRotation?.(act.tilt);
     if (this.shadow) {
       // The shadow tightens as the striker rises: it tracks lift, never bob.
       const lift = Math.max(0, -act.lift);
@@ -300,9 +311,11 @@ export class Kicker {
     if (this.destroyed || this.reducedMotion || !this.ambientEnabled || this.ambient) return this;
     this.ambient = this.scene.tweens.add({
       targets: this.idleState,
-      bob: -1.1,
-      swell: 0.012,
-      duration: 780,
+      bob: -0.48,
+      // Do not inflate the whole silhouette to fake breathing. A sub-pixel
+      // weight shift keeps the stance alive without the "AI puppet" pulse.
+      swell: 0,
+      duration: 1080,
       ease: 'Sine.easeInOut',
       yoyo: true,
       repeat: -1,
@@ -346,6 +359,7 @@ export class Kicker {
       this.scene.tweens.killTweensOf(this.actState);
       this.actState.lunge = 0;
       this.actState.lift = 0;
+      this.actState.tilt = 0;
       this.actState.squashX = 1;
       this.actState.squashY = 1;
       this.sprite?.setRotation(0).setAlpha(1);
@@ -410,6 +424,7 @@ export class Kicker {
       y: this.sprite.y,
       scaleX: this.sprite.scaleX,
       scaleY: this.sprite.scaleY,
+      rotation: this.sprite.rotation,
       flipX: this.sprite.flipX
     };
   }
@@ -429,16 +444,17 @@ export class Kicker {
       .setOrigin(anchor.originX, anchor.originY)
       .setPosition(source.x, source.y)
       .setScale(source.scaleX, source.scaleY)
+      .setRotation(source.rotation || 0)
       .setFlipX(source.flipX)
-      .setAlpha(0.3)
+      .setAlpha(0.14)
       .setDepth(this.depth)
       .setVisible(true);
     this.scene.tweens.killTweensOf(this.ghost);
     this.scene.tweens.add({
       targets: this.ghost,
       alpha: 0,
-      duration: 110,
-      ease: 'Quad.easeOut',
+      duration: 72,
+      ease: 'Cubic.easeOut',
       onComplete: () => this.ghost?.setVisible(false)
     });
   }
@@ -449,8 +465,9 @@ export class Kicker {
     this.adoptAnimatedPose('windup');
     if (!action.reducedMotion) {
       this._tweenAct({
-        lunge: -3.6,
-        lift: 0.8,
+        lunge: -3,
+        lift: 0.48,
+        tilt: -0.045,
         duration: action.timing.holds.windup,
         ease: 'Cubic.easeIn'
       }, action.token);
@@ -468,15 +485,17 @@ export class Kicker {
     action.phase = 'strike';
     if (!action.reducedMotion) this._spawnGhost(action.previousVisual);
     this.adoptAnimatedPose('strike');
-    this.actState.squashX = action.reducedMotion ? 1 : 1.1;
-    this.actState.squashY = action.reducedMotion ? 1 : 0.95;
-    this.actState.lunge = action.reducedMotion ? 0 : 0.8;
-    this.actState.lift = action.reducedMotion ? 0 : -0.4;
+    this.actState.squashX = action.reducedMotion ? 1 : 1.035;
+    this.actState.squashY = action.reducedMotion ? 1 : 0.985;
+    this.actState.lunge = action.reducedMotion ? 0 : 0.65;
+    this.actState.lift = action.reducedMotion ? 0 : -0.22;
+    this.actState.tilt = action.reducedMotion ? 0 : 0.024;
     this.applyTransform();
     if (!action.reducedMotion) {
       this._tweenAct({
-        lunge: 1.1,
+        lunge: 0.95,
         lift: 0,
+        tilt: 0.038,
         squashX: 1,
         squashY: 1,
         duration: action.timing.holds.strike,
@@ -496,8 +515,9 @@ export class Kicker {
     this.adoptAnimatedPose('follow');
     if (!action.reducedMotion) {
       this._tweenAct({
-        lunge: 2.8,
+        lunge: 2.25,
         lift: 0,
+        tilt: 0.052,
         duration: action.timing.holds.follow,
         ease: 'Cubic.easeOut'
       }, action.token);
@@ -511,8 +531,9 @@ export class Kicker {
     this.adoptAnimatedPose('recover');
     if (!action.reducedMotion) {
       this._tweenAct({
-        lunge: 1.8,
+        lunge: 1.55,
         lift: 0,
+        tilt: 0.018,
         squashX: 1,
         squashY: 1,
         duration: action.timing.holds.recover,
@@ -532,8 +553,9 @@ export class Kicker {
     this.adoptAnimatedPose('watch');
     if (!action.reducedMotion) {
       this._tweenAct({
-        lunge: 1.2,
+        lunge: 1.05,
         lift: 0,
+        tilt: 0,
         squashX: 1,
         squashY: 1,
         duration: action.timing.holds.watch,
@@ -571,8 +593,9 @@ export class Kicker {
     // Hold the watch pose after the clip has completed. GameScene changes the
     // pose only when the shot is resolved, so every striker visibly tracks the
     // ball instead of snapping back to a generic ready frame mid-flight.
-    this.actState.lunge = action.reducedMotion ? 0 : 1.2;
+    this.actState.lunge = action.reducedMotion ? 0 : 1.05;
     this.actState.lift = 0;
+    this.actState.tilt = 0;
     this.actState.squashX = 1;
     this.actState.squashY = 1;
     this.applyTransform();
@@ -604,11 +627,13 @@ export class Kicker {
     if (this.hasPlayableActionAnimation()) {
       if (!action.reducedMotion) {
         this.actState.lunge = -1.4;
+        this.actState.tilt = -0.012;
         this.applyTransform();
         action.previousVisual = this.snapshotSprite();
         this._tweenAct({
           lunge: -2.4,
           lift: 0.5,
+          tilt: -0.026,
           duration: action.timing.holds.ready,
           ease: 'Quad.easeIn'
         }, token);
@@ -645,10 +670,12 @@ export class Kicker {
 
     // Load: weight settles back and down before the strike.
     this.actState.lunge = -1.4;
+    this.actState.tilt = -0.012;
     this.applyTransform();
     this._tweenAct({
       lunge: -2.4,
       lift: 0.5,
+      tilt: -0.026,
       duration: action.timing.holds.ready,
       ease: 'Quad.easeIn'
     }, token);
@@ -713,16 +740,25 @@ export class Kicker {
       });
       return this;
     }
+    const motion = CELEBRATION_MOTION[this.characterId] ?? CELEBRATION_MOTION['character-mica'];
     this._tweenAct({
-      lift: -7,
-      duration: 180,
-      ease: 'Quad.easeOut',
+      lift: motion.lift,
+      lunge: motion.lunge,
+      squashX: this.characterId === 'character-power-striker' ? 1.045 : 1,
+      squashY: this.characterId === 'character-power-striker' ? 0.97 : 1,
+      tilt: this.characterId === 'character-agile-winger' ? 0.06 : -0.035,
+      duration: motion.duration,
+      ease: 'Cubic.easeOut',
       yoyo: true,
-      repeat: 1,
-      hold: Math.max(0, duration - 540),
+      repeat: 0,
+      hold: Math.max(0, duration - motion.duration * 2),
       onComplete: () => {
         if (token !== this.sequenceToken) return;
         this.actState.lift = 0;
+        this.actState.lunge = 0;
+        this.actState.tilt = 0;
+        this.actState.squashX = 1;
+        this.actState.squashY = 1;
         this.setPose('idle');
         this.resumeAmbient();
       }

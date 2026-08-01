@@ -19,7 +19,8 @@ function spriteStub() {
     'setPosition',
     'setScale',
     'setDepth',
-    'setRotation'
+    'setRotation',
+    'setTexture'
   ]) {
     sprite[method] = () => sprite;
   }
@@ -209,4 +210,20 @@ test('impact flash is cleared by fixed-step update without a delayed callback', 
   wall.update(0.1);
   assert.equal(wall.players[0].flashTime, 0);
   assert.equal(wall.players[0].spr.calls.clearTint, 1);
+});
+
+test('a Thunderstrike impact advances through the authored collapse sheet', () => {
+  const scene = sceneStub();
+  scene.textures.exists = (key) => key === 'defender-collapse-hd';
+  const wall = new Wall(scene, 1, 12, 0);
+  const contact = wall.contact({ x: wall.players[0].x, y: 0.5 });
+
+  wall.impact(contact, { x: 0, y: 0.5 }, { vx: 8 }, { collapse: true });
+  assert.equal(wall.players[0].collapsing, true);
+  for (let index = 0; index < 3; index++) wall.update(0.1);
+  assert.ok(wall.players[0].collapseTime >= 0.29);
+  for (let index = 0; index < 4; index++) wall.update(0.1);
+  assert.equal(wall.players[0].collapseTime, 0.62);
+  wall.reset();
+  assert.equal(wall.players[0].collapsing, false);
 });

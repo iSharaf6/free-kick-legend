@@ -1,6 +1,6 @@
 # Free Kick Legend — Night Match '98
 
-A polished, portal-ready pixel football game built with Phaser 3 and Vite. Draw a swipe to set direction, loft, power, and curl; beat an animated keeper; clear objective-driven cups; and spend earned coins on visual-only matchday customizations.
+A polished, portal-ready pixel football game built with Phaser 3 and Vite. Draw a swipe to set direction, loft, power, and curl; master four specialist strikers and eight distinct ball types; beat an animated keeper; clear objective-driven cups; and spend earned coins on matchday loadouts.
 
 **[Play Free Kick Legend in your browser](https://isharaf6.github.io/free-kick-legend/)**
 
@@ -9,11 +9,12 @@ A polished, portal-ready pixel football game built with Phaser 3 and Vite. Draw 
 - 50 authored career matches across five cups, with stable-ID progression and escalating objectives: corner-only finishes, bank shots, ring threading, limited-power strikes, blind shots, numbered zones, and combo challenges.
 - Match hazards and defensive twists including rotating wind, fog, snow, glare, slippery run-ups, crowd pressure, moving/split/double walls, deflectors, compact goals, sweeper keepers, and two-keeper finals. The wall shuffles, splits, staggers and stretches a leg out, but it never advances on the ball: under Law 13 it holds its distance until the kick is taken.
 - Fixed-step pseudo-3D ball physics at 120 Hz: full-velocity drag, Magnus curl, wind, grounded rolling, bounce, glancing post/crossbar rebounds, net damping, and frame-rate-invariant outcomes.
-- A gameplay-routed set of 28 practical goalkeeper actions: full/low/mid dives, fingertip tips, upper/low parries, low/mid catches, high claims, jump catches, front/side smothers, the spread and foot saves, secure side holds, and a centre get-up. The striker uses contact-timed run-up, strike, follow-through, recovery, and celebration animations.
+- A gameplay-routed set of 28 practical goalkeeper actions: full/low/mid dives, fingertip tips, upper/low parries, low/mid catches, high claims, jump catches, front/side smothers, the spread and foot saves, secure side holds, and a centre get-up. The striker uses a compact, eased contact-timed run-up, strike, follow-through, recovery, and character-specific celebration. Keepers recover and run home between attempts without teleporting.
 - Robust mouse/touch swipes with pointer isolation, smoothing, resampling, invalid-gesture feedback, and live power/curl presentation.
 - Score, combo, shot grades, top-corner/target bonuses, three-star mastery, first-clear rewards, and Time Attack.
 - A deterministic five-shot Daily Kick, moving bonus target, seven-day reward cycle, three rotating missions, 12 achievements, claimable coins, and replay-safe rewards.
-- A functional Locker with selectable strikers, six kits, six balls, six trails, earned coins, progression gates, and no pay-to-win upgrades.
+- A functional Locker with four readable striker techniques: Mica's balance, Malik's 112% Thunderstrike and wall knockdown, Nico's extra curl, and Islam's wind-resistant control. Six kits remain cosmetic.
+- Eight selectable ball types with deterministic flight identities, including an oversized high-bounce basketball and a small, fast, high-curl golf ball. Six progression trails now communicate pace, power, bounce, reward, or the complete curl path instead of being empty decoration.
 - Versioned saves with v1 migration, validation, settings, lifetime stats, daily streaks/claims, achievements, and CrazyGames Data fallback.
 - CrazyGames SDK v3 lifecycle, cloud-data, completion, happy-time, and natural-break ad hooks; the bridge remains safe when the SDK is disabled or unavailable.
 - True 1920×1080 Full-HD rendering over stable logical coordinates, 4× text rasterization, high-density original striker/keeper/defender sprites, a purpose-built pixel pitch whose mowing converges on the camera's own vanishing line, responsive safe areas, and layered synthesized stadium audio.
@@ -62,9 +63,10 @@ src/
 │   ├── progression.js          daily missions, streak rewards, achievements
 │   ├── keeperAssets.js          boot/deferred goalkeeper atlas manifest
 │   ├── keeperMoveset.js         complete keeper animation catalog and frame maps
-│   └── cosmetics.js            visual-only kit, ball, and trail catalog
+│   └── cosmetics.js            kits, player techniques, ball profiles, utility trails
 ├── systems/
 │   ├── SwipeInput.js           gesture capture, smoothing, shot mapping
+│   ├── LoadoutGameplay.js      deterministic player/ball trade-offs
 │   ├── LevelMechanics.js       hazards, goals, rings, walls and objective rules
 │   ├── ShotScoring.js          grades, combo and mastery scoring
 │   ├── GoalFramePhysics.js     shared post/crossbar collision and rebound geometry
@@ -104,4 +106,4 @@ The keeper, ball, defender and player HD sources are preserved in `assets/source
 
 ## Tuning
 
-Physics and shot feel are centralized in `src/config.js`. Career difficulty and objective content live in `src/data/levels.js`. Cosmetic prices and unlock gates live in `src/data/cosmetics.js`.
+Base physics and shot feel are centralized in `src/config.js`; per-ball and per-player trade-offs live in `src/data/cosmetics.js` and are composed by `src/systems/LoadoutGameplay.js`. Career difficulty and objective content live in `src/data/levels.js`. Prices and unlock gates remain in `src/data/cosmetics.js`.

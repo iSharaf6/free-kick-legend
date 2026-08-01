@@ -4,6 +4,8 @@ import { getWallPoseOffsets, normalizeWallConfig } from '../systems/LevelMechani
 const SPACING = 0.64;      // shoulder-to-shoulder without sealing the goal
 const JUMP_GRAVITY = 11;
 const IMPACT_FLASH_SECONDS = 0.095;
+const COLLAPSE_SECONDS = 0.62;
+const COLLAPSE_FRAMES = 6;
 const PLANE_TOLERANCE = 0.08;
 
 // Do not raise this to buy a wider gap underneath.
@@ -130,7 +132,8 @@ export class Wall {
     for (let i = 0; i < config.count; i++) {
       const pose = initialPoses[i] || { x: 0, z: 0, row: 0, role: 'wall', legExtension: 0 };
       const hd = Boolean(scene.textures?.exists?.('defender-hd'));
-      const spr = scene.add.sprite(0, 0, hd ? 'defender-hd' : (i % 2 ? 'defender2' : 'defender'))
+      const baseTexture = hd ? 'defender-hd' : (i % 2 ? 'defender2' : 'defender');
+      const spr = scene.add.sprite(0, 0, baseTexture)
         .setOrigin(0.5, 1)
         .setFlipX(hd && i % 2 === 1);
       const jumpSpeed = this.rng
@@ -148,9 +151,10 @@ export class Wall {
         role: pose.role,
         legExtension: pose.legExtension,
         deflectorDir: i % 2 ? -1 : 1,
-        jumpY: 0, vy: 0, jumpSpeed, spr, index: i,
+        jumpY: 0, vy: 0, jumpSpeed, spr, baseTexture, index: i,
         flinch: 0, flinchDir: 1, landSquash: 0,
         flashTime: 0,
+        collapsing: false, collapseTime: 0,
         ...build
       });
     }
@@ -283,6 +287,7 @@ export class Wall {
         }
       }
       if (p.flinch > 0) p.flinch = Math.max(0, p.flinch - dt * 2.4);
+      if (p.collapsing) p.collapseTime = Math.min(COLLAPSE_SECONDS, p.collapseTime + dt);
       if (p.landSquash > 0) p.landSquash = Math.max(0, p.landSquash - dt * 6);
       if (p.flashTime > 0) {
         p.flashTime = Math.max(0, p.flashTime - dt);
@@ -295,22 +300,29 @@ export class Wall {
     for (const p of this.players) {
       const pos = project(p.x, p.jumpY, p.z);
       p.spr.setPosition(pos.x, pos.y);
+      if (p.collapsing && this.scene.textures?.exists?.('defender-collapse-hd')) {
+        const progress = Math.min(p.collapseTime / COLLAPSE_SECONDS, 0.9999);
+        p.spr.setTexture('defender-collapse-hd', Math.min(COLLAPSE_FRAMES - 1, Math.floor(progress * COLLAPSE_FRAMES)));
+      }
       const textureH = p.spr.texture?.source?.[0]?.height || 28;
       const baseScale = (pos.s * p.height) / textureH;
       // Impact flinch tips the hit defender from the boots; a faint idle sway
       // keeps the line alive while they wait on the whistle.
-      const sway = p.jumpY > 0 ? 0 : Math.sin(this.clock * 1.5 + p.index * 0.9) * 0.012;
-      const lean = p.flinchDir * p.flinch * 0.32;
+      const sway = p.collapsing || p.jumpY > 0 ? 0 : Math.sin(this.clock * 1.5 + p.index * 0.9) * 0.012;
+      const lean = p.collapsing ? 0 : p.flinchDir * p.flinch * 0.32;
       const deflectLean = p.deflectorDir * p.legExtension * 0.13;
       p.spr.setRotation?.(sway + lean - deflectLean);
       // Smear the jump: elongate with upward velocity, squash on touchdown.
       // Frozen frames look stretched; in motion they read as explosive hops.
       const rise = p.jumpY > 0 ? Math.min(Math.max(p.vy, 0) * 0.05, 0.16) : 0;
       const squash = (p.landSquash || 0) * 0.16;
-      p.spr.setScale(
-        baseScale * (1 - rise * 0.55 + squash * 0.7 + p.legExtension * 0.08),
-        baseScale * (1 + rise - squash) * (1 - p.flinch * 0.07)
-      );
+      if (p.collapsing) p.spr.setScale(baseScale);
+      else {
+        p.spr.setScale(
+          baseScale * (1 - rise * 0.55 + squash * 0.7 + p.legExtension * 0.08),
+          baseScale * (1 + rise - squash) * (1 - p.flinch * 0.07)
+        );
+      }
       p.spr.setDepth(1000 - p.z * 10);
     }
   }
@@ -408,7 +420,7 @@ export class Wall {
     return Boolean(this.contact(pt, planeZ));
   }
 
-  impact(contact, pt, ball) {
+  impact(contact, pt, ball, options = {}) {
     const p = contact?.player || this.players[contact?.index];
     if (!p) return false;
     p.flinch = 1;
@@ -417,6 +429,12 @@ export class Wall {
     if (p.jumpY > 0) p.vy = Math.min(p.vy, 0.4);
     p.spr.setTint?.(0xfff3c4);
     p.flashTime = IMPACT_FLASH_SECONDS;
+    if (options.collapse && this.scene.textures?.exists?.('defender-collapse-hd')) {
+      p.collapsing = true;
+      p.collapseTime = 0;
+      p.jumpY = 0;
+      p.vy = 0;
+    }
     return true;
   }
 
@@ -436,6 +454,9 @@ export class Wall {
       player.flinchDir = 1;
       player.landSquash = 0;
       player.flashTime = 0;
+      player.collapsing = false;
+      player.collapseTime = 0;
+      player.spr?.setTexture?.(player.baseTexture);
       player.spr?.clearTint?.();
       player.spr?.setRotation?.(0);
     }

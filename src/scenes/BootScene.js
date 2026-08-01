@@ -54,6 +54,10 @@ export class BootScene extends Phaser.Scene {
     });
     queueKeeperSheets(this, { initial: true });
     this.load.image('defender-hd', `${base}assets/hd/defender-hd.png`);
+    this.load.spritesheet('defender-collapse-hd', `${base}assets/hd/defender-collapse-sheet-hd.png`, {
+      frameWidth: 256,
+      frameHeight: 256
+    });
     this.load.spritesheet('security-guards-hd', `${base}assets/hd/security-guards-sheet-hd.png`, {
       frameWidth: 88,
       frameHeight: 204
@@ -156,7 +160,12 @@ export class BootScene extends Phaser.Scene {
     });
 
     getCosmeticsByCategory('ball').forEach((cosmetic) => {
-      textureFromMap(this, cosmetic.id, MAPS.ball, {
+      const map = cosmetic.id === 'ball-basketball'
+        ? MAPS.ballBasketball
+        : cosmetic.id === 'ball-golf'
+          ? MAPS.ballGolf
+          : MAPS.ball;
+      textureFromMap(this, cosmetic.id, map, {
         W: cosmetic.palette.base,
         K: cosmetic.palette.panels,
         G: cosmetic.palette.accent

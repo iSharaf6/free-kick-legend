@@ -1457,6 +1457,28 @@ export class Goalkeeper {
     return this;
   }
 
+  // Start the next attempt without teleporting across the goalmouth. All save
+  // state is cleared immediately, then the dedicated return atlas carries the
+  // keeper back to his mark while the player is already allowed to aim.
+  resetForNextAttempt() {
+    if (this.destroyed) return this;
+    const previousX = Number.isFinite(this.x) ? this.x : this.homeX;
+    this.reset();
+    if (Math.abs(previousX - this.homeX) < 0.08 || this.reducedMotion) return this;
+    this.x = previousX;
+    this.diveStartX = previousX;
+    this.contactRootX = previousX;
+    this.landingRootX = previousX;
+    this.state = 'return';
+    this.pose = 'recovery';
+    this.stateT = 0;
+    this.footworkDistance = 0;
+    this.returnDirection = Math.sign(this.homeX - previousX);
+    this.moveVx = 0;
+    this.draw();
+    return this;
+  }
+
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;

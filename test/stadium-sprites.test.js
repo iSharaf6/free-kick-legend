@@ -27,6 +27,14 @@ test('CALYNX board mark keeps its compact pixel-sprite dimensions', () => {
   assert.deepEqual(dimensions, { width: 66, height: 20 });
 });
 
+test('defender collapse atlas contains six equal production frames', () => {
+  const dimensions = pngDimensions(new URL(
+    '../public/assets/hd/defender-collapse-sheet-hd.png',
+    import.meta.url
+  ));
+  assert.deepEqual(dimensions, { width: 256 * 6, height: 256 });
+});
+
 test('every authored selectable player ships a complete fixed-canvas striker pose set', () => {
   const kits = ['home', 'crimson', 'emerald', 'sunrise', 'monochrome', 'royal'];
   const players = ['mica', 'power-striker', 'agile-winger', 'islam-sharaf'];

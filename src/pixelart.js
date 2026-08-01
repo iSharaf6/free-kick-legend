@@ -99,6 +99,36 @@ export const MAPS = {
     '....WGGG....'
   ],
 
+  ballBasketball: [
+    '....WWWW....',
+    '..WWWWWWWW..',
+    '.WWWKWWKWWW.',
+    '.WWWKWWKWWW.',
+    'WWWKWWKWWWWW',
+    'KKKKKKKKKKKK',
+    'WWWKWWKWWWWW',
+    'WWWKWWKWWWWG',
+    '.WWKWWWWKWG.',
+    '.WWKWWWWKGG.',
+    '..WWWWWWGG..',
+    '....WGGG....'
+  ],
+
+  ballGolf: [
+    '....WWWW....',
+    '..WWGWWGWW..',
+    '.WGWWGWWGWG.',
+    '.WWWGWWGWWW.',
+    'WGWWGWWGWWWW',
+    'WWWGWWGWWWGW',
+    'GWWGWWGWWWWW',
+    'WWGWWGWWGWGG',
+    '.WWWGWWGWWG.',
+    '.WGWWGWWWGG.',
+    '..WWGWWGGG..',
+    '....WGGG....'
+  ],
+
   // Existing gameplay silhouettes retain their original dimensions so the
   // pseudo-3D scale maths in Wall and Goalkeeper remains compatible.
   defender: [

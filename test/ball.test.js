@@ -102,6 +102,37 @@ test('wind and sidespin affect the complete velocity vector deterministically', 
   close(rightSpin.x, -leftSpin.x, 1e-10);
 });
 
+test('equipped ball profiles change curve, hang time and rebound deterministically', () => {
+  const basketball = new Ball({ physics: {
+    gravity: 0.94, drag: 1.08, magnus: 0.84, bounce: 1.45, rollingDrag: 0.82
+  } });
+  const golf = new Ball({ physics: {
+    gravity: 1.06, drag: 0.76, magnus: 1.45, bounce: 0.66, spinDecay: 0.78
+  } });
+  basketball.kick(0, 7, 25, 0.9);
+  golf.kick(0, 7, 25, 0.9);
+  for (let index = 0; index < 30; index++) {
+    basketball.step(PHYS.fixedStep);
+    golf.step(PHYS.fixedStep);
+  }
+
+  assert.ok(basketball.y > golf.y, 'the basketball hangs longer');
+  assert.ok(Math.abs(golf.x) > Math.abs(basketball.x), 'the golf ball bends harder');
+
+  const basketballDrop = new Ball({ physics: { bounce: 1.45 } });
+  const golfDrop = new Ball({ physics: { bounce: 0.66 } });
+  for (const ball of [basketballDrop, golfDrop]) {
+    ball.y = 1;
+    ball.grounded = false;
+    ball.kick(0, -4, 4, 0);
+  }
+  for (let index = 0; index < 90 && (basketballDrop.vy <= 0 || golfDrop.vy <= 0); index++) {
+    basketballDrop.step(PHYS.fixedStep);
+    golfDrop.step(PHYS.fixedStep);
+  }
+  assert.ok(basketballDrop.vy > golfDrop.vy, 'the basketball rebounds more strongly');
+});
+
 test('enterNet damps the shot and resolves the back net', () => {
   const ball = new Ball();
   const backZ = CAM.ballDist + 2;
