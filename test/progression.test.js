@@ -208,7 +208,8 @@ test('cosmetics are unique, visual-only and include a valid starter per category
     const starter = getCosmetic(STARTER_COSMETICS[category]);
     assert.equal(starter.category, category);
     assert.equal(starter.price, 0);
-    assert.ok(getCosmeticsByCategory(category).length >= 5);
+    const minimum = category === 'character' ? 2 : 5;
+    assert.ok(getCosmeticsByCategory(category).length >= minimum);
   }
 
   for (const cosmetic of COSMETICS) {
@@ -259,6 +260,10 @@ test('save validation clamps corrupt values and restores safe cosmetics/settings
   assert.equal(SaveManager.getBestDaily('2026-07-12'), 44);
   assert.equal(SaveManager.getCoins(), 0);
   assert.deepEqual(SaveManager.getOwnedCosmetics('kit'), ['kit-home', 'kit-crimson']);
+  assert.deepEqual(
+    SaveManager.getOwnedCosmetics('character'),
+    ['character-mica', 'character-islam-sharaf']
+  );
   assert.equal(SaveManager.getEquippedCosmetic('kit'), 'kit-home');
   assert.equal(SaveManager.getEquippedCosmetic('trail'), 'trail-ember');
   assert.equal(SaveManager.getSettings().musicVolume, 1);

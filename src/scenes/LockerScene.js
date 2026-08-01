@@ -8,13 +8,14 @@ import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
 import { MenuMusic } from '../systems/MenuMusic.js';
 import {
-  COSMETIC_CATEGORIES, getCosmetic, getCosmeticsByCategory
+  COSMETIC_CATEGORIES, getCosmetic, getCosmeticsByCategory, kickerHdTextureKey
 } from '../data/cosmetics.js';
 import { CUPS } from '../data/levels.js';
 import { PAL } from '../pixelart.js';
 import { Kicker } from '../objects/Kicker.js';
 
 const CATEGORY_META = {
+  character: { label: 'PLAYERS', icon: 'kicker-hd-kit-home-idle', color: 0x237064 },
   kit: { label: 'KITS', icon: 'icon-kit', color: PAL.blue },
   ball: { label: 'BALLS', icon: 'ball-classic', color: PAL.orange },
   trail: { label: 'TRAILS', icon: 'icon-trail', color: 0x67549a }
@@ -129,11 +130,11 @@ export class LockerScene extends Phaser.Scene {
       this.tabLayer.destroy();
     }
     this.tabLayer = this.add.container(0, 0).setDepth(120);
-    const xs = [142, 240, 338];
+    const xs = [64, 181, 299, 416];
     COSMETIC_CATEGORIES.forEach((category, index) => {
       const meta = CATEGORY_META[category];
       const selected = category === this.category;
-      const button = makeButton(this, xs[index], 51, 88, 29, meta.label, () => {
+      const button = makeButton(this, xs[index], 51, 100, 29, meta.label, () => {
         this.category = category;
         this.selectedId = SaveManager.getEquippedCosmetic(category)
           || getCosmeticsByCategory(category)[0]?.id;
@@ -145,9 +146,9 @@ export class LockerScene extends Phaser.Scene {
         selected,
         border: selected ? PAL.gold : PAL.borderDark,
         icon: meta.icon,
-        iconScale: category === 'ball' ? 0.65 : 0.72,
+        iconScale: category === 'character' ? 0.075 : category === 'ball' ? 0.65 : 0.72,
         iconX: 14,
-        fontSize: '9px',
+        fontSize: category === 'character' ? '8px' : '9px',
         letterSpacing: 0.45,
         hitHeight: 32
       });
@@ -183,11 +184,15 @@ export class LockerScene extends Phaser.Scene {
   }
 
   renderPreview(selected) {
+    const equippedCharacter = this.category === 'character'
+      ? selected.id
+      : SaveManager.getEquippedCosmetic('character');
     const equippedKit = this.category === 'kit'
       ? selected.id
       : SaveManager.getEquippedCosmetic('kit');
     this.kicker = new Kicker(this, 91, 222, {
       kitId: equippedKit,
+      characterId: equippedCharacter,
       scale: 4.05,
       depth: 133
     });
@@ -319,11 +324,13 @@ export class LockerScene extends Phaser.Scene {
     });
 
     let texture;
-    if (item.category === 'kit') texture = `icon-${item.id}`;
+    if (item.category === 'character') {
+      texture = kickerHdTextureKey(item.id, 'kit-home', 'idle');
+    } else if (item.category === 'kit') texture = `icon-${item.id}`;
     else if (item.category === 'ball') texture = item.id;
     else texture = `icon-${item.id}`;
     const preview = this.add.image(0, -2, this.textures.exists(texture) ? texture : CATEGORY_META[item.category].icon)
-      .setScale(item.category === 'ball' ? 1.15 : 1);
+      .setScale(item.category === 'character' ? 0.11 : item.category === 'ball' ? 1.15 : 1);
     button.add(preview);
 
     if (owned) {

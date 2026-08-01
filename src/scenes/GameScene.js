@@ -382,6 +382,7 @@ export class GameScene extends Phaser.Scene {
     this.ball.setWind(this.currentWind);
     const savedLoadout = SaveManager.getEquippedCosmetics?.() || SaveManager.load?.().equipped || {};
     this.loadout = {
+      character: savedLoadout.character || 'character-mica',
       kit: savedLoadout.kit || 'kit-home',
       ball: savedLoadout.ball || 'ball-classic',
       trail: savedLoadout.trail || 'trail-none'
@@ -425,6 +426,7 @@ export class GameScene extends Phaser.Scene {
     const ballScale = project(this.ball.x, 0, this.ball.z).s;
     this.kicker = new Kicker(this, stance.x, stance.y, {
       kitId: this.loadout.kit,
+      characterId: this.loadout.character,
       pose: 'idle',
       scale: 2.37 * (stance.s / ballScale),
       depth: 1260,

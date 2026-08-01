@@ -91,7 +91,9 @@ function animatedSpriteStub(x, y, key) {
 function sceneStub({ animated = false } = {}) {
   const scene = {
     textures: {
-      exists: (key) => key === 'shadow' || key.startsWith('kicker-hd-kit-home-')
+      exists: (key) => key === 'shadow'
+        || key.startsWith('kicker-hd-kit-home-')
+        || key.startsWith('kicker-hd-character-islam-sharaf-kit-home-')
     },
     add: { image: (x, y, key) => imageStub(x, y, key) },
     time: { delayedCall: () => ({ remove() {} }) },
@@ -190,6 +192,26 @@ test('all poses share one ground baseline', () => {
     kicker.setPose(pose);
     // originY pins the authored content baseline, so the boots land on
     // kicker.y for every pose regardless of canvas padding.
+    assert.equal(kicker.sprite.originY, 247 / 256);
+    assert.equal(kicker.sprite.y, 200);
+  }
+});
+
+test('a selectable character keeps one shared centre and foot anchor across its pose set', () => {
+  const kicker = new Kicker(withTweenManager(sceneStub()), 120, 200, {
+    characterId: 'character-islam-sharaf',
+    kitId: 'kit-home',
+    scale: 4.8,
+    ambient: false
+  });
+
+  for (const pose of Object.keys(POSE_WIDTH)) {
+    kicker.setPose(pose);
+    assert.equal(
+      kicker.sprite.texture.key,
+      `kicker-hd-character-islam-sharaf-kit-home-${pose}`
+    );
+    assert.equal(kicker.sprite.originX, 0.5);
     assert.equal(kicker.sprite.originY, 247 / 256);
     assert.equal(kicker.sprite.y, 200);
   }

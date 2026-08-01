@@ -1,3 +1,5 @@
+import { STARTER_COSMETICS, getCosmetic, kickerHdTextureKey } from '../data/cosmetics.js';
+
 // Presentation striker shared by the menu, locker and match scenes.
 //
 // Registration is the whole story here. The authored HD poses are all 256px
@@ -28,6 +30,7 @@ const HD_POSE_ANCHOR = Object.freeze({
   celebrate: Object.freeze({ originX: 70.5 / 144, originY: 247 / 256 })
 });
 const FALLBACK_ANCHOR = Object.freeze({ originX: 0.5, originY: 1 });
+const SELECTABLE_CHARACTER_ANCHOR = Object.freeze({ originX: 0.5, originY: 247 / 256 });
 
 // Source pixels per rendered logical pixel for the 256px-tall HD art.
 const HD_SCALE_RATIO = 0.106;
@@ -41,8 +44,9 @@ const KICK_TIMELINE = Object.freeze({
 });
 const KICK_ANIMATION_KEY = 'kicker-action';
 
-function anchorFor(pose, isHd) {
+function anchorFor(pose, isHd, characterId) {
   if (!isHd) return FALLBACK_ANCHOR;
+  if (characterId !== STARTER_COSMETICS.character) return SELECTABLE_CHARACTER_ANCHOR;
   return HD_POSE_ANCHOR[pose] || HD_POSE_ANCHOR.idle;
 }
 
@@ -51,12 +55,19 @@ function poseFromTexture(textureKey) {
   return POSE_SEQUENCE.find((pose) => key.endsWith(`-${pose}`)) || null;
 }
 
+function characterIdOrDefault(characterId) {
+  return getCosmetic(characterId)?.category === 'character'
+    ? characterId
+    : STARTER_COSMETICS.character;
+}
+
 export class Kicker {
   constructor(scene, x, y, opts = {}) {
     this.scene = scene;
     this.x = x;
     this.y = y;
     this.kitId = opts.kitId || 'kit-home';
+    this.characterId = characterIdOrDefault(opts.characterId);
     this.pose = opts.pose || 'idle';
     this.scale = opts.scale ?? 3.6;
     this.reducedMotion = Boolean(opts.reducedMotion);
@@ -67,6 +78,7 @@ export class Kicker {
     this.sequenceTimers = [];
     this.activeKick = null;
     this.actionClipKit = null;
+    this.actionClipCharacter = null;
     this.animationListenersBound = false;
 
     // Ambient breathing and the kick sequence own separate state objects, so
@@ -108,7 +120,7 @@ export class Kicker {
   // ------------------------------------------------------------- appearance
 
   textureFor(pose) {
-    const hd = `kicker-hd-${this.kitId}-${pose}`;
+    const hd = kickerHdTextureKey(this.characterId, this.kitId, pose);
     if (this.scene.textures.exists(hd)) return hd;
     const keyed = `kicker-${this.kitId}-${pose}`;
     if (this.scene.textures.exists(keyed)) return keyed;
@@ -123,7 +135,7 @@ export class Kicker {
     const texture = this.textureFor(this.pose);
     this.isHd = texture.startsWith('kicker-hd-');
     this.visualScale = this.scale * (this.isHd ? HD_SCALE_RATIO : 1);
-    const anchor = anchorFor(this.pose, this.isHd);
+    const anchor = anchorFor(this.pose, this.isHd, this.characterId);
     // Order matters: origin before position, so the new anchor is honoured by
     // the transform written on the very same frame the texture changes.
     this.sprite.setTexture(texture);
@@ -138,7 +150,7 @@ export class Kicker {
     const texture = this.sprite.texture?.key || this.textureFor(this.pose);
     this.isHd = texture.startsWith('kicker-hd-');
     this.visualScale = this.scale * (this.isHd ? HD_SCALE_RATIO : 1);
-    const anchor = anchorFor(this.pose, this.isHd);
+    const anchor = anchorFor(this.pose, this.isHd, this.characterId);
     this.sprite.setOrigin(anchor.originX, anchor.originY);
     this.applyTransform();
     return this;
@@ -178,6 +190,7 @@ export class Kicker {
     if (!clip && !anims.exists?.(KICK_ANIMATION_KEY)) return false;
 
     this.actionClipKit = this.kitId;
+    this.actionClipCharacter = this.characterId;
     if (!this.animationListenersBound) {
       this.onAnimationUpdate = (animation, frame) => {
         if (animation?.key !== KICK_ANIMATION_KEY) return;
@@ -195,9 +208,12 @@ export class Kicker {
   }
 
   hasPlayableActionAnimation() {
-    if (this.actionClipKit !== this.kitId) this.setupActionAnimation();
+    if (this.actionClipKit !== this.kitId || this.actionClipCharacter !== this.characterId) {
+      this.setupActionAnimation();
+    }
     return Boolean(
       this.actionClipKit === this.kitId &&
+      this.actionClipCharacter === this.characterId &&
       this.sprite?.anims?.exists?.(KICK_ANIMATION_KEY) &&
       (this.sprite?.play || this.sprite?.anims?.play)
     );
@@ -228,6 +244,13 @@ export class Kicker {
 
   setKit(kitId) {
     this.kitId = kitId || 'kit-home';
+    this.applyPoseTexture();
+    this.setupActionAnimation();
+    return this;
+  }
+
+  setCharacter(characterId) {
+    this.characterId = characterIdOrDefault(characterId);
     this.applyPoseTexture();
     this.setupActionAnimation();
     return this;
@@ -380,7 +403,7 @@ export class Kicker {
     if (!source?.texture) return;
     const anchor = snapshot
       ? { originX: source.originX, originY: source.originY }
-      : anchorFor(this.pose, this.isHd);
+      : anchorFor(this.pose, this.isHd, this.characterId);
     if (!this.ghost || !this.ghost.scene) {
       this.ghost = this.scene.add.image(0, 0, source.texture);
     }

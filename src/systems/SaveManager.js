@@ -2,7 +2,8 @@ import { LEVELS } from '../data/levels.js';
 import {
   COSMETIC_CATEGORIES,
   STARTER_COSMETICS,
-  getCosmetic
+  getCosmetic,
+  getCosmeticsByCategory
 } from '../data/cosmetics.js';
 import {
   ACHIEVEMENTS,
@@ -170,6 +171,11 @@ function normalizedOwned(rawOwned) {
     const valid = (id) => getCosmetic(id)?.category === category;
     owned[category] = uniqueStrings(rawOwned?.[category], valid, 100);
     if (!owned[category].includes(starterId)) owned[category].unshift(starterId);
+    for (const cosmetic of getCosmeticsByCategory(category)) {
+      if (cosmetic.price === 0 && cosmetic.unlock?.type === 'starter' && !owned[category].includes(cosmetic.id)) {
+        owned[category].push(cosmetic.id);
+      }
+    }
   }
   return owned;
 }

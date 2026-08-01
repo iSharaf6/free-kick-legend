@@ -13,7 +13,7 @@ A polished, portal-ready pixel football game built with Phaser 3 and Vite. Draw 
 - Robust mouse/touch swipes with pointer isolation, smoothing, resampling, invalid-gesture feedback, and live power/curl presentation.
 - Score, combo, shot grades, top-corner/target bonuses, three-star mastery, first-clear rewards, and Time Attack.
 - A deterministic five-shot Daily Kick, moving bonus target, seven-day reward cycle, three rotating missions, 12 achievements, claimable coins, and replay-safe rewards.
-- A functional Locker with six kits, six balls, six trails, earned coins, progression gates, and no pay-to-win upgrades.
+- A functional Locker with selectable strikers, six kits, six balls, six trails, earned coins, progression gates, and no pay-to-win upgrades.
 - Versioned saves with v1 migration, validation, settings, lifetime stats, daily streaks/claims, achievements, and CrazyGames Data fallback.
 - CrazyGames SDK v3 lifecycle, cloud-data, completion, happy-time, and natural-break ad hooks; the bridge remains safe when the SDK is disabled or unavailable.
 - True 1920×1080 Full-HD rendering over stable logical coordinates, 4× text rasterization, high-density original striker/keeper/defender sprites, a purpose-built pixel pitch whose mowing converges on the camera's own vanishing line, responsive safe areas, and layered synthesized stadium audio.
@@ -100,7 +100,7 @@ For other portals, the bridge falls back to local storage and no-op lifecycle/ad
 
 Useful official references: [SDK setup](https://docs.crazygames.com/sdk/intro/), [game lifecycle](https://docs.crazygames.com/sdk/game/), [data storage](https://docs.crazygames.com/sdk/data/), and [advertisement requirements](https://docs.crazygames.com/requirements/ads/).
 
-The keeper, kicker, ball, and defender HD sources are preserved in `assets/source/`; their optimized transparent runtime frames live in `public/assets/hd/` and can be rebuilt with `scripts/build_hd_sprites.py`. The checked-in pitch and crowd panorama are separate generated release assets and are not rebuilt by that script. The practical save generation and packing contract is documented in `assets/source/KEEPER-PRACTICAL-SAVES-V2-PROMPT.md`; the wider situational/distribution/reaction source contract remains in `assets/source/KEEPER-COMPLETE-MOVESET-V1-PROMPT.md`.
+The keeper, original kicker, ball, and defender HD sources are preserved in `assets/source/`; their optimized transparent runtime frames live in `public/assets/hd/` and can be rebuilt with `scripts/build_hd_sprites.py`. Islam Sharaf's selectable striker set has its own reproducible pipeline in `scripts/build_striker_sprites.py`. The checked-in pitch and crowd panorama are separate generated release assets and are not rebuilt by those scripts. The practical save generation and packing contract is documented in `assets/source/KEEPER-PRACTICAL-SAVES-V2-PROMPT.md`; the wider situational/distribution/reaction source contract remains in `assets/source/KEEPER-COMPLETE-MOVESET-V1-PROMPT.md`.
 
 ## Tuning
 

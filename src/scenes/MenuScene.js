@@ -13,6 +13,7 @@ import { PAL } from '../pixelart.js';
 import { Kicker } from '../objects/Kicker.js';
 import { utcDateKey } from '../data/progression.js';
 import { addAnimatedCrowdPanorama } from '../art/CrowdPanorama.js';
+import { getCosmetic } from '../data/cosmetics.js';
 
 function levelId(level, index) {
   return level?.id ?? index;
@@ -50,6 +51,7 @@ export class MenuScene extends Phaser.Scene {
     const lastPlayed = SaveManager.getLastPlayed?.();
     const continueIndex = this.resolveContinueIndex(lastPlayed, unlocked);
     const equippedKit = SaveManager.getEquippedCosmetic?.('kit') ?? 'kit-home';
+    const equippedCharacter = SaveManager.getEquippedCosmetic?.('character') ?? 'character-mica';
     const today = utcDateKey();
     const daily = SaveManager.ensureDaily(today);
     const readyClaims = [
@@ -58,7 +60,7 @@ export class MenuScene extends Phaser.Scene {
     ].filter((state) => state.completed && !state.claimed).length;
 
     this.makeHeader(totalStars, coins, muted, readyClaims);
-    this.makeHero(equippedKit, totalStars);
+    this.makeHero(equippedKit, equippedCharacter, totalStars);
     this.makeLogo();
     this.makeActions(continueIndex, daily, today);
 
@@ -172,14 +174,15 @@ export class MenuScene extends Phaser.Scene {
     this.soundButton.buttonIcon?.setTexture(muted ? 'icon-mute' : 'icon-sound');
   }
 
-  makeHero(equippedKit, totalStars) {
+  makeHero(equippedKit, equippedCharacter, totalStars) {
     const plate = this.add.graphics().setDepth(150);
     drawPanel(plate, 17, 206, 180, 44, {
       fill: PAL.panel,
       border: PAL.goldDark,
       corner: PAL.gold
     });
-    bodyText(this, 27, 218, 'MICA VALE  ·  #17', {
+    const player = getCosmetic(equippedCharacter) || getCosmetic('character-mica');
+    bodyText(this, 27, 218, `${player.name.toUpperCase()}  ·  #${player.number}`, {
       fontFamily: FONT,
       fontSize: '9px',
       color: '#f3e7c3'
@@ -204,6 +207,7 @@ export class MenuScene extends Phaser.Scene {
     // believable to fall.
     this.kicker = new Kicker(this, 104, 202, {
       kitId: equippedKit,
+      characterId: equippedCharacter,
       scale: 4.4,
       depth: 130
     });

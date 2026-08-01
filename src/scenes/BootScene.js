@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { GAME_W, GAME_H, STADIUM_Y } from '../config.js';
 import { textureFromMap, MAPS, PAL } from '../pixelart.js';
-import { getCosmeticsByCategory } from '../data/cosmetics.js';
+import { getCosmeticsByCategory, kickerHdTextureKey } from '../data/cosmetics.js';
 import { PlatformService } from '../systems/PlatformService.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
@@ -44,9 +44,12 @@ export class BootScene extends Phaser.Scene {
     const base = import.meta.env.BASE_URL;
     this.load.image('pitch-grass-pixel-v3', `${base}assets/hd/pitch-grass-pixel-v3.png`);
     this.load.image(CROWD_PANORAMA.textureKey, `${base}${CROWD_PANORAMA.assetPath}`);
-    getCosmeticsByCategory('kit').forEach((kit) => {
-      HD_KICKER_POSES.forEach((pose) => {
-        this.load.image(`kicker-hd-${kit.id}-${pose}`, `${base}assets/hd/kicker-hd-${kit.id}-${pose}.png`);
+    getCosmeticsByCategory('character').forEach((character) => {
+      getCosmeticsByCategory('kit').forEach((kit) => {
+        HD_KICKER_POSES.forEach((pose) => {
+          const key = kickerHdTextureKey(character.id, kit.id, pose);
+          this.load.image(key, `${base}assets/hd/${key}.png`);
+        });
       });
     });
     queueKeeperSheets(this, { initial: true });

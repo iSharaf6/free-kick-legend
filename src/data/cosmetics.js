@@ -1,9 +1,10 @@
 // Every item in this catalog is visual-only. Prices use coins earned through
 // play; no item changes shot power, accuracy, physics or goalkeeper behaviour.
 
-export const COSMETIC_CATEGORIES = Object.freeze(['kit', 'ball', 'trail']);
+export const COSMETIC_CATEGORIES = Object.freeze(['character', 'kit', 'ball', 'trail']);
 
 export const STARTER_COSMETICS = Object.freeze({
+  character: 'character-mica',
   kit: 'kit-home',
   ball: 'ball-classic',
   trail: 'trail-none'
@@ -23,6 +24,18 @@ function item(definition) {
 }
 
 export const COSMETICS = Object.freeze([
+  // -------------------------------------------------------------- characters
+  item({
+    id: 'character-mica', category: 'character', name: 'Mica Vale',
+    description: 'The original number 17 and free-kick specialist.',
+    number: 17, price: 0, rarity: 'common', unlock: { type: 'starter', value: 0 }
+  }),
+  item({
+    id: 'character-islam-sharaf', category: 'character', name: 'Islam Sharaf',
+    description: 'A powerful number 10 with a sharp, compact striking style.',
+    number: 10, price: 0, rarity: 'legendary', unlock: { type: 'starter', value: 0 }
+  }),
+
   // -------------------------------------------------------------------- kits
   item({
     id: 'kit-home', category: 'kit', name: 'Legend Home', description: 'Navy, gold and stadium white.',
@@ -129,4 +142,14 @@ export function getCosmetic(id) {
 export function getCosmeticsByCategory(category) {
   if (!COSMETIC_CATEGORIES.includes(category)) return [];
   return COSMETICS.filter((cosmetic) => cosmetic.category === category);
+}
+
+export function kickerHdTextureKey(characterId, kitId, pose) {
+  const safeCharacter = getCosmetic(characterId)?.category === 'character'
+    ? characterId
+    : STARTER_COSMETICS.character;
+  const safeKit = getCosmetic(kitId)?.category === 'kit' ? kitId : STARTER_COSMETICS.kit;
+  return safeCharacter === STARTER_COSMETICS.character
+    ? `kicker-hd-${safeKit}-${pose}`
+    : `kicker-hd-${safeCharacter}-${safeKit}-${pose}`;
 }
