@@ -261,6 +261,21 @@ export class LockerScene extends Phaser.Scene {
     });
     this.contentLayer.add([name, rarityText, description]);
 
+    if (selected.category === 'character') {
+      const playerMeta = bodyText(
+        this,
+        221,
+        130,
+        `${selected.archetype.toUpperCase()}  ·  ${selected.dominantFoot.toUpperCase()} FOOT  ·  ${selected.personality.toUpperCase()}`,
+        {
+          fontSize: '6px',
+          color: '#f3c449',
+          letterSpacing: 0.22
+        }
+      );
+      this.contentLayer.add(playerMeta);
+    }
+
     items.forEach((item, index) => {
       const x = 231 + index * 43;
       this.contentLayer.add(this.makeCosmeticTile(x, 157, item, item.id === selected.id));

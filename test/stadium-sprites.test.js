@@ -27,15 +27,18 @@ test('CALYNX board mark keeps its compact pixel-sprite dimensions', () => {
   assert.deepEqual(dimensions, { width: 66, height: 20 });
 });
 
-test('Islam Sharaf ships a complete fixed-canvas striker pose set', () => {
+test('every authored selectable player ships a complete fixed-canvas striker pose set', () => {
   const kits = ['home', 'crimson', 'emerald', 'sunrise', 'monochrome', 'royal'];
-  for (const kit of kits) {
-    for (const pose of ['idle', 'ready', 'strike', 'follow', 'celebrate']) {
-      const dimensions = pngDimensions(new URL(
-        `../public/assets/hd/kicker-hd-character-islam-sharaf-kit-${kit}-${pose}.png`,
-        import.meta.url
-      ));
-      assert.deepEqual(dimensions, { width: 256, height: 256 });
+  const players = ['power-striker', 'agile-winger', 'islam-sharaf'];
+  for (const player of players) {
+    for (const kit of kits) {
+      for (const pose of ['idle', 'ready', 'strike', 'follow', 'celebrate']) {
+        const dimensions = pngDimensions(new URL(
+          `../public/assets/hd/kicker-hd-character-${player}-kit-${kit}-${pose}.png`,
+          import.meta.url
+        ));
+        assert.deepEqual(dimensions, { width: 256, height: 256 });
+      }
     }
   }
 });

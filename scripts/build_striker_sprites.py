@@ -1,25 +1,58 @@
 #!/usr/bin/env python3
-"""Build selectable-striker pose textures from one approved alpha strip."""
+"""Build every non-Mica player/kit/pose texture from approved base art.
+
+Each player owns one identity strip in the home palette. Kits remain a separate
+concern: this builder palette-swaps the authored navy/gold cloth into the six
+runtime kit palettes. The approved idle is stored independently and deliberately
+replaces frame zero, so image-generation drift can never alter a signed-off
+silhouette while producing the motion frames.
+"""
 
 from __future__ import annotations
 
 import colorsys
+from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "assets/source/kicker-islam-sharaf-sheet-v1-alpha.png"
+SOURCE_ROOT = ROOT / "assets/source/players"
 OUT = ROOT / "public/assets/hd"
 
-CHARACTER_ID = "character-islam-sharaf"
 POSES = ("idle", "ready", "strike", "follow", "celebrate")
 FRAME_SIZE = 256
 CONTENT_BASELINE = 247
-MAX_CONTENT_SIZE = 240
+CONTENT_MARGIN = 8
 
-# RGB kit palettes mirror src/data/cosmetics.js. The approved strip is navy/gold.
+
+@dataclass(frozen=True)
+class PlayerSource:
+    source: Path
+    approved_idle: Path
+    idle_height: int
+
+
+PLAYERS = {
+    "character-power-striker": PlayerSource(
+        source=SOURCE_ROOT / "power-striker/source-strip-v1-alpha.png",
+        approved_idle=SOURCE_ROOT / "power-striker/approved-idle-v1-alpha.png",
+        idle_height=240,
+    ),
+    "character-agile-winger": PlayerSource(
+        source=SOURCE_ROOT / "agile-winger/source-strip-v1-alpha.png",
+        approved_idle=SOURCE_ROOT / "agile-winger/approved-idle-v1-alpha.png",
+        idle_height=205,
+    ),
+    "character-islam-sharaf": PlayerSource(
+        source=SOURCE_ROOT / "islam-sharaf/source-strip-v2-alpha.png",
+        approved_idle=SOURCE_ROOT / "islam-sharaf/approved-idle-v2-alpha.png",
+        idle_height=228,
+    ),
+}
+
+# RGB kit palettes mirror src/data/cosmetics.js. Every source strip is navy/gold.
 KITS = {
     "kit-home": (0x17365D, 0xF2C832),
     "kit-crimson": (0x9F2837, 0xFFF0D4),
@@ -35,7 +68,7 @@ def rgb(color: int) -> tuple[int, int, int]:
 
 
 def largest_component(image: Image.Image, threshold: int = 8) -> Image.Image:
-    """Keep the connected player and discard generation debris from nearby slots."""
+    """Keep the connected player and discard generation debris near a slot."""
     source = image.convert("RGBA")
     alpha = source.getchannel("A")
     width, height = source.size
@@ -70,7 +103,7 @@ def largest_component(image: Image.Image, threshold: int = 8) -> Image.Image:
             components.append(component)
 
     if not components:
-        raise ValueError("No striker pixels were detected in a generated frame")
+        raise ValueError("No player pixels were detected in a generated frame")
     component = max(components, key=len)
     left = min(x for x, _ in component)
     right = max(x for x, _ in component)
@@ -93,21 +126,31 @@ def extract_frames(strip: Image.Image) -> list[Image.Image]:
     return frames
 
 
-def normalize_frames(frames: list[Image.Image]) -> list[Image.Image]:
-    max_width = max(frame.width for frame in frames)
-    max_height = max(frame.height for frame in frames)
-    scale = min(MAX_CONTENT_SIZE / max_width, MAX_CONTENT_SIZE / max_height)
-    normalized = []
-    for frame in frames:
-        width = max(1, round(frame.width * scale))
-        height = max(1, round(frame.height * scale))
-        sprite = frame.resize((width, height), Image.Resampling.NEAREST)
-        canvas = Image.new("RGBA", (FRAME_SIZE, FRAME_SIZE), (0, 0, 0, 0))
-        x = (FRAME_SIZE - width) // 2
-        y = CONTENT_BASELINE - height
-        canvas.alpha_composite(sprite, (x, y))
-        normalized.append(canvas)
-    return normalized
+def fit_frame(frame: Image.Image, scale: float) -> Image.Image:
+    """Scale one pose onto a fixed canvas while preserving the common baseline."""
+    limit = FRAME_SIZE - CONTENT_MARGIN
+    scale = min(scale, limit / frame.width, limit / frame.height)
+    width = max(1, round(frame.width * scale))
+    height = max(1, round(frame.height * scale))
+    sprite = frame.resize((width, height), Image.Resampling.NEAREST)
+    canvas = Image.new("RGBA", (FRAME_SIZE, FRAME_SIZE), (0, 0, 0, 0))
+    x = (FRAME_SIZE - width) // 2
+    y = CONTENT_BASELINE - height
+    canvas.alpha_composite(sprite, (x, y))
+    return canvas
+
+
+def normalize_player(source: PlayerSource) -> list[Image.Image]:
+    generated = extract_frames(Image.open(source.source).convert("RGBA"))
+    generated_idle = generated[0]
+    identity_scale = source.idle_height / generated_idle.height
+    frames = [fit_frame(frame, identity_scale) for frame in generated]
+
+    # Lock frame zero back to the accepted Phase-2 idle. Its scale derives from
+    # the same target height, so the animation retains a coherent body scale.
+    approved_idle = largest_component(Image.open(source.approved_idle).convert("RGBA"))
+    frames[0] = fit_frame(approved_idle, source.idle_height / approved_idle.height)
+    return frames
 
 
 def recolor_kit(image: Image.Image, primary: int, trim: int) -> Image.Image:
@@ -139,13 +182,13 @@ def recolor_kit(image: Image.Image, primary: int, trim: int) -> Image.Image:
 
 
 def main() -> None:
-    strip = Image.open(SOURCE).convert("RGBA")
-    frames = normalize_frames(extract_frames(strip))
     OUT.mkdir(parents=True, exist_ok=True)
-    for pose, frame in zip(POSES, frames, strict=True):
-        for kit_id, (primary, trim) in KITS.items():
-            output = OUT / f"kicker-hd-{CHARACTER_ID}-{kit_id}-{pose}.png"
-            recolor_kit(frame, primary, trim).save(output, optimize=True)
+    for character_id, source in PLAYERS.items():
+        frames = normalize_player(source)
+        for pose, frame in zip(POSES, frames, strict=True):
+            for kit_id, (primary, trim) in KITS.items():
+                output = OUT / f"kicker-hd-{character_id}-{kit_id}-{pose}.png"
+                recolor_kit(frame, primary, trim).save(output, optimize=True)
 
 
 if __name__ == "__main__":

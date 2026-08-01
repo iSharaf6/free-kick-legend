@@ -208,7 +208,7 @@ test('cosmetics are unique, visual-only and include a valid starter per category
     const starter = getCosmetic(STARTER_COSMETICS[category]);
     assert.equal(starter.category, category);
     assert.equal(starter.price, 0);
-    const minimum = category === 'character' ? 2 : 5;
+    const minimum = category === 'character' ? 4 : 5;
     assert.ok(getCosmeticsByCategory(category).length >= minimum);
   }
 
@@ -217,6 +217,14 @@ test('cosmetics are unique, visual-only and include a valid starter per category
     assert.equal('power' in cosmetic, false);
     assert.equal('accuracy' in cosmetic, false);
     assert.equal('multiplier' in cosmetic, false);
+  }
+
+  const players = getCosmeticsByCategory('character');
+  assert.equal(new Set(players.map((player) => player.archetype)).size, players.length);
+  for (const player of players) {
+    assert.ok(player.dominantFoot);
+    assert.ok(player.personality);
+    assert.ok(player.silhouette);
   }
 });
 
@@ -262,7 +270,12 @@ test('save validation clamps corrupt values and restores safe cosmetics/settings
   assert.deepEqual(SaveManager.getOwnedCosmetics('kit'), ['kit-home', 'kit-crimson']);
   assert.deepEqual(
     SaveManager.getOwnedCosmetics('character'),
-    ['character-mica', 'character-islam-sharaf']
+    [
+      'character-mica',
+      'character-power-striker',
+      'character-agile-winger',
+      'character-islam-sharaf'
+    ]
   );
   assert.equal(SaveManager.getEquippedCosmetic('kit'), 'kit-home');
   assert.equal(SaveManager.getEquippedCosmetic('trail'), 'trail-ember');
