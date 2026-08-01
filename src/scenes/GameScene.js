@@ -43,6 +43,14 @@ import {
 import { PAL } from '../pixelart.js';
 import { addCrowdTiers } from '../art/CrowdPanorama.js';
 import { buildPitchMarkingLayout, PITCH_MARKING_DIMENSIONS } from '../art/PitchMarkings.js';
+import {
+  MATCH_HUD_LAYOUT,
+  drawBroadcastPlate,
+  drawHudBadge,
+  drawResultPlate,
+  drawSegmentedPressureMeter,
+  getResultTheme
+} from '../art/MatchHud.js';
 import { queueKeeperSheets } from '../data/keeperAssets.js';
 
 const ATTEMPTS = 3;
@@ -168,8 +176,8 @@ const TUTORIAL_STEPS = Object.freeze([
 
 // The shot readout lives with the bottom chrome. Directly under the banner it
 // covered the goalmouth at the one moment the player wants to watch the net.
-const READOUT_Y = 231;
-const COACHING_HINT_Y = 197;
+const READOUT_Y = 202;
+const COACHING_HINT_Y = 224;
 
 // The thread itself: one continuous line drawn through the ball, every gate and
 // the finish. This is the level, not decoration - the gates are eyes on it.
@@ -272,6 +280,9 @@ export class GameScene extends Phaser.Scene {
     this.snowEmitter = null;
     this.windTxt = null;
     this.pressureMeterGfx = null;
+    this.pressureChromeGfx = null;
+    this.stadiumLightObjects = [];
+    this.bannerGlow = null;
     this.frameContacts = new Set();
 
     this.mode = data.mode || 'career';
@@ -362,6 +373,7 @@ export class GameScene extends Phaser.Scene {
     this.currentWind = getWindVectorAt(this.level.wind, this.simTime);
     this.drawPitch();
     this.buildNearCrowd();
+    this.buildStadiumFloodlights();
     this.buildSecurityGuards();
     this.drawSponsorBoards();
     this.buildTrackside();
@@ -786,6 +798,8 @@ export class GameScene extends Phaser.Scene {
     this.trailGfx = null;
     this.pressureMeterGfx?.destroy?.();
     this.pressureMeterGfx = null;
+    this.pressureChromeGfx?.destroy?.();
+    this.pressureChromeGfx = null;
     this.crowdTiers?.destroy?.();
     this.crowdTiers = null;
     this.tracksideTweens?.forEach((timer) => timer?.remove?.(false));
@@ -797,6 +811,7 @@ export class GameScene extends Phaser.Scene {
     this.securityGuardTweens = [];
     this.sponsorBoardObjects = [];
     this.tracksideObjects = [];
+    this.stadiumLightObjects = [];
     this.cornerFlags = [];
     this.ballGhosts = [];
     this.objectiveUi = null;
@@ -807,6 +822,7 @@ export class GameScene extends Phaser.Scene {
     this.tutorialCaption = null;
     this.tutorialDetail = null;
     this.attemptIcons = null;
+    this.bannerGlow = null;
     this.terminalOverlayObjects?.forEach((obj) => { if (obj?.active) obj.destroy(); });
     this.terminalOverlayObjects = [];
     this.terminalOverlayShown = false;
@@ -852,6 +868,55 @@ export class GameScene extends Phaser.Scene {
         gfx.fillRect(x + 2, 30 + step * 4, 5, 1);
       }
       gfx.fillStyle(PAL.borderDark, 0.8).fillRect(x, 26, 9, 1);
+    }
+  }
+
+  // Sixteen individual lamps, a steel cradle and additive bloom reproduce the
+  // floodlight banks from the visual target without becoming collision or
+  // hazard objects. They live behind all match chrome and gameplay sprites.
+  buildStadiumFloodlights() {
+    this.stadiumLightObjects = [];
+    const banks = [29, GAME_W - 29];
+    for (const x of banks) {
+      const outer = this.add.ellipse(x, 25, 52, 46, 0xa8d9ff, 0.07)
+        .setDepth(1.31)
+        .setBlendMode(Phaser.BlendModes.ADD);
+      const bloom = this.add.ellipse(x, 25, 33, 31, 0xdaf0ff, 0.14)
+        .setDepth(1.32)
+        .setBlendMode(Phaser.BlendModes.ADD);
+      const core = this.add.ellipse(x, 25, 23, 23, 0xffffff, 0.11)
+        .setDepth(1.33)
+        .setBlendMode(Phaser.BlendModes.ADD);
+      const frame = this.add.graphics().setDepth(1.34);
+      frame.fillStyle(0x071018, 0.78).fillRect(x - 13, 11, 26, 28);
+      frame.fillStyle(0x30465b, 1).fillRect(x - 12, 12, 24, 24);
+      frame.fillStyle(0x0b1624, 1).fillRect(x - 10, 14, 20, 20);
+      frame.fillStyle(0x667b88, 0.8).fillRect(x - 12, 12, 24, 1);
+      frame.fillStyle(0x30465b, 0.82).fillRect(x - 1, 36, 2, 27);
+      frame.fillStyle(0x667b88, 0.35).fillRect(x, 37, 1, 26);
+      for (let row = 0; row < 4; row++) {
+        for (let col = 0; col < 4; col++) {
+          const lampX = x - 8 + col * 5;
+          const lampY = 16 + row * 5;
+          frame.fillStyle(0x9fc7df, 0.75).fillRect(lampX - 1, lampY - 1, 4, 4);
+          frame.fillStyle(0xffffff, 1).fillRect(lampX, lampY, 3, 3);
+          frame.fillStyle(0xfff4d0, 1).fillRect(lampX + 1, lampY, 1, 1);
+        }
+      }
+      this.stadiumLightObjects.push(outer, bloom, core, frame);
+
+      if (!this.settings.reducedMotion) {
+        this.tweens.add({
+          targets: [outer, bloom],
+          alpha: (target) => target === outer ? 0.095 : 0.18,
+          scaleX: 1.04,
+          scaleY: 1.04,
+          duration: 1800 + (x < GAME_W / 2 ? 0 : 260),
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut'
+        });
+      }
     }
   }
 
@@ -1690,6 +1755,30 @@ export class GameScene extends Phaser.Scene {
           .setBlendMode(Phaser.BlendModes.ADD);
         this.hazardVisuals.push(glow);
       });
+      // Anamorphic streaks make the glare read as a lens/light condition rather
+      // than a soft yellow target painted on top of the goal.
+      const horizontal = this.add.ellipse(world.x, world.y, radius * 3.2, 3, 0xfff2b3,
+        glare.strength * 0.055)
+        .setDepth(1343)
+        .setBlendMode(Phaser.BlendModes.ADD);
+      const vertical = this.add.ellipse(world.x, world.y, 2, radius * 1.8, 0xdaf0ff,
+        glare.strength * 0.035)
+        .setDepth(1343)
+        .setBlendMode(Phaser.BlendModes.ADD);
+      const flareCore = this.add.circle(world.x, world.y, 2.2, 0xffffff, glare.strength * 0.5)
+        .setDepth(1344)
+        .setBlendMode(Phaser.BlendModes.ADD);
+      this.hazardVisuals.push(horizontal, vertical, flareCore);
+      if (!this.settings.reducedMotion) {
+        this.tweens.add({
+          targets: [horizontal, vertical, flareCore],
+          alpha: '*=0.68',
+          duration: 920,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut'
+        });
+      }
     }
 
     const snow = getHazard(this.hazards, 'snow');
@@ -1716,10 +1805,20 @@ export class GameScene extends Phaser.Scene {
     const pressure = this.hazardMap.get('crowd-pressure');
     if (pressure) {
       this.pressureMeterGfx = this.add.graphics().setDepth(2001);
-      const label = bodyText(this, 9, GAME_H - 53, 'CROWD PRESSURE', {
-        fontFamily: FONT, fontSize: '5px', color: '#ffcf8a', letterSpacing: 0.25
+      this.pressureChromeGfx = this.add.graphics().setDepth(1999);
+      const iconBounds = MATCH_HUD_LAYOUT.pressureIcon;
+      drawBroadcastPlate(this.pressureChromeGfx, iconBounds, {
+        fill: PAL.panel, inner: PAL.panelHi, border: PAL.border, edge: PAL.cream, cut: 4
+      });
+      const label = bodyText(this, MATCH_HUD_LAYOUT.pressureMeter.x, 243, 'CROWD PRESSURE', {
+        fontFamily: FONT, fontSize: '6px', color: '#f3c449', letterSpacing: 0.25
       }).setDepth(2002);
-      this.hazardVisuals.push(this.pressureMeterGfx, label);
+      const icon = this.textures.exists('icon-sound')
+        ? this.add.image(iconBounds.x + iconBounds.w / 2, iconBounds.y + iconBounds.h / 2, 'icon-sound')
+          .setDisplaySize(12, 12).setDepth(2002).setTint(0xffd27a)
+        : null;
+      this.hazardVisuals.push(this.pressureMeterGfx, this.pressureChromeGfx, label);
+      if (icon) this.hazardVisuals.push(icon);
     }
   }
 
@@ -1785,7 +1884,7 @@ export class GameScene extends Phaser.Scene {
       if (this.windTxt) {
         const horizontal = this.currentWind.x;
         const vertical = this.currentWind.y;
-        const arrow = Math.abs(horizontal) < 0.06 ? (vertical >= 0 ? '^' : 'v') : horizontal > 0 ? '>' : '<';
+        const arrow = Math.abs(horizontal) < 0.06 ? (vertical >= 0 ? '↑' : '↓') : horizontal > 0 ? '↗' : '↖';
         this.windTxt.setText(`WIND ${this.currentWind.magnitude.toFixed(1)} ${arrow}`);
       }
     }
@@ -1802,9 +1901,7 @@ export class GameScene extends Phaser.Scene {
       const pulse = 0.5 + 0.5 * Math.sin(this.simTime * pressure.pulseSpeed * Math.PI * 2);
       const amount = Phaser.Math.Clamp(pressure.intensity * (0.72 + pulse * 0.28), 0, 1);
       this.pressureMeterGfx.clear();
-      this.pressureMeterGfx.fillStyle(0x071018, 0.78).fillRect(9, GAME_H - 45, 72, 6);
-      this.pressureMeterGfx.fillStyle(amount > 0.66 ? 0xff8a65 : PAL.gold, 0.95)
-        .fillRect(10, GAME_H - 44, 70 * amount, 4);
+      drawSegmentedPressureMeter(this.pressureMeterGfx, MATCH_HUD_LAYOUT.pressureMeter, amount);
     }
   }
 
@@ -1826,20 +1923,22 @@ export class GameScene extends Phaser.Scene {
 
   buildHud() {
     const chrome = this.add.graphics().setDepth(1988);
-    drawPanel(chrome, 4, 1, GAME_W - 8, 9, {
-      fill: PAL.panel,
-      border: PAL.borderDark,
-      corner: PAL.goldDark
-    });
+    if (this.mode !== 'career') {
+      drawPanel(chrome, 4, 1, GAME_W - 8, 9, {
+        fill: PAL.panel,
+        border: PAL.borderDark,
+        corner: PAL.goldDark
+      });
+    }
 
-    makeIconButton(this, 9, 5.5, 7, 'icon-back', () => {
+    makeIconButton(this, 9, this.mode === 'career' ? 10 : 5.5, 7, 'icon-back', () => {
       this.startScene(this.mode === 'career' ? 'LevelSelect' : 'Menu');
     }, {
       color: PAL.panelHi, hover: PAL.blue, border: PAL.borderDark,
       iconScale: 0.32, hitWidth: 22, hitHeight: 19
     }).setDepth(2000);
 
-    this.muteButton = makeIconButton(this, 23, 5.5, 7,
+    this.muteButton = makeIconButton(this, 23, this.mode === 'career' ? 10 : 5.5, 7,
       Audio.muted ? 'icon-mute' : 'icon-sound', () => {
         const muted = Audio.toggleMuted();
         MenuMusic.setMuted(muted);
@@ -1851,51 +1950,63 @@ export class GameScene extends Phaser.Scene {
       }).setDepth(2000);
 
     if (this.mode === 'career') {
-      // One strip, three zones: identity left, match title centred, conditions
-      // right. Everything used to compete inside the same run of text.
-      bodyText(this, 38, 5.5, `MATCH ${String(this.levelIndex + 1).padStart(2, '0')}`, {
-        fontFamily: FONT, fontSize: '4px', color: '#f3e7c3', letterSpacing: 0.2
+      const left = MATCH_HUD_LAYOUT.topLeft;
+      const center = MATCH_HUD_LAYOUT.topCenter;
+      const right = MATCH_HUD_LAYOUT.topRight;
+      drawBroadcastPlate(chrome, left, {
+        fill: PAL.panel, inner: 0x173047, border: PAL.border, edge: PAL.cream
+      });
+      drawBroadcastPlate(chrome, center, {
+        fill: 0x741416, inner: 0x971b1b, border: PAL.cream, edge: PAL.gold, tail: 7
+      });
+      drawBroadcastPlate(chrome, right, {
+        fill: PAL.panel, inner: 0x173047, border: PAL.border, edge: PAL.cream
+      });
+
+      bodyText(this, left.x + left.w / 2, left.y + 10, `MATCH ${String(this.levelIndex + 1).padStart(2, '0')}`, {
+        originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '7px', color: '#f3e7c3',
+        stroke: '#071018', strokeThickness: 2, letterSpacing: 0.2
       }).setDepth(2000);
-      bodyText(this, GAME_W / 2, 5.5, String(this.level.name).toUpperCase(), {
-        originX: 0.5, fontFamily: FONT, fontSize: '6px', color: '#f3c449', letterSpacing: 0.3
+      bodyText(this, left.x + left.w / 2, left.y + 20, `${String(this.level.cup || 'career').toUpperCase()} CUP`, {
+        originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '6px', color: '#f3e7c3',
+        stroke: '#071018', strokeThickness: 2, letterSpacing: 0.2
       }).setDepth(2000);
+
+      const levelName = String(this.level.name).toUpperCase();
+      bodyText(this, center.x + center.w / 2, center.y + 12, `· ${levelName} ·`, {
+        originX: 0.5, originY: 0.5, fontFamily: FONT,
+        fontSize: levelName.length > 16 ? '8px' : '10px', color: '#f3c449',
+        stroke: '#071018', strokeThickness: 3, letterSpacing: 0.35
+      }).setDepth(2000);
+
+      const needed = Math.max(1, this.level.objective?.goals || 1);
+      this.objectiveProgressTxt = bodyText(this, center.x + center.w / 2, center.y + 23.5,
+        `${Math.min(this.goalsThisLevel, needed)}/${needed} TARGETS`, {
+          originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '7px', color: '#f3e7c3',
+          stroke: '#071018', strokeThickness: 2, letterSpacing: 0.25
+        }).setDepth(2000);
 
       this.attemptIcons = [];
       // Cosmetic balls ship at several native sizes (12px pixel art, 57px HD),
       // so size the HUD icons from the texture instead of a fixed scale.
       const iconTexW = this.textures.get(this.ballTexture).getSourceImage()?.width || 12;
+      const iconGap = Math.min(11, 56 / Math.max(this.maxAttempts, 1));
+      const iconStart = right.x + right.w / 2 - ((this.maxAttempts - 1) * iconGap) / 2;
       for (let i = 0; i < this.maxAttempts; i++) {
-        const icon = this.add.image(GAME_W - 8 - i * 8, 5.5, this.ballTexture)
-          .setScale(5.5 / iconTexW).setDepth(2000);
+        const icon = this.add.image(iconStart + i * iconGap, right.y + 19.5, this.ballTexture)
+          .setScale(7.2 / iconTexW).setDepth(2000);
+        icon.fklBaseScale = icon.scaleX;
         this.attemptIcons.push(icon);
       }
       const wind = getWindVectorAt(this.level.wind, this.simTime);
-      const attemptsWidth = this.maxAttempts * 8;
-      if (wind.magnitude >= 0.1 || this.level.wind?.rotation) {
-        const arrow = Math.abs(wind.x) < 0.06 ? (wind.y >= 0 ? '^' : 'v') : wind.x > 0 ? '>' : '<';
-        this.windTxt = bodyText(this, GAME_W - 8 - attemptsWidth, 5.5, `WIND ${wind.magnitude.toFixed(1)} ${arrow}`, {
-          originX: 1, fontFamily: FONT, fontSize: '4px', color: '#f3c449', letterSpacing: 0.2
+      const arrow = Math.abs(wind.x) < 0.06 ? (wind.y >= 0 ? '↑' : '↓') : wind.x > 0 ? '↗' : '↖';
+      this.windTxt = bodyText(this, right.x + right.w / 2, right.y + 8.5,
+        `WIND ${wind.magnitude.toFixed(1)} ${arrow}`, {
+          originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '6px', color: '#f3e7c3',
+          stroke: '#071018', strokeThickness: 2, letterSpacing: 0.15
         }).setDepth(2000);
-      }
 
-      // Secondary strip: cup identity and objective count, out of the way of
-      // the primary readout above it.
-      const subChrome = this.add.graphics().setDepth(1988);
-      const needed = Math.max(1, this.level.objective?.goals || 1);
-      const subWidth = needed > 1 ? 118 : 78;
-      drawPanel(subChrome, 4, 11.5, subWidth, 8, {
-        fill: PAL.panelMuted, border: PAL.borderDark, corner: PAL.goldDark, alpha: 0.9
-      });
-      bodyText(this, 9, 15.5, `${String(this.level.cup || 'career').toUpperCase()} CUP`, {
-        fontSize: '4px', color: '#8fa2ab', letterSpacing: 0.3
-      }).setDepth(2000);
-      if (needed > 1) {
-        this.objectiveProgressTxt = bodyText(this, 4 + subWidth - 5, 15.5, `0 / ${needed} TARGETS`, {
-          originX: 1, fontFamily: FONT, fontSize: '4px', color: '#f3c449', letterSpacing: 0.2
-        }).setDepth(2000);
-      }
-
-      this.buildConditionChips(4 + subWidth + 4);
+      this.buildConditionChips();
       this.buildTutorial();
       this.buildObjectiveStrip();
     } else if (this.mode === 'daily') {
@@ -1938,11 +2049,14 @@ export class GameScene extends Phaser.Scene {
       this.timerTxt = timer.valueText;
     }
 
+    const resultBounds = MATCH_HUD_LAYOUT.result;
+    this.bannerGlow = this.add.ellipse(GAME_W / 2, resultBounds.y + resultBounds.h / 2,
+      resultBounds.w + 30, resultBounds.h + 18, PAL.red, 0)
+      .setDepth(2093)
+      .setBlendMode(Phaser.BlendModes.ADD);
     this.bannerPlate = this.add.graphics().setDepth(2095).setAlpha(0);
-    drawPanel(this.bannerPlate, GAME_W / 2 - 105, 38, 210, 28, {
-      fill: PAL.panel, border: PAL.goldDark, corner: PAL.gold
-    });
-    this.banner = titleText(this, GAME_W / 2, 52, '', '14px').setDepth(2100).setAlpha(0);
+    this.banner = titleText(this, GAME_W / 2, resultBounds.y + resultBounds.h / 2, '', '16px')
+      .setDepth(2100).setAlpha(0);
     // Diagnostic line under the banner: the banner is the feeling, this is the
     // reason. Both clear together when the next attempt starts.
     this.shotReadoutPlate = this.add.graphics().setDepth(2095).setAlpha(0);
@@ -1950,7 +2064,7 @@ export class GameScene extends Phaser.Scene {
       originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '6px',
       color: '#d7dfda', letterSpacing: 0.2
     }).setDepth(2100).setAlpha(0);
-    this.inputHint = crispText(this.add.text(GAME_W / 2, GAME_H - 34, '', {
+    this.inputHint = crispText(this.add.text(GAME_W / 2, 224, '', {
       fontFamily: FONT, fontSize: '9px', color: '#f3e7c3',
       stroke: '#071018', strokeThickness: 3
     }).setOrigin(0.5).setDepth(2100).setAlpha(0));
@@ -1981,21 +2095,38 @@ export class GameScene extends Phaser.Scene {
    * of contact. Both are deliberate, and both look like faults until the game
    * says so out loud.
    */
-  buildConditionChips(startX) {
-    let x = startX;
-    for (const hazard of this.hazards) {
+  buildConditionChips() {
+    const visible = this.hazards
+      .filter((hazard) => CONDITION_CHIPS[hazard.type])
+      .slice(0, 2);
+    const single = { x: 188, y: MATCH_HUD_LAYOUT.badgeLeft.y, w: 104, h: MATCH_HUD_LAYOUT.badgeLeft.h };
+    for (let index = 0; index < visible.length; index++) {
+      const hazard = visible[index];
       const chip = CONDITION_CHIPS[hazard.type];
       if (!chip) continue;
-      const width = chip.label.length * 2.4 + 10;
-      if (x + width > GAME_W - 4) break;
+      const bounds = visible.length === 1
+        ? single
+        : index === 0 ? MATCH_HUD_LAYOUT.badgeLeft : MATCH_HUD_LAYOUT.badgeRight;
+      const warning = hazard.type === 'crowd-pressure' || hazard.type === 'slippery';
+      const label = hazard.type === 'glare'
+        ? 'GLARE ACTIVE'
+        : hazard.type === 'crowd-pressure'
+          ? 'CROWD PRESSURE'
+          : chip.label;
       const plate = this.add.graphics().setDepth(1988);
-      drawPanel(plate, x, 11.5, width, 8, {
-        fill: PAL.panelMuted, border: PAL.borderDark, corner: PAL.goldDark, alpha: 0.9
+      drawHudBadge(plate, bounds, {
+        fill: warning ? 0x791d14 : 0x755100,
+        border: warning ? 0xe04b2c : PAL.gold,
+        highlight: warning ? 0xff8a65 : PAL.flood
       });
-      bodyText(this, x + width / 2, 15.5, chip.label, {
-        originX: 0.5, fontSize: '4px', color: chip.color, letterSpacing: 0.25
+      bodyText(this, bounds.x + 13, bounds.y + bounds.h / 2, hazard.type === 'glare' ? '✦' : '●', {
+        originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '7px',
+        color: warning ? '#ffcf8a' : '#fff0a8', stroke: '#071018', strokeThickness: 1
       }).setDepth(2000);
-      x += width + 4;
+      bodyText(this, bounds.x + bounds.w / 2 + 5, bounds.y + bounds.h / 2, label, {
+        originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: label.length > 15 ? '5px' : '6px',
+        color: '#f3e7c3', stroke: '#071018', strokeThickness: 2, letterSpacing: 0.15
+      }).setDepth(2000);
     }
   }
 
@@ -2015,31 +2146,36 @@ export class GameScene extends Phaser.Scene {
       { kind: 'goal', text: this.describeFinish() }
     ];
 
-    const gap = 7;
-    const chipW = (step) => (step.kind === 'hoop' ? 11 : Math.max(24, step.text.length * 4.4 + 8));
-    const contentW = steps.reduce((sum, step) => sum + chipW(step), 0) + gap * (steps.length - 1);
-    const labelW = 44;
-    const plateW = Math.round(labelW + contentW + 16);
-    const plateH = 15;
-    const plateX = Math.round(GAME_W / 2 - plateW / 2);
-    const plateY = GAME_H - 20;
-    const midY = plateY + plateH / 2;
+    const gap = 4;
+    const labelBounds = MATCH_HUD_LAYOUT.objectiveLabel;
+    const valueBounds = MATCH_HUD_LAYOUT.objectiveValue;
+    const availableW = valueBounds.w - 10 - gap * (steps.length - 1);
+    const hoopW = 11;
+    const goalW = Math.max(22, availableW - rings.length * hoopW);
+    const chipW = (step) => (step.kind === 'hoop' ? hoopW : goalW);
+    const midY = valueBounds.y + valueBounds.h / 2;
 
     const plate = this.add.graphics().setDepth(1975);
-    drawPanel(plate, plateX, plateY, plateW, plateH, {
-      fill: PAL.panel, border: PAL.borderDark, corner: PAL.goldDark, alpha: 0.92
+    drawBroadcastPlate(plate, labelBounds, {
+      fill: 0x12345b, inner: 0x174b80, border: PAL.goldDark, edge: PAL.cream, cut: 4
     });
-    const label = bodyText(this, plateX + 7, midY, 'OBJECTIVE', {
-      originY: 0.5, fontFamily: FONT, fontSize: '5px', color: '#f3c449', letterSpacing: 0.4
+    drawBroadcastPlate(plate, valueBounds, {
+      fill: 0x14562f, inner: 0x2d874b, border: PAL.gold, edge: PAL.flood, cut: 4
+    });
+    const label = bodyText(this, labelBounds.x + labelBounds.w / 2, midY, 'OBJECTIVE', {
+      originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '7px', color: '#f3e7c3',
+      stroke: '#071018', strokeThickness: 2, letterSpacing: 0.3
     }).setDepth(2000);
 
     const marks = this.add.graphics().setDepth(1990);
     this.objectiveSteps = [];
-    let x = plateX + 8 + labelW;
+    let x = valueBounds.x + 5;
     steps.forEach((step, index) => {
       const w = chipW(step);
       const text = bodyText(this, x + w / 2, midY, step.text, {
-        originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '5px', color: '#8fa2ab', letterSpacing: 0.2
+        originX: 0.5, originY: 0.5, fontFamily: FONT,
+        fontSize: step.kind === 'goal' && step.text.length > 8 ? '4px' : '6px',
+        color: '#8fa2ab', stroke: '#071018', strokeThickness: 1, letterSpacing: 0.1
       }).setDepth(2000);
       this.objectiveSteps.push({ ...step, x, w, text, state: 'pending' });
       x += w;
@@ -2047,11 +2183,11 @@ export class GameScene extends Phaser.Scene {
         // Pixel chevron rather than an arrow glyph, so the strip stays in the
         // same drawing language as the rest of the chrome.
         marks.fillStyle(PAL.borderDark, 1);
-        marks.fillRect(Math.round(x + 2), Math.round(midY) - 2, 1, 1);
-        marks.fillRect(Math.round(x + 3), Math.round(midY) - 1, 1, 1);
-        marks.fillRect(Math.round(x + 4), Math.round(midY), 1, 1);
-        marks.fillRect(Math.round(x + 3), Math.round(midY) + 1, 1, 1);
-        marks.fillRect(Math.round(x + 2), Math.round(midY) + 2, 1, 1);
+        marks.fillRect(Math.round(x + 1), Math.round(midY) - 2, 1, 1);
+        marks.fillRect(Math.round(x + 2), Math.round(midY) - 1, 1, 1);
+        marks.fillRect(Math.round(x + 3), Math.round(midY), 1, 1);
+        marks.fillRect(Math.round(x + 2), Math.round(midY) + 1, 1, 1);
+        marks.fillRect(Math.round(x + 1), Math.round(midY) + 2, 1, 1);
         x += gap;
       }
     });
@@ -2066,7 +2202,7 @@ export class GameScene extends Phaser.Scene {
     // under it is the dump-everything-at-once problem this is here to avoid.
     const brief = this.tutorialActive() ? null : this.level.objective?.label;
     if (brief) {
-      this.objectiveBrief = bodyText(this, GAME_W / 2, plateY - 9, brief, {
+      this.objectiveBrief = bodyText(this, GAME_W / 2, valueBounds.y - 10, brief, {
         originX: 0.5, originY: 0.5, fontSize: '7px', color: '#d7dfda',
         stroke: '#071018', strokeThickness: 3, letterSpacing: 0.15
       }).setDepth(2000);
@@ -2333,38 +2469,70 @@ export class GameScene extends Phaser.Scene {
     this.shotReadoutPlate.setAlpha(0);
   }
 
-  showBanner(text, color = '#f0e8d0') {
-    this.tweens.killTweensOf([this.banner, this.bannerPlate]);
+  showBanner(text, color = '#f0e8d0', outcome = 'MISS') {
+    const theme = getResultTheme(outcome);
+    const bounds = MATCH_HUD_LAYOUT.result;
+    const centerY = bounds.y + bounds.h / 2;
+    this.tweens.killTweensOf([this.banner, this.bannerPlate, this.bannerGlow]);
     const reduced = Boolean(this.settings.reducedMotion);
-    this.bannerPlate?.setAlpha(0).setY(reduced ? 0 : -7);
-    this.banner.setText(text).setColor(color).setAlpha(0).setScale(reduced ? 1 : 0.94).setY(reduced ? 52 : 45);
-    // One writer per property. The old version tweened `y` across both objects
-    // AND wrote this.banner.setY() from an onUpdate on the same tween, so two
-    // sources fought over the banner's position and it visibly juddered as it
-    // came in. The plate slides; the banner's y is derived from it, once.
+    this.bannerPlate.clear();
+    drawResultPlate(this.bannerPlate, bounds, theme);
+    this.bannerPlate.setPosition(0, reduced ? 0 : -9).setAlpha(0);
+    this.banner.setText(text)
+      .setFontSize(text.length > 13 ? '11px' : text.length > 9 ? '13px' : '16px')
+      .setColor(theme.color || color)
+      .setAlpha(0)
+      .setScale(reduced ? 1 : 0.78)
+      .setAngle(reduced ? 0 : (outcome === 'GOAL' ? -1.5 : 1.5))
+      .setY(reduced ? centerY : centerY - 9);
+    this.bannerGlow?.setFillStyle(theme.glow, 1)
+      .setAlpha(reduced ? 0 : 0.24)
+      .setScale(0.88);
     this.tweens.add({
       targets: [this.banner, this.bannerPlate],
       alpha: 1,
-      duration: reduced ? 120 : 200,
+      duration: reduced ? 110 : 150,
       ease: 'Cubic.easeOut'
     });
     if (!reduced) {
       this.tweens.add({
         targets: this.bannerPlate,
         y: 0,
-        duration: 200,
-        ease: 'Cubic.easeOut',
-        onUpdate: () => this.banner.setY(52 + this.bannerPlate.y)
+        duration: 240,
+        ease: 'Back.easeOut'
       });
-      this.tweens.add({ targets: this.banner, scale: 1, duration: 200, ease: 'Cubic.easeOut' });
+      this.tweens.add({
+        targets: this.banner,
+        y: centerY,
+        scaleX: 1,
+        scaleY: 1,
+        angle: 0,
+        duration: 260,
+        ease: 'Back.easeOut'
+      });
+      this.tweens.add({
+        targets: this.bannerGlow,
+        alpha: 0,
+        scaleX: 1.22,
+        scaleY: 1.45,
+        duration: 430,
+        ease: 'Cubic.easeOut'
+      });
     }
     this.tweens.add({
       targets: [this.banner, this.bannerPlate],
       alpha: 0,
-      delay: 850,
-      duration: 180,
+      delay: 980,
+      duration: 210,
       ease: 'Cubic.easeOut'
     });
+  }
+
+  hideBanner() {
+    this.tweens.killTweensOf([this.banner, this.bannerPlate, this.bannerGlow]);
+    this.banner?.setAlpha(0).setScale(1).setAngle(0);
+    this.bannerPlate?.setAlpha(0).setPosition(0, 0);
+    this.bannerGlow?.setAlpha(0).setScale(1);
   }
 
   showSwipeHint(reason) {
@@ -2406,14 +2574,18 @@ export class GameScene extends Phaser.Scene {
 
   showSwipeHintMessage(message) {
     if (!this.inputHint || this.state === 'OVERLAY') return;
-    this.inputHint.setText(message).setAlpha(1).setY(COACHING_HINT_Y);
+    this.inputHint
+      .setText(message)
+      .setFontSize(message.length > 58 ? '6px' : message.length > 42 ? '7px' : '9px')
+      .setAlpha(1)
+      .setY(COACHING_HINT_Y);
     this.tweens.killTweensOf(this.inputHint);
     this.tweens.add({
       targets: this.inputHint,
       y: COACHING_HINT_Y - 5,
       alpha: 0,
-      delay: 700,
-      duration: 450,
+      delay: 1000,
+      duration: 300,
       ease: 'Quad.easeOut'
     });
   }
@@ -2991,7 +3163,7 @@ export class GameScene extends Phaser.Scene {
         this.schedule(150, () => this.keepers.forEach((keeper) => keeper.reactToGoal()));
         const spos = project(pt.x, pt.y, this.zGoal);
         this.confetti.explode(60, spos.x, spos.y);
-        this.showBanner(isTopCorner ? 'TOP BINS' : shotRating.grade === 'S' ? 'WORLD CLASS' : 'GOAL', '#f2c832');
+        this.showBanner(isTopCorner ? 'TOP BINS' : shotRating.grade === 'S' ? 'WORLD CLASS' : 'GOAL', '#f2c832', 'GOAL');
         Audio.goal();
         this.playCrowdGoal();
         // The goal is the payoff, so it lands on the camera as well as the net.
@@ -3010,23 +3182,24 @@ export class GameScene extends Phaser.Scene {
         break;
       }
       case 'CAUGHT':
-        this.showBanner('CAUGHT!', '#ff8a65');
+        this.showBanner('CAUGHT!', '#ff8a65', 'CAUGHT');
+        this.playImpactShake(105, 0.55);
         Audio.groan();
         break;
       case 'SAVE':
-        this.showBanner('SAVED!', '#ff8a65');
+        this.showBanner('SAVED!', '#ff8a65', 'SAVE');
         Audio.groan();
         break;
       case 'WALL':
-        this.showBanner('BLOCKED!', '#ff8a65');
+        this.showBanner('BLOCKED!', '#ff8a65', 'WALL');
         Audio.groan();
         break;
       case 'POST':
-        this.showBanner('OFF THE POST!', '#ffab40');
+        this.showBanner('OFF THE POST!', '#ffab40', 'POST');
         Audio.groan();
         break;
       default:
-        this.showBanner('OFF TARGET', '#b0bec5');
+        this.showBanner('OFF TARGET', '#b0bec5', 'MISS');
         Audio.groan();
     }
 
@@ -3104,7 +3277,7 @@ export class GameScene extends Phaser.Scene {
     this.attempt++;
     const remaining = this.maxAttempts - this.attempt + 1;
     this.dailyShotsTxt?.setText(`${this.attempt}/${this.maxAttempts}`);
-    this.schedule(550, () => this.showSwipeHintMessage(
+    this.schedule(80, () => this.showSwipeHintMessage(
       outcome === 'GOAL'
         ? `${rating.label.toUpperCase()}  ·  ${remaining} SHOTS LEFT`
         : `${remaining} SHOTS LEFT  ·  BUILD THE SCORE`
@@ -3237,7 +3410,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    this.attemptIcons[this.attempt - 1]?.setTint(0x4b5560).setAlpha(0.42);
+    this.animateAttemptSpent(this.attempt - 1, outcome);
     this.attempt++;
     const remaining = Math.max(this.maxAttempts - this.attempt + 1, 0);
     if (this.attempt > this.maxAttempts) {
@@ -3246,9 +3419,41 @@ export class GameScene extends Phaser.Scene {
       const message = scored && !check.qualifies
         ? check.reason
         : scored ? `${this.goalsThisLevel}/${needed} DONE — ${remaining} SHOTS LEFT` : `${check.reason}  ·  ${remaining} LEFT`;
-      this.schedule(550, () => this.showSwipeHintMessage(message));
+      this.schedule(80, () => this.showSwipeHintMessage(message));
       this.schedule(this.resultResetDelay(outcome), () => this.resetAttempt());
     }
+  }
+
+  animateAttemptSpent(index, outcome) {
+    const icon = this.attemptIcons?.[index];
+    if (!icon?.active) return;
+    const base = icon.fklBaseScale || icon.scaleX || 1;
+    this.tweens.killTweensOf(icon);
+    if (this.settings.reducedMotion) {
+      icon.setTint(0x4b5560).setAlpha(0.38).setScale(base * 0.88);
+      return;
+    }
+    icon.clearTint().setAlpha(1).setScale(base);
+    this.tweens.add({
+      targets: icon,
+      scaleX: base * 1.32,
+      scaleY: base * 1.32,
+      duration: 115,
+      yoyo: true,
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        if (!icon.active) return;
+        icon.setTint(outcome === 'GOAL' ? 0x8b7b45 : 0x4b5560);
+        this.tweens.add({
+          targets: icon,
+          alpha: 0.38,
+          scaleX: base * 0.88,
+          scaleY: base * 0.88,
+          duration: 150,
+          ease: 'Cubic.easeOut'
+        });
+      }
+    });
   }
 
   resultResetDelay(outcome, minimum = 750) {
@@ -3293,6 +3498,9 @@ export class GameScene extends Phaser.Scene {
       keeper.draw();
     });
     this.hideShotReadout();
+    this.hideBanner();
+    this.tweens.killTweensOf(this.inputHint);
+    this.inputHint?.setAlpha(0);
     this.kicker?.cancelSequence().setPose('idle');
     this.buildWall();
     this.ringVisuals?.forEach((visual) => this.destroyRingVisual(visual));
