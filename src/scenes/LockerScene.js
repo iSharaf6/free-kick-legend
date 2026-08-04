@@ -17,7 +17,7 @@ import { Kicker } from '../objects/Kicker.js';
 const CATEGORY_META = {
   character: { label: 'PLAYERS', icon: 'kicker-hd-kit-home-idle', color: 0x237064 },
   kit: { label: 'KITS', icon: 'icon-kit', color: PAL.blue },
-  ball: { label: 'BALLS', icon: 'ball-classic', color: PAL.orange },
+  ball: { label: 'BALLS', icon: 'ball-snowball', color: PAL.orange },
   trail: { label: 'TRAILS', icon: 'icon-trail', color: 0x67549a }
 };
 
@@ -134,6 +134,11 @@ export class LockerScene extends Phaser.Scene {
     COSMETIC_CATEGORIES.forEach((category, index) => {
       const meta = CATEGORY_META[category];
       const selected = category === this.category;
+      const iconScale = category === 'character'
+        ? 0.075
+        : category === 'ball'
+          ? 10 / (this.textures.get(meta.icon).getSourceImage()?.width || 12)
+          : 0.72;
       const button = makeButton(this, xs[index], 51, 100, 29, meta.label, () => {
         this.category = category;
         this.selectedId = SaveManager.getEquippedCosmetic(category)
@@ -146,7 +151,7 @@ export class LockerScene extends Phaser.Scene {
         selected,
         border: selected ? PAL.gold : PAL.borderDark,
         icon: meta.icon,
-        iconScale: category === 'character' ? 0.075 : category === 'ball' ? 0.65 : 0.72,
+        iconScale,
         iconX: 14,
         fontSize: category === 'character' ? '8px' : '9px',
         letterSpacing: 0.45,
@@ -200,9 +205,7 @@ export class LockerScene extends Phaser.Scene {
     const ballId = this.category === 'ball'
       ? selected.id
       : SaveManager.getEquippedCosmetic('ball');
-    const ballKey = ballId === 'ball-classic' && this.textures.exists('ball-classic-hd')
-      ? 'ball-classic-hd'
-      : (this.textures.exists(ballId) ? ballId : 'ball-classic');
+    const ballKey = this.textures.exists(ballId) ? ballId : 'ball-snowball';
     const ball = this.add.image(160, 211, ballKey).setDepth(143);
     const ballGameplay = getCosmetic(ballId)?.gameplay;
     ball.setScale((19 / (ball.texture.source[0]?.width || 12)) * (ballGameplay?.visualScale ?? 1));
@@ -360,8 +363,11 @@ export class LockerScene extends Phaser.Scene {
     } else if (item.category === 'kit') texture = `icon-${item.id}`;
     else if (item.category === 'ball') texture = item.id;
     else texture = `icon-${item.id}`;
-    const preview = this.add.image(0, -2, this.textures.exists(texture) ? texture : CATEGORY_META[item.category].icon)
-      .setScale(item.category === 'character' ? 0.11 : item.category === 'ball' ? (compact ? 0.88 : 1.15) : 1);
+    const previewTexture = this.textures.exists(texture) ? texture : CATEGORY_META[item.category].icon;
+    const ballScale = (compact ? 16 : 20) /
+      (this.textures.get(previewTexture).getSourceImage()?.width || 12);
+    const preview = this.add.image(0, -2, previewTexture)
+      .setScale(item.category === 'character' ? 0.11 : item.category === 'ball' ? ballScale : 1);
     button.add(preview);
 
     if (owned) {

@@ -14,7 +14,7 @@ A polished, portal-ready pixel football game built with Phaser 3 and Vite. Draw 
 - Score, combo, shot grades, top-corner/target bonuses, three-star mastery, first-clear rewards, and Time Attack.
 - A deterministic five-shot Daily Kick, moving bonus target, seven-day reward cycle, three rotating missions, 12 achievements, claimable coins, and replay-safe rewards.
 - A functional Locker with four readable striker techniques: Mica's balance, Malik's 112% Thunderstrike and wall knockdown, Nico's extra curl, and Islam's wind-resistant control. Six kits remain cosmetic.
-- Eight selectable ball types with deterministic flight identities, including an oversized high-bounce basketball and a small, fast, high-curl golf ball. Six progression trails now communicate pace, power, bounce, reward, or the complete curl path instead of being empty decoration.
+- Six selectable pixel-art sport balls with deterministic flight identities: snowball, basketball, golf ball, volleyball, beach ball, and tennis ball. Each changes launch, gravity, drag, curl, wind response, bounce, rolling resistance, or spin decay.
 - Versioned saves with v1 migration, validation, settings, lifetime stats, daily streaks/claims, achievements, and CrazyGames Data fallback.
 - CrazyGames SDK v3 lifecycle, cloud-data, completion, happy-time, and natural-break ad hooks; the bridge remains safe when the SDK is disabled or unavailable.
 - True 1920×1080 Full-HD rendering over stable logical coordinates, 4× text rasterization, high-density original striker/keeper/defender sprites, a purpose-built pixel pitch whose mowing converges on the camera's own vanishing line, responsive safe areas, and layered synthesized stadium audio.
@@ -47,9 +47,8 @@ automated playtest.
 - Swipe farther upward for loft; release faster for power.
 - Bow the gesture left or right and the ball follows that curve.
 - Low shots can pass beneath a jumping wall; precise high finishes earn larger scores.
-- Press `Tab` during a match to pause and open the match menu.
-- Press `R` during a match or from the pause menu to restart the current level.
-- Press `Esc` in the pause menu to return to the main menu.
+- Press `Tab` during a match to open the match menu.
+- Restart and Exit Match are only available from that Tab menu.
 
 ## Project map
 

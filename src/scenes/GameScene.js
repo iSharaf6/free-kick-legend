@@ -270,7 +270,7 @@ export class GameScene extends Phaser.Scene {
     this.threadTimer = null;
     this.threadFlow = 0;
     this.hazardVisuals = [];
-    this.snowEmitter = null;
+    this.snowEmitters = [];
     this.windTxt = null;
     this.pressureMeterGfx = null;
     this.frameContacts = new Set();
@@ -381,7 +381,7 @@ export class GameScene extends Phaser.Scene {
     this.loadout = {
       character: savedLoadout.character || 'character-mica',
       kit: savedLoadout.kit || 'kit-home',
-      ball: savedLoadout.ball || 'ball-classic',
+      ball: savedLoadout.ball || 'ball-snowball',
       trail: savedLoadout.trail || 'trail-none'
     };
     this.loadoutGameplay = resolveLoadoutGameplay(this.loadout);
@@ -402,9 +402,7 @@ export class GameScene extends Phaser.Scene {
       opacity: trailCosmetic?.utility?.opacity ?? 0.14
     };
     this.ballVisualScale = this.loadoutGameplay.visualScale;
-    this.ballTexture = this.loadout.ball === 'ball-classic' && this.textures.exists('ball-classic-hd')
-      ? 'ball-classic-hd'
-      : (this.textures.exists(this.loadout.ball) ? this.loadout.ball : 'ball');
+    this.ballTexture = this.textures.exists(this.loadout.ball) ? this.loadout.ball : 'ball-snowball';
     // The ball is the subject of a free-kick game, so it gets its own keyline
     // and specular pass rather than relying on the sprite alone to carry it.
     this.ballOutlineGfx = this.add.graphics();
@@ -593,23 +591,7 @@ export class GameScene extends Phaser.Scene {
       if (event?.repeat || this.adRequestActive || this.transitioning) return;
       this.togglePauseMenu();
     };
-    this.onRestartKey = (event) => {
-      if (event?.repeat || this.adRequestActive || this.transitioning) return;
-      if (this.state === 'PAUSED' || this.state === 'OVERLAY' || this.state === 'AIMING' || this.state === 'RESULT' || this.state === 'FLIGHT') {
-        this.restartCurrentLevel();
-      }
-    };
-    this.onEscapeKey = (event) => {
-      if (event?.repeat || this.adRequestActive || this.transitioning) return;
-      if (this.state === 'PAUSED') {
-        this.startScene('Menu');
-      } else {
-        this.togglePauseMenu();
-      }
-    };
     keyboard.on('keydown-TAB', this.onTabKey);
-    keyboard.on('keydown-R', this.onRestartKey);
-    keyboard.on('keydown-ESC', this.onEscapeKey);
   }
 
   currentRestartData() {
@@ -711,7 +693,7 @@ export class GameScene extends Phaser.Scene {
         }
       },
       { label: 'RESTART', color: PAL.goldDark, hover: PAL.gold, cb: () => this.restartCurrentLevel() },
-      { label: 'MAIN MENU', color: PAL.panelHi, hover: PAL.border, cb: () => this.startScene('Menu') }
+      { label: 'EXIT MATCH', color: PAL.panelHi, hover: PAL.border, cb: () => this.startScene('Menu') }
     ];
     // Four buttons across the 300px panel: 68 wide on a 72px pitch, centred.
     const first = GAME_W / 2 - ((actions.length - 1) * 72) / 2;
@@ -721,7 +703,7 @@ export class GameScene extends Phaser.Scene {
         fontSize: action.label.length > 7 ? '6px' : '7px', hitHeight: 32
       }).setDepth(3501));
     });
-    objects.push(bodyText(this, GAME_W / 2, 198, 'TAB  RESUME    ·    R  RESTART    ·    ESC  MAIN MENU', {
+    objects.push(bodyText(this, GAME_W / 2, 198, 'TAB TO RESUME  ·  CHOOSE RESTART OR EXIT MATCH', {
       originX: 0.5, originY: 0.5, align: 'center', fontSize: '6px', color: '#8fa2ab'
     }).setDepth(3501));
   }
@@ -764,8 +746,6 @@ export class GameScene extends Phaser.Scene {
 
     const keyboard = this.input.keyboard;
     keyboard?.off?.('keydown-TAB', this.onTabKey);
-    keyboard?.off?.('keydown-R', this.onRestartKey);
-    keyboard?.off?.('keydown-ESC', this.onEscapeKey);
     keyboard?.removeCapture?.('TAB');
     if (import.meta.env.DEV && globalThis.window?.__fkl === this) globalThis.window.__fkl = null;
     PlatformService.gameplayStop();
@@ -779,8 +759,8 @@ export class GameScene extends Phaser.Scene {
     this.wall = null;
     this.kicker?.destroy?.();
     this.kicker = null;
-    this.snowEmitter?.destroy?.();
-    this.snowEmitter = null;
+    this.snowEmitters?.forEach((emitter) => emitter?.destroy?.());
+    this.snowEmitters = [];
     this.hazardVisuals?.forEach((v) => { if (v?.destroy) v.destroy(); });
     this.hazardVisuals = [];
     this.ringVisuals?.forEach((v) => this.destroyRingVisual(v));
@@ -1710,23 +1690,58 @@ export class GameScene extends Phaser.Scene {
 
     const snow = getHazard(this.hazards, 'snow');
     if (snow && this.textures.exists('spark')) {
-      this.snowEmitter = this.add.particles(0, 0, 'spark', {
-        x: { min: 0, max: GAME_W },
-        y: { min: CAM.horizonY - 16, max: CAM.horizonY + 4 },
-        speedX: { min: -7, max: 4 },
-        speedY: { min: 18, max: 34 },
-        lifespan: { min: 4200, max: 6800 },
-        scale: { start: 0.72, end: 0.24 },
-        alpha: { start: 0.9, end: 0.24 },
-        tint: [0xffffff, 0xd9efff],
-        quantity: 1,
-        frequency: Math.round(125 - snow.density * 62),
-        advance: 1800,
-        maxParticles: 112,
-        maxAliveParticles: 92,
-        reserve: 92
+      // Snow needs depth, not just a particle overlay: a cold low haze settles
+      // over the pitch, distant flakes establish the weather at the goal, and
+      // fast foreground flakes occasionally cross the shot line.
+      const groundFrost = this.add.graphics().setDepth(6);
+      groundFrost.fillStyle(0xcfe7f7, 0.08 + snow.density * 0.06);
+      groundFrost.fillTriangle(0, STADIUM_Y + 7, GAME_W, STADIUM_Y + 7, GAME_W, GAME_H);
+      groundFrost.fillTriangle(0, STADIUM_Y + 7, GAME_W, GAME_H, 0, GAME_H);
+      groundFrost.fillStyle(0xffffff, 0.035 + snow.density * 0.025);
+      for (let index = 0; index < 22; index++) {
+        const t = index / 21;
+        const y = STADIUM_Y + 12 + t * (GAME_H - STADIUM_Y - 16);
+        const width = 12 + ((index * 29) % 44);
+        const x = ((index * 97) % (GAME_W + width)) - width / 2;
+        groundFrost.fillRect(x, y, width, Math.max(1, 1 + Math.floor(t * 1.4)));
+      }
+      this.hazardVisuals.push(groundFrost);
+
+      const lowMist = this.add.ellipse(GAME_W / 2, STADIUM_Y + 17, GAME_W * 1.08, 36,
+        0xdff0fa, 0.045 + snow.density * 0.07)
+        .setDepth(1175)
+        .setBlendMode(Phaser.BlendModes.SCREEN);
+      this.hazardVisuals.push(lowMist);
+      if (!this.settings.reducedMotion) {
+        this.tweens.add({
+          targets: lowMist, x: GAME_W / 2 + 12, alpha: lowMist.alpha * 1.45,
+          duration: 4100, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
+        });
+      }
+
+      const farFlakes = this.add.particles(0, 0, 'spark', {
+        x: { min: -16, max: GAME_W + 16 }, y: { min: CAM.horizonY - 12, max: CAM.horizonY + 18 },
+        speedX: { min: -5 - snow.density * 8, max: 2 }, speedY: { min: 13, max: 25 },
+        lifespan: { min: 4300, max: 6900 }, scale: { start: 0.38, end: 0.15 },
+        alpha: { start: 0.72, end: 0.12 }, tint: [0xffffff, 0xd9efff], quantity: 1,
+        frequency: Math.round(132 - snow.density * 68), advance: 2300,
+        maxParticles: 136, maxAliveParticles: 108, reserve: 108
       }).setDepth(1420);
-      this.hazardVisuals.push(this.snowEmitter);
+      this.snowEmitters.push(farFlakes);
+      this.hazardVisuals.push(farFlakes);
+
+      if (!this.settings.reducedMotion) {
+        const nearFlakes = this.add.particles(0, 0, 'spark', {
+          x: { min: -25, max: GAME_W + 25 }, y: { min: -8, max: GAME_H * 0.48 },
+          speedX: { min: -24 - snow.density * 18, max: -5 }, speedY: { min: 42, max: 76 },
+          lifespan: { min: 1750, max: 3100 }, scale: { start: 0.92, end: 0.28 },
+          alpha: { start: 0.58, end: 0.08 }, tint: [0xffffff, 0xc6e7ff], quantity: 1,
+          frequency: Math.round(165 - snow.density * 72), advance: 900,
+          maxParticles: 84, maxAliveParticles: 64, reserve: 64
+        }).setDepth(2101);
+        this.snowEmitters.push(nearFlakes);
+        this.hazardVisuals.push(nearFlakes);
+      }
     }
 
     const pressure = this.hazardMap.get('crowd-pressure');
@@ -1848,14 +1863,7 @@ export class GameScene extends Phaser.Scene {
       corner: PAL.goldDark
     });
 
-    makeIconButton(this, 9, 5.5, 7, 'icon-back', () => {
-      this.startScene(this.mode === 'career' ? 'LevelSelect' : 'Menu');
-    }, {
-      color: PAL.panelHi, hover: PAL.blue, border: PAL.borderDark,
-      iconScale: 0.32, hitWidth: 22, hitHeight: 19
-    }).setDepth(2000);
-
-    this.muteButton = makeIconButton(this, 23, 5.5, 7,
+    this.muteButton = makeIconButton(this, 10, 5.5, 7,
       Audio.muted ? 'icon-mute' : 'icon-sound', () => {
         const muted = Audio.toggleMuted();
         MenuMusic.setMuted(muted);
@@ -1869,7 +1877,7 @@ export class GameScene extends Phaser.Scene {
     if (this.mode === 'career') {
       // One strip, three zones: identity left, match title centred, conditions
       // right. Everything used to compete inside the same run of text.
-      bodyText(this, 38, 5.5, `MATCH ${String(this.levelIndex + 1).padStart(2, '0')}`, {
+      bodyText(this, 24, 5.5, `MATCH ${String(this.levelIndex + 1).padStart(2, '0')}`, {
         fontFamily: FONT, fontSize: '4px', color: '#f3e7c3', letterSpacing: 0.2
       }).setDepth(2000);
       bodyText(this, GAME_W / 2, 5.5, String(this.level.name).toUpperCase(), {
@@ -1980,6 +1988,13 @@ export class GameScene extends Phaser.Scene {
       fontFamily: FONT, fontSize: '9px', color: '#f3e7c3',
       stroke: '#071018', strokeThickness: 3
     }).setOrigin(0.5).setDepth(2100).setAlpha(0));
+    // A small, permanently visible route to the only match-control surface.
+    // It stays in the lower safe area so the objective, swipe cue and goal
+    // never compete with it at any responsive size.
+    this.menuHint = bodyText(this, GAME_W - 7, GAME_H - 8, 'TAB  MATCH MENU', {
+      originX: 1, originY: 0.5, fontFamily: FONT, fontSize: '4px',
+      color: '#cfe8ff', letterSpacing: 0.28
+    }).setDepth(2102);
 
     // Labels for the live gesture meter; drawAim toggles their visibility.
     const meterX = GAME_W / 2 - 48;

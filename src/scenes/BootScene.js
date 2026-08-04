@@ -17,6 +17,10 @@ const KICKER_POSES = {
   celebrate: MAPS.kickerCelebrate
 };
 const HD_KICKER_POSES = ['idle', 'ready', 'windup', 'strike', 'follow', 'recover', 'watch', 'celebrate'];
+const BALL_ASSET_IDS = Object.freeze([
+  'ball-snowball', 'ball-basketball', 'ball-golf',
+  'ball-volleyball', 'ball-beachball', 'ball-tennis'
+]);
 
 const HOME_KIT = { B: 0x17365d, C: PAL.gold, D: 0x0e2038, Y: 0xf8f8f4 };
 // Hard ceiling on the boot screen, whatever the platform SDK decides to do.
@@ -63,7 +67,7 @@ export class BootScene extends Phaser.Scene {
       frameHeight: 204
     });
     this.load.image('calynx-logo-pixel', `${base}assets/hd/calynx-logo-pixel.png`);
-    this.load.image('ball-classic-hd', `${base}assets/hd/ball-classic-hd.png`);
+    BALL_ASSET_IDS.forEach((id) => this.load.image(id, `${base}assets/balls/${id}.png`));
   }
 
   create() {
@@ -160,16 +164,20 @@ export class BootScene extends Phaser.Scene {
     });
 
     getCosmeticsByCategory('ball').forEach((cosmetic) => {
-      const map = cosmetic.id === 'ball-basketball'
-        ? MAPS.ballBasketball
-        : cosmetic.id === 'ball-golf'
-          ? MAPS.ballGolf
-          : MAPS.ball;
-      textureFromMap(this, cosmetic.id, map, {
-        W: cosmetic.palette.base,
-        K: cosmetic.palette.panels,
-        G: cosmetic.palette.accent
-      });
+      // The selectable ball collection is generated pixel art. Keep this
+      // procedural fallback so an interrupted asset load never breaks Boot.
+      if (!this.textures.exists(cosmetic.id)) {
+        const map = cosmetic.id === 'ball-basketball'
+          ? MAPS.ballBasketball
+          : cosmetic.id === 'ball-golf'
+            ? MAPS.ballGolf
+            : MAPS.ball;
+        textureFromMap(this, cosmetic.id, map, {
+          W: cosmetic.palette.base,
+          K: cosmetic.palette.panels,
+          G: cosmetic.palette.accent
+        });
+      }
     });
 
     getCosmeticsByCategory('trail').forEach((cosmetic) => {

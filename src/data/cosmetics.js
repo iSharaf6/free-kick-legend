@@ -8,7 +8,7 @@ export const COSMETIC_CATEGORIES = Object.freeze(['character', 'kit', 'ball', 't
 export const STARTER_COSMETICS = Object.freeze({
   character: 'character-mica',
   kit: 'kit-home',
-  ball: 'ball-classic',
+  ball: 'ball-snowball',
   trail: 'trail-none'
 });
 
@@ -129,58 +129,17 @@ export const COSMETICS = Object.freeze([
   }),
 
   // ------------------------------------------------------------------- balls
+  // These are deliberately sport balls, not recoloured footballs. Each one
+  // changes the solver profile, so its feel is something the player can learn.
   item({
-    id: 'ball-classic', category: 'ball', name: 'Classic Panels', description: 'The timeless black-and-white match ball.',
+    id: 'ball-snowball', category: 'ball', name: 'Packed Snowball',
+    description: 'A hand-packed snowball that thumps down and sheds speed in the air.',
     price: 0, rarity: 'common', unlock: { type: 'starter', value: 0 },
-    palette: { base: 0xf3f0df, panels: 0x202630, accent: 0xaeb5bc },
+    palette: { base: 0xeaf5ff, panels: 0xaec8dc, accent: 0xffffff },
     gameplay: {
-      feel: 'Match Standard', summary: 'Balanced flight, bounce and curl', shotPower: 1,
-      visualScale: 1, physics: {}
-    }
-  }),
-  item({
-    id: 'ball-ocean', category: 'ball', name: 'Ocean Spin', description: 'Cool cyan panels that read clearly in flight.',
-    price: 180, rarity: 'common', unlock: { type: 'coins', value: 180 },
-    palette: { base: 0xeaf9ff, panels: 0x1679a7, accent: 0x55c5dc },
-    gameplay: {
-      feel: 'Curve Ball', summary: 'Stronger bend with a softer rebound', shotPower: 0.99,
-      visualScale: 1, physics: { magnus: 1.24, bounce: 0.92, spinDecay: 0.86 }
-    }
-  }),
-  item({
-    id: 'ball-ember', category: 'ball', name: 'Ember Strike', description: 'Hot orange panels for pressure kicks.',
-    price: 300, rarity: 'uncommon', unlock: { type: 'stars', value: 28 },
-    palette: { base: 0xffe4b8, panels: 0xc44424, accent: 0xf39c32 },
-    gameplay: {
-      feel: 'Power Ball', summary: 'Faster launch with heavier air carry', shotPower: 1.04,
-      visualScale: 1.02, physics: { drag: 0.9, magnus: 0.92, bounce: 1.04 }
-    }
-  }),
-  item({
-    id: 'ball-pixel', category: 'ball', name: 'Pixel Pop', description: 'Chunky primary colours with arcade energy.',
-    price: 420, rarity: 'rare', unlock: { type: 'cup', value: 'targets' },
-    palette: { base: 0xf7f0d0, panels: 0x365fbd, accent: 0xe85a45 },
-    gameplay: {
-      feel: 'Arcade Ball', summary: 'Lively bounce and quick roll', shotPower: 1.01,
-      visualScale: 1, physics: { bounce: 1.18, rollingDrag: 0.84, impactFriction: 0.95 }
-    }
-  }),
-  item({
-    id: 'ball-midnight', category: 'ball', name: 'Midnight Chrome', description: 'A dark ball edged for strong visibility.',
-    price: 560, rarity: 'rare', unlock: { type: 'stars', value: 84 },
-    palette: { base: 0x323b4b, panels: 0x10151e, accent: 0xb7c6da },
-    gameplay: {
-      feel: 'Heavy Ball', summary: 'Low drag, muted bounce, slower curl', shotPower: 1.03,
-      visualScale: 1.04, physics: { drag: 0.84, magnus: 0.82, bounce: 0.78, gravity: 1.04 }
-    }
-  }),
-  item({
-    id: 'ball-gold', category: 'ball', name: 'Golden Match', description: 'The final-stage ball of a proven specialist.',
-    price: 850, rarity: 'legendary', unlock: { type: 'cup', value: 'legend' },
-    palette: { base: 0xffe184, panels: 0xa66b16, accent: 0xfff0b8 },
-    gameplay: {
-      feel: 'Final Ball', summary: 'Fast, stable tournament flight', shotPower: 1.02,
-      visualScale: 1, physics: { drag: 0.92, spinDecay: 0.94 }
+      feel: 'Packed Impact', summary: 'Heavy drop · soft bounce · low wind drift', shotPower: 0.92,
+      visualScale: 1.08, windEffect: 0.76,
+      physics: { gravity: 1.12, drag: 1.32, magnus: 0.70, bounce: 0.36, rollingDrag: 1.72, impactFriction: 0.72, spinDecay: 1.34 }
     }
   }),
   item({
@@ -190,7 +149,8 @@ export const COSMETICS = Object.freeze([
     palette: { base: 0xe77925, panels: 0x24160f, accent: 0xffb45e },
     gameplay: {
       feel: 'Street Bounce', summary: 'Floatier flight · 45% stronger bounce', shotPower: 0.96,
-      visualScale: 1.16, physics: { gravity: 0.94, drag: 1.08, magnus: 0.84, bounce: 1.45, rollingDrag: 0.82 }
+      visualScale: 1.16, windEffect: 0.96,
+      physics: { gravity: 0.94, drag: 1.08, magnus: 0.84, bounce: 1.45, rollingDrag: 0.82 }
     }
   }),
   item({
@@ -200,7 +160,41 @@ export const COSMETICS = Object.freeze([
     palette: { base: 0xf8fbf2, panels: 0x9aa7a5, accent: 0xd6ded9 },
     gameplay: {
       feel: 'Tour Flight', summary: 'Smaller · faster · 45% more aerodynamic curl', shotPower: 1.06,
-      visualScale: 0.72, physics: { gravity: 1.06, drag: 0.76, magnus: 1.45, bounce: 0.66, spinDecay: 0.78 }
+      visualScale: 0.72, windEffect: 0.88,
+      physics: { gravity: 1.06, drag: 0.76, magnus: 1.45, bounce: 0.66, spinDecay: 0.78 }
+    }
+  }),
+  item({
+    id: 'ball-volleyball', category: 'ball', name: 'Sky Volleyball',
+    description: 'A soft, buoyant volleyball that carries high and keeps its bend.',
+    price: 340, rarity: 'uncommon', unlock: { type: 'coins', value: 340 },
+    palette: { base: 0xf7fbff, panels: 0x247ac5, accent: 0x78c6ee },
+    gameplay: {
+      feel: 'Float Serve', summary: 'High carry · extra curl · lively rebound', shotPower: 0.98,
+      visualScale: 1.05, windEffect: 1.14,
+      physics: { gravity: 0.88, drag: 1.02, magnus: 1.16, bounce: 1.18, rollingDrag: 0.92, spinDecay: 0.75 }
+    }
+  }),
+  item({
+    id: 'ball-beachball', category: 'ball', name: 'Beach Ball',
+    description: 'A glossy beach ball that floats, swerves and catches every breeze.',
+    price: 560, rarity: 'rare', unlock: { type: 'cup', value: 'targets' },
+    palette: { base: 0xf7fbff, panels: 0x217bd0, accent: 0xf0523b },
+    gameplay: {
+      feel: 'Breeze Rider', summary: 'Big float · huge wind drift · slow launch', shotPower: 0.84,
+      visualScale: 1.20, windEffect: 1.65,
+      physics: { gravity: 0.74, drag: 1.55, magnus: 1.50, bounce: 0.90, rollingDrag: 1.20, impactFriction: 0.80, spinDecay: 1.24 }
+    }
+  }),
+  item({
+    id: 'ball-tennis', category: 'ball', name: 'Tennis Ball',
+    description: 'A fast felt ball with a sharp seam that bites into curl and springs off turf.',
+    price: 760, rarity: 'legendary', unlock: { type: 'cup', value: 'legend' },
+    palette: { base: 0xd8ed23, panels: 0xf7f4d5, accent: 0x91b312 },
+    gameplay: {
+      feel: 'Topspin Rally', summary: 'Quick launch · sharp curl · springy bounce', shotPower: 1.06,
+      visualScale: 0.90, windEffect: 1.05,
+      physics: { gravity: 1.04, drag: 0.90, magnus: 1.30, bounce: 1.60, rollingDrag: 1.05, impactFriction: 0.88, spinDecay: 0.90 }
     }
   }),
 

@@ -234,6 +234,7 @@ test('Tab is captured, prevents browser focus, and toggles the pause menu once',
   listeners.get('keydown-TAB')({ repeat: true, preventDefault: () => { prevented++; } });
 
   assert.deepEqual(captures, ['TAB']);
+  assert.deepEqual([...listeners.keys()], ['keydown-TAB']);
   assert.equal(prevented, 2);
   assert.equal(event.cancelled, 1);
   assert.equal(toggles, 1);

@@ -87,11 +87,12 @@ test('career data contains five coherent ten-level cups', () => {
   }
 });
 
-test('Level 15 and low-shot technique levels stay placement-open instead of forcing centre circles', () => {
+test('Level 15 is a targeted snow curve challenge and low-shot routes stay placement-open', () => {
   assert.equal(LEVELS[14].id, 'curve-05');
-  assert.equal(LEVELS[14].objective.type, 'dip');
-  assert.equal(LEVELS[14].target, null);
-  assert.ok(LEVELS[14].objective.minimumHeight <= 1.95);
+  assert.equal(LEVELS[14].objective.type, 'curve-target');
+  assert.ok(LEVELS[14].target);
+  assert.ok(LEVELS[14].hazards.some((hazard) => hazard.type === 'snow'));
+  assert.equal(LEVELS[14].wall, 0);
 
   for (const level of LEVELS.filter((entry) => entry.objective.type === 'low-shot')) {
     assert.equal(level.target, null, `${level.id} should reward the low route, not a mandatory circle`);
@@ -284,6 +285,7 @@ test('save validation clamps corrupt values and restores safe cosmetics/settings
     ]
   );
   assert.equal(SaveManager.getEquippedCosmetic('kit'), 'kit-home');
+  assert.equal(SaveManager.getEquippedCosmetic('ball'), 'ball-snowball');
   assert.equal(SaveManager.getEquippedCosmetic('trail'), 'trail-ember');
   assert.equal(SaveManager.getSettings().musicVolume, 1);
   assert.equal(SaveManager.getSettings().sfxVolume, 0);
@@ -332,12 +334,12 @@ test('career stars unlock sequentially and award clear/three-star coins only onc
 });
 
 test('coins purchase and equip deterministic play-style cosmetics', () => {
-  SaveManager.addCoins(300);
-  assert.equal(SaveManager.purchaseCosmetic('ball-ocean'), true);
-  assert.equal(SaveManager.getCoins(), 120);
-  assert.equal(SaveManager.ownsCosmetic('ball-ocean'), true);
-  assert.equal(SaveManager.equipCosmetic('ball-ocean'), true);
-  assert.equal(SaveManager.getEquippedCosmetic('ball'), 'ball-ocean');
+  SaveManager.addCoins(400);
+  assert.equal(SaveManager.purchaseCosmetic('ball-volleyball'), true);
+  assert.equal(SaveManager.getCoins(), 60);
+  assert.equal(SaveManager.ownsCosmetic('ball-volleyball'), true);
+  assert.equal(SaveManager.equipCosmetic('ball-volleyball'), true);
+  assert.equal(SaveManager.getEquippedCosmetic('ball'), 'ball-volleyball');
   assert.equal(SaveManager.purchaseCosmetic('trail-aurora'), false);
   assert.equal(SaveManager.equipCosmetic('trail-aurora'), false);
 });

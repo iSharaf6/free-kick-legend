@@ -17,6 +17,7 @@ const DEFAULT_BALL = Object.freeze({
   summary: 'Balanced flight, bounce and curl',
   shotPower: 1,
   visualScale: 1,
+  windEffect: 1,
   physics: Object.freeze({})
 });
 
@@ -36,7 +37,7 @@ export function resolveLoadoutGameplay(loadout = {}) {
     powerCap: finite(character.powerCap, 1),
     spinMultiplier: finite(character.spinMultiplier, 1),
     lateralMultiplier: finite(character.lateralMultiplier, 1),
-    windEffect: finite(character.windEffect, 1),
+    windEffect: finite(character.windEffect, 1) * finite(ball.windEffect, DEFAULT_BALL.windEffect),
     previewFraction: finite(character.previewFraction, 0.55),
     wallKnockdownPower: finite(character.wallKnockdownPower, Infinity),
     visualScale: finite(ball.visualScale, 1),

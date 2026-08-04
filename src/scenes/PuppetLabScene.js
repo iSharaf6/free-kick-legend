@@ -96,7 +96,7 @@ export class PuppetLabScene extends Phaser.Scene {
     this.ballBody.plugin = { ...(this.ballBody.plugin || {}), labBall: true };
     this.matter.world.add(this.ballBody);
     this.ballSprite = this.add.image(72, 207,
-      this.textures.exists('ball-classic-hd') ? 'ball-classic-hd' : 'ball')
+      this.textures.exists('ball-snowball') ? 'ball-snowball' : 'ball')
       .setDisplaySize(15, 15)
       .setDepth(80);
     this.ballShadow = this.add.ellipse(72, 239, 20, 5, 0x071018, 0.36).setDepth(10);

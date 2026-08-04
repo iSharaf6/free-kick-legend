@@ -197,8 +197,9 @@ const RAW_LEVELS = [
     objective: objective('target', 'Lift the ball through the centre', { attempts: 4 }), target: TARGETS.center, reward: reward(45), style: 'training'
   }),
   makeLevel({
-    id: 'academy-03', cup: 'academy', name: 'Lift Off', distance: 15, offsetX: 0, wall: 2, keeper: 0.14,
-    objective: objective('loft', 'Lift the ball over the wall', { minimumHeight: 1.9 }), reward: reward(50), style: 'training'
+    id: 'academy-03', cup: 'academy', name: 'First Flurry', distance: 15, offsetX: 0, wall: 0, keeper: 0.14,
+    objective: objective('power', 'Drive a clean finish through the falling snow'),
+    hazards: [hazard('snow', { drag: 0.045, trail: true, density: 0.46 })], reward: reward(50), style: 'training'
   }),
   makeLevel({
     id: 'academy-04', cup: 'academy', name: 'Pick the Left', distance: 15, offsetX: 1.5, wall: 1, keeper: 0.16,
@@ -249,9 +250,10 @@ const RAW_LEVELS = [
     reward: reward(80), style: 'aggressive'
   }),
   makeLevel({
-    id: 'curve-05', cup: 'curve', name: 'Over and Down', distance: 18, offsetX: 0, wall: 4, keeper: 0.36,
-    objective: objective('dip', 'Clear the wall, then finish away from the keeper', { minimumHeight: 1.95 }),
-    reward: reward(85), style: 'line-reader'
+    id: 'curve-05', cup: 'curve', name: 'Snow Drift', distance: 18, offsetX: 0, wall: 0, keeper: 0.36,
+    objective: objective('curve-target', 'Bend through the crosswind into the far corner', { curveDirection: 'right', minimumCurve: 0.24 }),
+    target: TARGETS.topRight, wind: wind(0.32, 0.06),
+    hazards: [hazard('snow', { drag: 0.065, trail: true, density: 0.64 })], reward: reward(85), style: 'line-reader'
   }),
   makeLevel({
     id: 'curve-06', cup: 'curve', name: 'Under the Jump', distance: 16, offsetX: 1, wall: 4, keeper: 0.38,
