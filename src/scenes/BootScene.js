@@ -67,6 +67,7 @@ export class BootScene extends Phaser.Scene {
       frameHeight: 204
     });
     this.load.image('calynx-logo-pixel', `${base}assets/hd/calynx-logo-pixel.png`);
+    this.load.image('ball-classic', `${base}assets/hd/ball-classic-hd.png`);
     BALL_ASSET_IDS.forEach((id) => this.load.image(id, `${base}assets/balls/${id}.png`));
   }
 

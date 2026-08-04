@@ -225,6 +225,8 @@ test('cosmetics are unique, readable and include a valid starter per category', 
   assert.ok(getCosmeticsByCategory('trail').every((cosmetic) => cosmetic.utility?.summary));
   assert.ok(getCosmetic('ball-basketball'));
   assert.ok(getCosmetic('ball-golf'));
+  assert.ok(getCosmetic('ball-classic'));
+  assert.equal(STARTER_COSMETICS.ball, 'ball-classic');
 
   const players = getCosmeticsByCategory('character');
   assert.equal(new Set(players.map((player) => player.archetype)).size, players.length);
@@ -285,7 +287,7 @@ test('save validation clamps corrupt values and restores safe cosmetics/settings
     ]
   );
   assert.equal(SaveManager.getEquippedCosmetic('kit'), 'kit-home');
-  assert.equal(SaveManager.getEquippedCosmetic('ball'), 'ball-snowball');
+  assert.equal(SaveManager.getEquippedCosmetic('ball'), 'ball-classic');
   assert.equal(SaveManager.getEquippedCosmetic('trail'), 'trail-ember');
   assert.equal(SaveManager.getSettings().musicVolume, 1);
   assert.equal(SaveManager.getSettings().sfxVolume, 0);

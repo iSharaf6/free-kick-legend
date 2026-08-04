@@ -8,7 +8,7 @@ export const COSMETIC_CATEGORIES = Object.freeze(['character', 'kit', 'ball', 't
 export const STARTER_COSMETICS = Object.freeze({
   character: 'character-mica',
   kit: 'kit-home',
-  ball: 'ball-snowball',
+  ball: 'ball-classic',
   trail: 'trail-none'
 });
 
@@ -129,8 +129,18 @@ export const COSMETICS = Object.freeze([
   }),
 
   // ------------------------------------------------------------------- balls
-  // These are deliberately sport balls, not recoloured footballs. Each one
+  // The classic football is the balanced default; every alternate sport ball
   // changes the solver profile, so its feel is something the player can learn.
+  item({
+    id: 'ball-classic', category: 'ball', name: 'Classic Football',
+    description: 'The balanced black-and-white match ball for a traditional free kick.',
+    price: 0, rarity: 'common', unlock: { type: 'starter', value: 0 },
+    palette: { base: 0xf3f0df, panels: 0x202630, accent: 0xaeb5bc },
+    gameplay: {
+      feel: 'Match Standard', summary: 'Balanced flight, bounce and curl', shotPower: 1,
+      visualScale: 1, windEffect: 1, physics: {}
+    }
+  }),
   item({
     id: 'ball-snowball', category: 'ball', name: 'Packed Snowball',
     description: 'A hand-packed snowball that thumps down and sheds speed in the air.',

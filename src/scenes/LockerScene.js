@@ -17,7 +17,7 @@ import { Kicker } from '../objects/Kicker.js';
 const CATEGORY_META = {
   character: { label: 'PLAYERS', icon: 'kicker-hd-kit-home-idle', color: 0x237064 },
   kit: { label: 'KITS', icon: 'icon-kit', color: PAL.blue },
-  ball: { label: 'BALLS', icon: 'ball-snowball', color: PAL.orange },
+  ball: { label: 'BALLS', icon: 'ball-classic', color: PAL.orange },
   trail: { label: 'TRAILS', icon: 'icon-trail', color: 0x67549a }
 };
 
@@ -205,7 +205,7 @@ export class LockerScene extends Phaser.Scene {
     const ballId = this.category === 'ball'
       ? selected.id
       : SaveManager.getEquippedCosmetic('ball');
-    const ballKey = this.textures.exists(ballId) ? ballId : 'ball-snowball';
+    const ballKey = this.textures.exists(ballId) ? ballId : 'ball-classic';
     const ball = this.add.image(160, 211, ballKey).setDepth(143);
     const ballGameplay = getCosmetic(ballId)?.gameplay;
     ball.setScale((19 / (ball.texture.source[0]?.width || 12)) * (ballGameplay?.visualScale ?? 1));

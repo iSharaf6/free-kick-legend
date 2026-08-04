@@ -381,7 +381,7 @@ export class GameScene extends Phaser.Scene {
     this.loadout = {
       character: savedLoadout.character || 'character-mica',
       kit: savedLoadout.kit || 'kit-home',
-      ball: savedLoadout.ball || 'ball-snowball',
+      ball: savedLoadout.ball || 'ball-classic',
       trail: savedLoadout.trail || 'trail-none'
     };
     this.loadoutGameplay = resolveLoadoutGameplay(this.loadout);
@@ -402,7 +402,7 @@ export class GameScene extends Phaser.Scene {
       opacity: trailCosmetic?.utility?.opacity ?? 0.14
     };
     this.ballVisualScale = this.loadoutGameplay.visualScale;
-    this.ballTexture = this.textures.exists(this.loadout.ball) ? this.loadout.ball : 'ball-snowball';
+    this.ballTexture = this.textures.exists(this.loadout.ball) ? this.loadout.ball : 'ball-classic';
     // The ball is the subject of a free-kick game, so it gets its own keyline
     // and specular pass rather than relying on the sprite alone to carry it.
     this.ballOutlineGfx = this.add.graphics();

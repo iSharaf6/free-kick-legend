@@ -211,8 +211,8 @@ export class MenuScene extends Phaser.Scene {
       scale: 4.4,
       depth: 130
     });
-    const ballKey = SaveManager.getEquippedCosmetic?.('ball') || 'ball-snowball';
-    const texture = this.textures.exists(ballKey) ? ballKey : 'ball-snowball';
+    const ballKey = SaveManager.getEquippedCosmetic?.('ball') || 'ball-classic';
+    const texture = this.textures.exists(ballKey) ? ballKey : 'ball-classic';
     const ball = this.add.image(158, 196, texture).setDepth(160);
     ball.setScale(17 / (ball.texture.source[0]?.width || 12));
     this.tweens.add({
