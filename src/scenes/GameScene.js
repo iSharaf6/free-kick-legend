@@ -3469,15 +3469,185 @@ export class GameScene extends Phaser.Scene {
     SaveManager.incrementStat('arcadeRuns');
     const runReward = Math.min(20 + this.goals * 6 + Math.floor(this.score / 5000) * 5, 120);
     SaveManager.addCoins(runReward);
-    this.showOverlay("TIME'S UP!", [
-      `Score: ${this.score}`,
-      `Goals: ${this.goals}  •  Best: ${SaveManager.getBestArcade()}`,
-      `+${runReward} COINS`
-    ], [
-      { label: 'RETRY', color: 0xb85818, hover: 0xd87828, cb: () => this.restartCurrentLevel({ mode: 'arcade' }) },
-      { label: 'MENU', color: 0x37474f, hover: 0x546e7a, cb: () => this.startScene('Menu') }
-    ]);
+    this.showArcadeCompleteOverlay({
+      score: this.score,
+      goals: this.goals,
+      best: SaveManager.getBestArcade(),
+      reward: runReward
+    });
     this.schedule(1150, () => this.requestNaturalBreakAd());
+  }
+
+  showArcadeCompleteOverlay({ score, goals, best, reward }) {
+    if (this.terminalOverlayShown || this.transitioning || !this.sessionAlive) return;
+    this.terminalOverlayShown = true;
+    this.over = true;
+    this.state = 'OVERLAY';
+    this.swipe.enabled = false;
+    this.swipe.cancel();
+    this.cancelScheduledCalls();
+
+    const overlayObjects = this.terminalOverlayObjects;
+    const dim = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, PAL.ink, 0.84)
+      .setDepth(2999).setInteractive();
+    overlayObjects.push(dim);
+
+    // Time Attack earns a dedicated broadcast-results card. The outer frame,
+    // crest, three fast-scanning stat rows, and oversized rematch actions are
+    // deliberately closer to an arcade cabinet result screen than the generic
+    // career/daily terminal overlay.
+    const chrome = this.add.graphics().setDepth(3000);
+    drawPanel(chrome, 64, 31, 352, 211, {
+      fill: 0x0d2236,
+      border: PAL.goldDark,
+      corner: PAL.gold,
+      highlight: 0x31506a
+    });
+
+    // Double inset and clipped gold corners give the large slab enough detail
+    // without depending on a resolution-specific bitmap frame.
+    chrome.fillStyle(PAL.borderDark, 0.86);
+    chrome.fillRect(70, 37, 340, 1);
+    chrome.fillRect(70, 37, 1, 198);
+    chrome.fillStyle(PAL.ink, 0.9);
+    chrome.fillRect(70, 234, 340, 1);
+    chrome.fillRect(409, 37, 1, 198);
+    chrome.fillStyle(PAL.gold, 0.92);
+    chrome.fillRect(73, 39, 8, 2);
+    chrome.fillRect(399, 39, 8, 2);
+    chrome.fillRect(73, 232, 8, 2);
+    chrome.fillRect(399, 232, 8, 2);
+
+    // Header rail pauses behind the ball crest, matching the visual rhythm of
+    // the reference while using the player's currently equipped ball skin.
+    chrome.fillStyle(PAL.goldDark, 1);
+    chrome.fillRect(82, 35, 142, 3);
+    chrome.fillRect(256, 35, 142, 3);
+    chrome.fillStyle(PAL.gold, 1);
+    chrome.fillRect(84, 34, 140, 1);
+    chrome.fillRect(256, 34, 140, 1);
+
+    const shieldOuter = [
+      { x: 221, y: 22 }, { x: 228, y: 17 }, { x: 252, y: 17 }, { x: 259, y: 22 },
+      { x: 259, y: 44 }, { x: 240, y: 58 }, { x: 221, y: 44 }
+    ];
+    const shieldGold = [
+      { x: 224, y: 23 }, { x: 230, y: 20 }, { x: 250, y: 20 }, { x: 256, y: 23 },
+      { x: 256, y: 42 }, { x: 240, y: 54 }, { x: 224, y: 42 }
+    ];
+    const shieldInner = [
+      { x: 227, y: 25 }, { x: 232, y: 22 }, { x: 248, y: 22 }, { x: 253, y: 25 },
+      { x: 253, y: 40 }, { x: 240, y: 50 }, { x: 227, y: 40 }
+    ];
+    chrome.fillStyle(PAL.ink, 1).fillPoints(shieldOuter, true);
+    chrome.fillStyle(PAL.gold, 1).fillPoints(shieldGold, true);
+    chrome.fillStyle(PAL.panel, 1).fillPoints(shieldInner, true);
+
+    // Title divider and compact central star keep the hierarchy legible even
+    // when the 480x270 canvas is scaled down to mobile landscape.
+    chrome.fillStyle(PAL.borderDark, 0.95);
+    chrome.fillRect(91, 91, 131, 1);
+    chrome.fillRect(258, 91, 131, 1);
+    chrome.fillStyle(PAL.panelHi, 0.9);
+    chrome.fillRect(96, 89, 126, 1);
+    chrome.fillRect(258, 89, 126, 1);
+
+    drawPanel(chrome, 97, 99, 286, 83, {
+      fill: 0x091a2a,
+      border: PAL.borderDark,
+      corner: 0x48627a,
+      highlight: 0x274157
+    });
+    chrome.fillStyle(PAL.borderDark, 0.68);
+    chrome.fillRect(103, 126, 274, 1);
+    chrome.fillRect(103, 153, 274, 1);
+    overlayObjects.push(chrome);
+
+    const ballTexture = this.ballTexture || 'ball-classic';
+    const crestBall = this.add.image(240, 34.5, ballTexture)
+      .setDisplaySize(21, 21).setDepth(3002);
+    const dividerStar = this.add.image(240, 90, 'icon-star')
+      .setScale(0.62).setAlpha(0.72).setDepth(3002);
+    overlayObjects.push(crestBall, dividerStar);
+
+    const headline = titleText(this, GAME_W / 2, 69, "TIME'S UP!", '24px', '#f3c449')
+      .setDepth(3002);
+    overlayObjects.push(headline);
+
+    const starIcon = this.add.image(121, 113, 'icon-star').setScale(1.12).setDepth(3002);
+    const ballIcon = this.add.image(121, 140, ballTexture).setDisplaySize(15, 15).setDepth(3002);
+    const coinIcon = this.add.image(121, 167, 'icon-coin').setScale(1.08).setDepth(3002);
+    overlayObjects.push(starIcon, ballIcon, coinIcon);
+
+    const statCopy = [
+      bodyText(this, 139, 113, 'SCORE', {
+        fontFamily: FONT, fontSize: '10px', color: '#f3e7c3'
+      }),
+      bodyText(this, 358, 113, String(score), {
+        originX: 1, fontFamily: FONT, fontSize: '11px', color: '#f3c449'
+      }),
+      bodyText(this, 139, 140, 'GOALS', {
+        fontFamily: FONT, fontSize: '10px', color: '#f3e7c3'
+      }),
+      bodyText(this, 256, 140, String(goals), {
+        originX: 1, fontFamily: FONT, fontSize: '11px', color: '#f3c449'
+      }),
+      bodyText(this, 270, 140, '•', {
+        originX: 0.5, fontFamily: FONT, fontSize: '9px', color: '#667b88'
+      }),
+      bodyText(this, 284, 140, 'BEST', {
+        fontFamily: FONT, fontSize: '8px', color: '#f3e7c3'
+      }),
+      bodyText(this, 358, 140, String(best), {
+        originX: 1, fontFamily: FONT, fontSize: '11px', color: '#f3c449'
+      }),
+      bodyText(this, 139, 167, `+${reward}`, {
+        fontFamily: FONT, fontSize: '11px', color: '#f3c449'
+      }),
+      bodyText(this, 189, 167, 'COINS', {
+        fontFamily: FONT, fontSize: '10px', color: '#f3e7c3'
+      })
+    ];
+    statCopy.forEach((copy) => {
+      copy.setDepth(3002);
+      overlayObjects.push(copy);
+    });
+
+    const retry = makeButton(this, 168, 216, 136, 34, 'RETRY',
+      () => this.restartCurrentLevel({ mode: 'arcade' }), {
+        color: 0xb85818,
+        hover: 0xd87828,
+        pressed: 0x81340f,
+        border: PAL.gold,
+        highlight: 0xee9847,
+        lowlight: 0x71300f,
+        fontSize: '11px',
+        hitHeight: 40
+      }).setDepth(3003);
+    const menu = makeButton(this, 312, 216, 136, 34, 'MENU',
+      () => this.startScene('Menu'), {
+        color: 0x315f8d,
+        hover: 0x487fae,
+        pressed: 0x234567,
+        border: 0x86a9c9,
+        highlight: 0x6191bd,
+        lowlight: 0x1b3854,
+        fontSize: '11px',
+        hitHeight: 40
+      }).setDepth(3003);
+    overlayObjects.push(retry, menu);
+
+    const cardObjects = overlayObjects.slice(1);
+    if (!this.settings.reducedMotion) {
+      cardObjects.forEach((object) => object.setAlpha?.(0));
+      this.tweens.add({
+        targets: cardObjects,
+        alpha: 1,
+        duration: 180,
+        ease: 'Cubic.easeOut'
+      });
+    }
+    this.announceStatus(`Time is up. Score ${score}. ${goals} goals. Best ${best}. ${reward} coins earned.`);
   }
 
   showDailyComplete() {

@@ -136,3 +136,54 @@ test('live swipe copy clears the gesture and feedback lanes', async ({ page }) =
   });
   expect(lanes.readoutY - lanes.hintY).toBeGreaterThan(30);
 });
+
+test('Time Attack ends on the dedicated results card with working rematch actions', async ({ page }) => {
+  const game = new GamePage(page);
+  await game.open({ width: 844, height: 390 });
+  await page.evaluate(() => {
+    const menu = window.__game.scene.getScene('Menu');
+    menu.scene.start('Game', { mode: 'arcade' });
+  });
+  await page.waitForFunction(() => window.__fkl?.state === 'AIMING');
+
+  await page.evaluate(() => {
+    window.__fkl.score = 8400;
+    window.__fkl.goals = 4;
+    window.__fkl.endArcade();
+  });
+  await page.waitForFunction(() => window.__fkl?.terminalOverlayShown === true);
+
+  const result = await page.evaluate(() => {
+    const scene = window.__fkl;
+    const text = scene.children.list
+      .flatMap((child) => child?.list ?? [child])
+      .map((child) => child?.text)
+      .filter(Boolean);
+    const buttons = scene.terminalOverlayObjects
+      .filter((child) => child?.buttonLabel)
+      .map((child) => ({
+        label: child.buttonLabel.text,
+        x: child.x,
+        y: child.y,
+        width: child.buttonWidth,
+        height: child.buttonHeight
+      }));
+    return { text, buttons };
+  });
+
+  expect(result.text).toEqual(expect.arrayContaining([
+    "TIME'S UP!", 'SCORE', '8400', 'GOALS', '4', 'BEST', '+49', 'COINS'
+  ]));
+  expect(result.buttons).toEqual([
+    { label: 'RETRY', x: 168, y: 216, width: 136, height: 34 },
+    { label: 'MENU', x: 312, y: 216, width: 136, height: 34 }
+  ]);
+
+  await game.clickLogical(168, 216);
+  await page.waitForFunction(() => window.__fkl?.mode === 'arcade' && window.__fkl?.state === 'AIMING');
+
+  await page.evaluate(() => window.__fkl.endArcade());
+  await page.waitForFunction(() => window.__fkl?.terminalOverlayShown === true);
+  await game.clickLogical(312, 216);
+  await page.waitForFunction(() => window.__game.scene.isActive('Menu'));
+});
