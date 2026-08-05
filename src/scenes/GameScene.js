@@ -200,6 +200,59 @@ function mixColor(a, b, t) {
   );
 }
 
+function drawTrophyResultsFrame(g, { x, y, w, h, fill = 0x0d2236 }) {
+  drawPanel(g, x, y, w, h, {
+    fill,
+    border: PAL.goldDark,
+    corner: PAL.gold,
+    highlight: 0x31506a
+  });
+
+  const insetX = x + 6;
+  const insetY = y + 6;
+  const insetW = w - 12;
+  const insetH = h - 13;
+  g.fillStyle(PAL.borderDark, 0.86);
+  g.fillRect(insetX, insetY, insetW, 1);
+  g.fillRect(insetX, insetY, 1, insetH);
+  g.fillStyle(PAL.ink, 0.9);
+  g.fillRect(insetX, insetY + insetH, insetW, 1);
+  g.fillRect(insetX + insetW - 1, insetY, 1, insetH);
+  g.fillStyle(PAL.gold, 0.92);
+  g.fillRect(insetX + 3, insetY + 2, 8, 2);
+  g.fillRect(insetX + insetW - 11, insetY + 2, 8, 2);
+  g.fillRect(insetX + 3, insetY + insetH - 2, 8, 2);
+  g.fillRect(insetX + insetW - 11, insetY + insetH - 2, 8, 2);
+
+  const railGap = 16;
+  const railLeft = x + 18;
+  const railRight = x + w - 18;
+  g.fillStyle(PAL.goldDark, 1);
+  g.fillRect(railLeft, y + 4, GAME_W / 2 - railGap - railLeft, 3);
+  g.fillRect(GAME_W / 2 + railGap, y + 4, railRight - (GAME_W / 2 + railGap), 3);
+  g.fillStyle(PAL.gold, 1);
+  g.fillRect(railLeft + 2, y + 3, GAME_W / 2 - railGap - railLeft - 2, 1);
+  g.fillRect(GAME_W / 2 + railGap, y + 3, railRight - (GAME_W / 2 + railGap) - 2, 1);
+
+  const top = y - 14;
+  const shieldOuter = [
+    { x: 221, y: top + 5 }, { x: 228, y: top }, { x: 252, y: top }, { x: 259, y: top + 5 },
+    { x: 259, y: top + 27 }, { x: 240, y: top + 41 }, { x: 221, y: top + 27 }
+  ];
+  const shieldGold = [
+    { x: 224, y: top + 6 }, { x: 230, y: top + 3 }, { x: 250, y: top + 3 }, { x: 256, y: top + 6 },
+    { x: 256, y: top + 25 }, { x: 240, y: top + 37 }, { x: 224, y: top + 25 }
+  ];
+  const shieldInner = [
+    { x: 227, y: top + 8 }, { x: 232, y: top + 5 }, { x: 248, y: top + 5 }, { x: 253, y: top + 8 },
+    { x: 253, y: top + 23 }, { x: 240, y: top + 33 }, { x: 227, y: top + 23 }
+  ];
+  g.fillStyle(PAL.ink, 1).fillPoints(shieldOuter, true);
+  g.fillStyle(PAL.gold, 1).fillPoints(shieldGold, true);
+  g.fillStyle(PAL.panel, 1).fillPoints(shieldInner, true);
+  return g;
+}
+
 // Kick loop state machine: AIMING -> WINDUP -> FLIGHT -> RESULT -> (AIMING | OVERLAY)
 export class GameScene extends Phaser.Scene {
   constructor() {
@@ -3497,51 +3550,7 @@ export class GameScene extends Phaser.Scene {
     // deliberately closer to an arcade cabinet result screen than the generic
     // career/daily terminal overlay.
     const chrome = this.add.graphics().setDepth(3000);
-    drawPanel(chrome, 64, 31, 352, 211, {
-      fill: 0x0d2236,
-      border: PAL.goldDark,
-      corner: PAL.gold,
-      highlight: 0x31506a
-    });
-
-    // Double inset and clipped gold corners give the large slab enough detail
-    // without depending on a resolution-specific bitmap frame.
-    chrome.fillStyle(PAL.borderDark, 0.86);
-    chrome.fillRect(70, 37, 340, 1);
-    chrome.fillRect(70, 37, 1, 198);
-    chrome.fillStyle(PAL.ink, 0.9);
-    chrome.fillRect(70, 234, 340, 1);
-    chrome.fillRect(409, 37, 1, 198);
-    chrome.fillStyle(PAL.gold, 0.92);
-    chrome.fillRect(73, 39, 8, 2);
-    chrome.fillRect(399, 39, 8, 2);
-    chrome.fillRect(73, 232, 8, 2);
-    chrome.fillRect(399, 232, 8, 2);
-
-    // Header rail pauses behind the ball crest, matching the visual rhythm of
-    // the reference while using the player's currently equipped ball skin.
-    chrome.fillStyle(PAL.goldDark, 1);
-    chrome.fillRect(82, 35, 142, 3);
-    chrome.fillRect(256, 35, 142, 3);
-    chrome.fillStyle(PAL.gold, 1);
-    chrome.fillRect(84, 34, 140, 1);
-    chrome.fillRect(256, 34, 140, 1);
-
-    const shieldOuter = [
-      { x: 221, y: 22 }, { x: 228, y: 17 }, { x: 252, y: 17 }, { x: 259, y: 22 },
-      { x: 259, y: 44 }, { x: 240, y: 58 }, { x: 221, y: 44 }
-    ];
-    const shieldGold = [
-      { x: 224, y: 23 }, { x: 230, y: 20 }, { x: 250, y: 20 }, { x: 256, y: 23 },
-      { x: 256, y: 42 }, { x: 240, y: 54 }, { x: 224, y: 42 }
-    ];
-    const shieldInner = [
-      { x: 227, y: 25 }, { x: 232, y: 22 }, { x: 248, y: 22 }, { x: 253, y: 25 },
-      { x: 253, y: 40 }, { x: 240, y: 50 }, { x: 227, y: 40 }
-    ];
-    chrome.fillStyle(PAL.ink, 1).fillPoints(shieldOuter, true);
-    chrome.fillStyle(PAL.gold, 1).fillPoints(shieldGold, true);
-    chrome.fillStyle(PAL.panel, 1).fillPoints(shieldInner, true);
+    drawTrophyResultsFrame(chrome, { x: 64, y: 31, w: 352, h: 211 });
 
     // Title divider and compact central star keep the hierarchy legible even
     // when the 480x270 canvas is scaled down to mobile landscape.
@@ -3728,28 +3737,161 @@ export class GameScene extends Phaser.Scene {
   showLevelClear(stars) {
     this.state = 'OVERLAY';
     PlatformService.gameplayStop();
-    const buttons = [];
-    if (this.levelIndex + 1 < LEVELS.length) {
-      buttons.push({
-        label: 'NEXT >', color: 0x2e7d32, hover: 0x43a047,
+    this.showCareerCompleteOverlay({
+      stars,
+      rating: this.lastShotRating?.label || 'Objective complete',
+      points: this.bestShotScore,
+      goalsRequired: Math.max(1, this.level.objective?.goals ?? 1),
+      reward: this.lastReward,
+      hasNext: this.levelIndex + 1 < LEVELS.length
+    });
+    this.schedule(1150, () => this.requestNaturalBreakAd());
+  }
+
+  showCareerCompleteOverlay({ stars, rating, points, goalsRequired, reward, hasNext }) {
+    if (this.terminalOverlayShown || this.transitioning || !this.sessionAlive) return;
+    this.terminalOverlayShown = true;
+    this.over = true;
+    this.state = 'OVERLAY';
+    this.swipe.enabled = false;
+    this.swipe.cancel();
+    this.cancelScheduledCalls();
+
+    const overlayObjects = this.terminalOverlayObjects;
+    const dim = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, PAL.ink, 0.84)
+      .setDepth(2999).setInteractive();
+    const chrome = this.add.graphics().setDepth(3000);
+    drawTrophyResultsFrame(chrome, { x: 58, y: 24, w: 364, h: 226 });
+
+    // Restrained rays and confetti live behind the headline. They sell the
+    // reward moment without obscuring the three pieces of actionable data.
+    chrome.fillStyle(PAL.gold, 0.06);
+    chrome.fillTriangle(240, 49, 117, 52, 240, 86);
+    chrome.fillTriangle(240, 49, 363, 52, 240, 86);
+    chrome.fillTriangle(240, 51, 156, 88, 324, 88);
+    chrome.fillStyle(PAL.gold, 0.9);
+    [[132, 69], [151, 84], [331, 67], [350, 82], [119, 95], [365, 96]].forEach(([x, y]) => {
+      chrome.fillRect(x, y, 1, 1);
+    });
+
+    drawPanel(chrome, 91, 129, 298, 67, {
+      fill: 0x091a2a,
+      border: PAL.borderDark,
+      corner: 0x48627a,
+      highlight: 0x274157
+    });
+    chrome.fillStyle(PAL.borderDark, 0.68);
+    chrome.fillRect(97, 151, 286, 1);
+    chrome.fillRect(97, 173, 286, 1);
+    overlayObjects.push(dim, chrome);
+
+    const ballTexture = this.ballTexture || 'ball-classic';
+    const crestBall = this.add.image(240, 27.5, ballTexture)
+      .setDisplaySize(21, 21).setDepth(3002);
+    const headline = titleText(this, GAME_W / 2, 68, 'LEVEL CLEAR', '25px', '#f3c449')
+      .setDepth(3002);
+    overlayObjects.push(crestBall, headline);
+
+    const earnedStars = Phaser.Math.Clamp(Number(stars) || 0, 0, 3);
+    for (let i = 0; i < 3; i++) {
+      const star = this.add.image(
+        GAME_W / 2 + (i - 1) * 46,
+        106,
+        i < earnedStars ? 'icon-star' : 'icon-star-empty'
+      ).setDisplaySize(31, 31).setDepth(3002);
+      overlayObjects.push(star);
+      if (!this.settings.reducedMotion) {
+        const finalScaleX = star.scaleX;
+        const finalScaleY = star.scaleY;
+        star.setScale(finalScaleX * 0.72, finalScaleY * 0.72);
+        this.tweens.add({
+          targets: star,
+          scaleX: finalScaleX,
+          scaleY: finalScaleY,
+          delay: 150 + i * 150,
+          duration: 170,
+          ease: 'Back.easeOut',
+          onStart: () => { if (i < earnedStars) Audio.star(i); }
+        });
+      }
+    }
+
+    const rowIcons = [
+      this.add.image(112, 141, 'icon-cup').setScale(1.05),
+      this.add.image(112, 163, 'icon-star').setScale(1.02),
+      this.add.image(112, 185, 'icon-coin').setScale(1.05)
+    ];
+    rowIcons.forEach((icon) => {
+      icon.setDepth(3002);
+      overlayObjects.push(icon);
+    });
+
+    const masteryShots = `${goalsRequired} SHOT${goalsRequired === 1 ? '' : 'S'}`;
+    const rewardText = reward > 0 ? `+${reward} COINS EARNED` : 'BEST REWARD ALREADY CLAIMED';
+    const rows = [
+      bodyText(this, 130, 141, `${String(rating).toUpperCase()}  •  ${points} PTS`, {
+        fontFamily: FONT, fontSize: '9px', color: '#f3e7c3'
+      }),
+      bodyText(this, 130, 163, `3★ MASTERY: ${masteryShots}  •  2050+ PTS`, {
+        fontFamily: FONT, fontSize: '7px', color: '#f3e7c3'
+      }),
+      bodyText(this, 130, 185, rewardText, {
+        fontFamily: FONT, fontSize: reward > 0 ? '9px' : '8px',
+        color: reward > 0 ? '#f3c449' : '#f3e7c3'
+      })
+    ];
+    rows.forEach((row) => {
+      row.setDepth(3002);
+      overlayObjects.push(row);
+    });
+
+    const actions = [];
+    if (hasNext) {
+      actions.push({
+        label: 'NEXT >', color: 0x2e7d32, hover: 0x43a047, pressed: 0x1b5720,
+        border: PAL.gold, highlight: 0x62b64c, lowlight: 0x173f19,
         cb: () => this.restartCurrentLevel({ mode: 'career', levelIndex: this.levelIndex + 1 })
       });
     }
-    buttons.push({
-      label: 'REPLAY', color: 0x1976d2, hover: 0x2196f3,
+    actions.push({
+      label: 'REPLAY', color: 0x1976d2, hover: 0x2196f3, pressed: 0x105298,
+      border: 0x78aade, highlight: 0x4e9bea, lowlight: 0x0c3a70,
       cb: () => this.restartCurrentLevel({ mode: 'career', levelIndex: this.levelIndex })
     });
-    buttons.push({
-      label: 'LEVELS', color: 0x37474f, hover: 0x546e7a,
+    actions.push({
+      label: 'LEVELS', color: 0x37474f, hover: 0x546e7a, pressed: 0x263238,
+      border: 0x78909c, highlight: 0x607d8b, lowlight: 0x1d272c,
       cb: () => this.startScene('LevelSelect')
     });
-    const lines = [
-      `${this.lastShotRating?.label || 'Objective complete'}  •  ${this.bestShotScore} pts`,
-      `3★ MASTERY: ${Math.max(1, this.level.objective?.goals ?? 1)} SHOT${(this.level.objective?.goals ?? 1) === 1 ? '' : 'S'} · 2050+ PTS`,
-      this.lastReward > 0 ? `+${this.lastReward} COINS EARNED` : 'BEST REWARD ALREADY CLAIMED'
-    ];
-    this.showOverlay('LEVEL CLEAR', lines, buttons, stars);
-    this.schedule(1150, () => this.requestNaturalBreakAd());
+
+    const buttonW = actions.length === 3 ? 104 : 136;
+    const gap = actions.length === 3 ? 8 : 10;
+    const totalW = actions.length * buttonW + (actions.length - 1) * gap;
+    actions.forEach((action, index) => {
+      const button = makeButton(this,
+        GAME_W / 2 - totalW / 2 + buttonW / 2 + index * (buttonW + gap),
+        224,
+        buttonW,
+        33,
+        action.label,
+        action.cb,
+        {
+          color: action.color,
+          hover: action.hover,
+          pressed: action.pressed,
+          border: action.border,
+          highlight: action.highlight,
+          lowlight: action.lowlight,
+          fontSize: '9px',
+          hitHeight: 39
+        }
+      ).setDepth(3003);
+      overlayObjects.push(button);
+    });
+
+    this.announceStatus(
+      `Level clear. ${earnedStars} stars. ${rating}, ${points} points. ${reward > 0 ? `${reward} coins earned.` : 'Best reward already claimed.'}`
+    );
   }
 
   showLevelFailed() {
@@ -3767,7 +3909,7 @@ export class GameScene extends Phaser.Scene {
     ]);
   }
 
-  showOverlay(title, lines, buttons, stars = -1) {
+  showOverlay(title, lines, buttons) {
     if (this.terminalOverlayShown || this.transitioning || !this.sessionAlive) return;
     this.terminalOverlayShown = true;
     this.over = true;
@@ -3788,37 +3930,10 @@ export class GameScene extends Phaser.Scene {
 
     overlayObjects.push(titleText(this, GAME_W / 2, 73, title, '17px', '#f3c449').setDepth(3001));
 
-    if (stars >= 0) {
-      for (let i = 0; i < 3; i++) {
-        const star = this.add.image(
-          GAME_W / 2 + (i - 1) * 34,
-          112,
-          i < stars ? 'icon-star' : 'icon-star-empty'
-        ).setDepth(3001).setScale(this.settings.reducedMotion ? 1 : 0.94);
-        overlayObjects.push(star);
-        if (!this.settings.reducedMotion) {
-          this.tweens.add({
-            targets: star,
-            scale: 1.06,
-            delay: 180 + i * 180,
-            duration: 120,
-            ease: 'Cubic.easeOut',
-            onStart: () => { if (i < stars) Audio.star(i); },
-            onComplete: () => this.tweens.add({
-              targets: star,
-              scale: 1,
-              duration: 80,
-              ease: 'Cubic.easeInOut'
-            })
-          });
-        }
-      }
-    }
-
     // One wrapped text block keeps failure explanations inside the card at
     // every backing resolution. The former 11px unwrapped lines were wider
     // than the 250px panel and produced the broken Try Again screenshot.
-    overlayObjects.push(bodyText(this, GAME_W / 2, stars >= 0 ? 150 : 123, lines.join('\n'), {
+    overlayObjects.push(bodyText(this, GAME_W / 2, 123, lines.join('\n'), {
       originX: 0.5,
       originY: 0.5,
       align: 'center',

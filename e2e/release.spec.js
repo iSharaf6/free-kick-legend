@@ -187,3 +187,55 @@ test('Time Attack ends on the dedicated results card with working rematch action
   await game.clickLogical(312, 216);
   await page.waitForFunction(() => window.__game.scene.isActive('Menu'));
 });
+
+test('Career victory uses the trophy results card and advances to the next level', async ({ page }) => {
+  const game = new GamePage(page);
+  await game.open({ width: 844, height: 390 });
+  await game.startCareer();
+
+  await page.evaluate(() => {
+    Object.assign(window.__fkl, {
+      lastShotRating: { label: 'Rocket' },
+      bestShotScore: 1296,
+      lastReward: 0
+    });
+    window.__fkl.showLevelClear(2);
+  });
+  await page.waitForFunction(() => window.__fkl?.terminalOverlayShown === true);
+
+  const result = await page.evaluate(() => {
+    const scene = window.__fkl;
+    const text = scene.children.list
+      .flatMap((child) => child?.list ?? [child])
+      .map((child) => child?.text)
+      .filter(Boolean);
+    const buttons = scene.terminalOverlayObjects
+      .filter((child) => child?.buttonLabel)
+      .map((child) => ({
+        label: child.buttonLabel.text,
+        x: child.x,
+        y: child.y,
+        width: child.buttonWidth,
+        height: child.buttonHeight
+      }));
+    const resultStars = scene.terminalOverlayObjects
+      .filter((child) => child?.texture?.key === 'icon-star' || child?.texture?.key === 'icon-star-empty')
+      .filter((child) => child.displayWidth === 31)
+      .map((child) => child.texture.key);
+    return { text, buttons, resultStars };
+  });
+
+  expect(result.text).toEqual(expect.arrayContaining([
+    'LEVEL CLEAR', 'ROCKET  •  1296 PTS', '3★ MASTERY: 1 SHOT  •  2050+ PTS',
+    'BEST REWARD ALREADY CLAIMED'
+  ]));
+  expect(result.resultStars).toEqual(['icon-star', 'icon-star', 'icon-star-empty']);
+  expect(result.buttons).toEqual([
+    { label: 'NEXT >', x: 128, y: 224, width: 104, height: 33 },
+    { label: 'REPLAY', x: 240, y: 224, width: 104, height: 33 },
+    { label: 'LEVELS', x: 352, y: 224, width: 104, height: 33 }
+  ]);
+
+  await game.clickLogical(128, 224);
+  await page.waitForFunction(() => window.__fkl?.state === 'AIMING' && window.__fkl?.levelIndex === 1);
+});
