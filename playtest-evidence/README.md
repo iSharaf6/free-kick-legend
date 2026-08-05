@@ -1,5 +1,26 @@
 # Playtest evidence index
 
+## Live-to-local manual pass — 5 August 2026
+
+The `live-fix-2026-08-05` directory contains a curated 23-image before/after
+set captured with the Codex in-app Chromium browser. The `before` images are
+from the deployed GitHub Pages canvas; the `after` images are from the updated
+local build using real pointer input. Key comparisons:
+
+| Before | After | Finding |
+|---|---|---|
+| `before/07-time-attack-1280x720.jpg` | `after/03-time-attack-ready-1280x720.jpg` | Timer now waits at 60 for the first valid shot. |
+| `before/03-aim-1280x720.jpg` | `after/04-aiming-mid-power-1280x720.jpg` | Fixed power domain and unobstructed live meter. |
+| `before/08-menu-1440x900-misaligned.jpg` | `after/10-menu-centered-1440x900.jpg` | Symmetric desktop letterboxing. |
+| `before/04-goal-result-1280x720.jpg` | `after/07-goal-1280x720.jpg` | Real pointer goal/result validation after calibration. |
+| `before/09-mobile-844x390.jpg` | `after/11-mobile-landscape-844x390.jpg` | Landscape remains full-frame and centered. |
+| `before/10-mobile-390x844.jpg` | `after/12-mobile-portrait-390x844.jpg` | Explicit landscape-only portrait gate remains readable. |
+
+See `PLAYTEST_REPORT.md` for exact reproduction steps, root causes, fixes, and
+resolution status.
+
+---
+
 Captured on 30 July 2026 with the Codex in-app Chromium browser. Images are intentionally limited to states that support a finding in `PLAYTEST_REPORT.md`.
 
 | File | Build / viewport | What it demonstrates |
