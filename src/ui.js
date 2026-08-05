@@ -80,7 +80,10 @@ export function drawPanel(g, x, y, w, h, opts = {}) {
 function drawButton(g, w, h, fill, state, opts) {
   const pressed = state === 'pressed';
   const disabled = state === 'disabled';
-  const y = pressed ? 1 : 0;
+  // A two-pixel travel plus the disappearing drop shadow reads as a physical
+  // broadcast-console key even after the 480px layout is scaled down on a
+  // phone. One pixel was technically different but visually imperceptible.
+  const y = pressed ? 2 : 0;
   const border = opts.border ?? (opts.selected ? PAL.gold : PAL.border);
 
   g.clear();
@@ -116,7 +119,7 @@ function drawButton(g, w, h, fill, state, opts) {
 export function makeButton(scene, x, y, w, h, label, onClick, opts = {}) {
   const base = opts.color ?? PAL.blue;
   const hover = opts.hover ?? shade(base, 18);
-  const pressed = opts.pressed ?? shade(base, -18);
+  const pressed = opts.pressed ?? shade(base, -36);
   const bg = scene.add.graphics();
   // Centring a long label inside an iconed button walks it straight over the
   // icon. `labelAlign: 'left'` parks the text in a reserved column instead, so
@@ -153,7 +156,7 @@ export function makeButton(scene, x, y, w, h, label, onClick, opts = {}) {
   const render = (state = enabled ? (isDown ? 'pressed' : (isOver ? 'hover' : 'idle')) : 'disabled') => {
     const fill = state === 'hover' ? hover : state === 'pressed' ? pressed : base;
     drawButton(bg, w, h, fill, state, opts);
-    const offset = state === 'pressed' ? 1 : 0;
+    const offset = state === 'pressed' ? 2 : 0;
     txt.setY((opts.labelY ?? 0) + offset).setAlpha(enabled ? 1 : 0.48);
     if (icon) icon.setY((opts.iconY ?? 0) + offset).setAlpha(enabled ? 1 : 0.42);
   };

@@ -7,6 +7,7 @@ import {
 import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
 import { MenuMusic } from '../systems/MenuMusic.js';
+import { SettingsPanel } from '../systems/SettingsPanel.js';
 import { PlatformService } from '../systems/PlatformService.js';
 import { LEVELS } from '../data/levels.js';
 import { PAL } from '../pixelart.js';
@@ -145,6 +146,25 @@ export class MenuScene extends Phaser.Scene {
         hitWidth: 30,
         hitHeight: 27
       }).setDepth(203);
+
+    this.settingsButton = makeButton(this, 231, 17, 76, 19, 'SETTINGS', () => {
+      SettingsPanel.open({
+        onChange: (nextSettings) => {
+          if (!this.kicker) return;
+          this.kicker.reducedMotion = Boolean(nextSettings.reducedMotion);
+          if (this.kicker.reducedMotion) this.kicker.pauseAmbient?.();
+          else this.kicker.resumeAmbient?.();
+        }
+      });
+    }, {
+      color: PAL.panelHi,
+      hover: PAL.blue,
+      border: PAL.borderDark,
+      fontSize: '6px',
+      letterSpacing: 0.35,
+      hitWidth: 80,
+      hitHeight: 27
+    }).setDepth(203);
 
     makeIconButton(this, 288, 17, 19, 'icon-cup', () => this.scene.start('Progress'), {
       color: readyClaims ? PAL.green : PAL.panelHi,

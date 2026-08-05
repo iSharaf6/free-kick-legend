@@ -15,6 +15,7 @@ import { AIM_ASSIST_MODES, SaveManager } from '../systems/SaveManager.js';
 import { PlatformService } from '../systems/PlatformService.js';
 import { Audio } from '../systems/AudioSynth.js';
 import { MenuMusic } from '../systems/MenuMusic.js';
+import { SettingsPanel } from '../systems/SettingsPanel.js';
 import { careerStars, isTopCorner, scoreShot, targetGeometry } from '../systems/ShotScoring.js';
 import {
   classifyGoalPlane,
@@ -297,6 +298,9 @@ export class GameScene extends Phaser.Scene {
     configureHdCamera(this);
     this.settings = SaveManager.getSettings?.() || {};
     this.aimAssist = this.settings.aimAssist ?? 'full';
+    const viewportWidth = Number(globalThis.innerWidth) || GAME_W;
+    const viewportHeight = Number(globalThis.innerHeight) || GAME_H;
+    this.compactHud = viewportWidth > viewportHeight && viewportHeight <= 520;
     Audio.setMuted(Boolean(this.settings.muted || PlatformService.shouldMuteAudio()));
     Audio.setVolume(this.settings.sfxVolume ?? 1);
     MenuMusic.configure({
@@ -512,6 +516,7 @@ export class GameScene extends Phaser.Scene {
     this.swipe.enabled = true;
 
     this.installKeyboardControls();
+    this.installVisibilityPause();
 
     this.loadDeferredKeeperArt();
 
@@ -598,6 +603,19 @@ export class GameScene extends Phaser.Scene {
     keyboard.on('keydown-TAB', this.onTabKey);
   }
 
+  installVisibilityPause() {
+    const documentRef = globalThis.document;
+    if (!documentRef?.addEventListener) return false;
+    this.onDocumentVisibility = () => {
+      if (!documentRef.hidden || this.state === 'PAUSED') return;
+      if (PAUSABLE_STATES.has(this.state) && !this.transitioning && !this.terminalOverlayShown) {
+        this.openPauseMenu();
+      }
+    };
+    documentRef.addEventListener('visibilitychange', this.onDocumentVisibility);
+    return true;
+  }
+
   currentRestartData() {
     if (this.mode === 'career') return { mode: 'career', levelIndex: this.levelIndex };
     if (this.mode === 'daily') return { mode: 'daily', dailyDate: this.dailyDate };
@@ -675,8 +693,6 @@ export class GameScene extends Phaser.Scene {
       wordWrap: { width: 250, useAdvancedWrap: true }
     }).setDepth(3501));
 
-    // Aim assist lives here because this is where a player already goes when the
-    // screen is telling them too much. Cycling is enough for three values.
     const assistLabel = () => `AIM ASSIST · ${String(this.aimAssist).toUpperCase()}`;
     const assistText = bodyText(this, GAME_W / 2, 131, assistLabel(), {
       originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '7px', color: '#f3c449'
@@ -686,14 +702,16 @@ export class GameScene extends Phaser.Scene {
     const actions = [
       { label: 'RESUME', color: PAL.blue, hover: PAL.blueHi, cb: () => this.closePauseMenu() },
       {
-        label: 'AIM ASSIST',
+        label: 'SETTINGS',
         color: PAL.panelHi,
         hover: PAL.border,
         cb: () => {
-          const next = AIM_ASSIST_MODES[(AIM_ASSIST_MODES.indexOf(this.aimAssist) + 1) % AIM_ASSIST_MODES.length];
-          this.aimAssist = next;
-          SaveManager.setSetting('aimAssist', next);
-          if (assistText.active) assistText.setText(assistLabel());
+          SettingsPanel.open({
+            onChange: (nextSettings) => {
+              this.applyLiveSettings(nextSettings);
+              if (assistText.active) assistText.setText(assistLabel());
+            }
+          });
         }
       },
       { label: 'RESTART', color: PAL.goldDark, hover: PAL.gold, cb: () => this.restartCurrentLevel() },
@@ -710,6 +728,21 @@ export class GameScene extends Phaser.Scene {
     objects.push(bodyText(this, GAME_W / 2, 198, 'TAB TO RESUME  ·  CHOOSE RESTART OR EXIT MATCH', {
       originX: 0.5, originY: 0.5, align: 'center', fontSize: '6px', color: '#8fa2ab'
     }).setDepth(3501));
+    this.announceStatus('Match paused. Settings, resume, restart, and exit controls are available.');
+  }
+
+  applyLiveSettings(nextSettings = {}) {
+    this.settings = { ...this.settings, ...nextSettings };
+    this.aimAssist = AIM_ASSIST_MODES.includes(this.settings.aimAssist)
+      ? this.settings.aimAssist
+      : 'full';
+    if (this.kicker) {
+      this.kicker.reducedMotion = Boolean(this.settings.reducedMotion);
+      if (this.kicker.reducedMotion) this.kicker.pauseAmbient?.();
+      else this.kicker.resumeAmbient?.();
+    }
+    for (const keeper of this.keepers || []) keeper.reducedMotion = Boolean(this.settings.reducedMotion);
+    return this.settings;
   }
 
   closePauseMenu() {
@@ -725,6 +758,7 @@ export class GameScene extends Phaser.Scene {
     if (!globalThis.document?.hidden && (returnState === 'AIMING' || returnState === 'WINDUP' || returnState === 'FLIGHT')) {
       PlatformService.gameplayStart();
     }
+    this.announceStatus('Match resumed.');
     return true;
   }
 
@@ -751,6 +785,8 @@ export class GameScene extends Phaser.Scene {
     const keyboard = this.input.keyboard;
     keyboard?.off?.('keydown-TAB', this.onTabKey);
     keyboard?.removeCapture?.('TAB');
+    globalThis.document?.removeEventListener?.('visibilitychange', this.onDocumentVisibility);
+    this.onDocumentVisibility = null;
     if (import.meta.env.DEV && globalThis.window?.__fkl === this) globalThis.window.__fkl = null;
     PlatformService.gameplayStop();
 
@@ -1860,6 +1896,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   buildHud() {
+    // At short landscape heights each logical pixel maps to roughly 1.4 device
+    // pixels. Promote the smallest broadcast labels so the HUD remains
+    // glance-readable without covering more of the pitch.
+    const primaryHudFont = this.compactHud ? '5px' : '4px';
+    const tinyHudFont = this.compactHud ? '5px' : '3px';
+    const secondaryHudFont = this.compactHud ? '5px' : '4px';
     const chrome = this.add.graphics().setDepth(1988);
     drawPanel(chrome, 4, 1, GAME_W - 8, 9, {
       fill: PAL.panel,
@@ -1882,7 +1924,7 @@ export class GameScene extends Phaser.Scene {
       // One strip, three zones: identity left, match title centred, conditions
       // right. Everything used to compete inside the same run of text.
       bodyText(this, 24, 5.5, `MATCH ${String(this.levelIndex + 1).padStart(2, '0')}`, {
-        fontFamily: FONT, fontSize: '4px', color: '#f3e7c3', letterSpacing: 0.2
+        fontFamily: FONT, fontSize: primaryHudFont, color: '#f3e7c3', letterSpacing: 0.2
       }).setDepth(2000);
       bodyText(this, GAME_W / 2, 5.5, String(this.level.name).toUpperCase(), {
         originX: 0.5, fontFamily: FONT, fontSize: '6px', color: '#f3c449', letterSpacing: 0.3
@@ -1902,7 +1944,7 @@ export class GameScene extends Phaser.Scene {
       if (wind.magnitude >= 0.1 || this.level.wind?.rotation) {
         const arrow = Math.abs(wind.x) < 0.06 ? (wind.y >= 0 ? '^' : 'v') : wind.x > 0 ? '>' : '<';
         this.windTxt = bodyText(this, GAME_W - 8 - attemptsWidth, 5.5, `WIND ${wind.magnitude.toFixed(1)} ${arrow}`, {
-          originX: 1, fontFamily: FONT, fontSize: '4px', color: '#f3c449', letterSpacing: 0.2
+          originX: 1, fontFamily: FONT, fontSize: primaryHudFont, color: '#f3c449', letterSpacing: 0.2
         }).setDepth(2000);
       }
 
@@ -1915,39 +1957,40 @@ export class GameScene extends Phaser.Scene {
         fill: PAL.panelMuted, border: PAL.borderDark, corner: PAL.goldDark, alpha: 0.9
       });
       bodyText(this, 9, 15.5, `${String(this.level.cup || 'career').toUpperCase()} CUP`, {
-        fontSize: '4px', color: '#8fa2ab', letterSpacing: 0.3
+        fontSize: secondaryHudFont, color: '#b9c6c5', letterSpacing: 0.24
       }).setDepth(2000);
       if (needed > 1) {
         this.objectiveProgressTxt = bodyText(this, 4 + subWidth - 5, 15.5, `0 / ${needed} TARGETS`, {
-          originX: 1, fontFamily: FONT, fontSize: '4px', color: '#f3c449', letterSpacing: 0.2
+          originX: 1, fontFamily: FONT, fontSize: secondaryHudFont, color: '#f3c449', letterSpacing: 0.2
         }).setDepth(2000);
       }
 
       const styleX = 4 + subWidth + 4;
       const styleLabel = `${this.loadoutGameplay.ability} · ${this.loadoutGameplay.ballFeel}`.toUpperCase();
-      const styleWidth = Math.min(112, styleLabel.length * 2.25 + 10);
+      const styleWidth = Math.min(this.compactHud ? 128 : 112,
+        styleLabel.length * (this.compactHud ? 2.8 : 2.25) + 10);
       const stylePlate = this.add.graphics().setDepth(1988);
       drawPanel(stylePlate, styleX, 11.5, styleWidth, 8, {
         fill: 0x153d3a, border: PAL.borderDark, corner: PAL.greenHi, alpha: 0.92
       });
       bodyText(this, styleX + styleWidth / 2, 15.5, styleLabel, {
-        originX: 0.5, fontSize: '4px', color: '#82d9c8', letterSpacing: 0.18
+        originX: 0.5, fontSize: secondaryHudFont, color: '#9ef0dc', letterSpacing: 0.14
       }).setDepth(2000);
       this.buildConditionChips(styleX + styleWidth + 4);
       this.buildTutorial();
       this.buildObjectiveStrip();
     } else if (this.mode === 'daily') {
       bodyText(this, 38, 5.5, `DAILY KICK  ·  ${this.dailyDate}`, {
-        fontSize: '3px', color: '#f3c449', letterSpacing: 0.24
+        fontSize: tinyHudFont, color: '#f3c449', letterSpacing: 0.18
       }).setDepth(2000);
       bodyText(this, 132, 5.5, 'FIVE SHOTS  ·  ONE SHARED CHALLENGE', {
-        fontFamily: FONT, fontSize: '3px', color: '#f3e7c3', letterSpacing: 0.12
+        fontFamily: FONT, fontSize: tinyHudFont, color: '#f3e7c3', letterSpacing: 0.08
       }).setDepth(2000);
       this.scoreTxt = bodyText(this, 342, 5.5, `SCORE ${this.score}`, {
-        originX: 0.5, fontFamily: FONT, fontSize: '4px', color: '#f3e7c3'
+        originX: 0.5, fontFamily: FONT, fontSize: primaryHudFont, color: '#f3e7c3'
       }).setDepth(2000);
       const shots = makeStatChip(this, GAME_W - 28, 5.5, 44, 'icon-star', `1/${this.maxAttempts}`, {
-        height: 8, fill: PAL.night, border: PAL.goldDark, color: '#f3c449', fontSize: '4px', iconScale: 0.42
+        height: 8, fill: PAL.night, border: PAL.goldDark, color: '#f3c449', fontSize: primaryHudFont, iconScale: 0.42
       }).setDepth(2000);
       this.dailyShotsTxt = shots.valueText;
 
@@ -1964,14 +2007,14 @@ export class GameScene extends Phaser.Scene {
       this.objectiveUi = [objectivePlate, dailyLabel, dailyCopy];
     } else {
       this.scoreTxt = bodyText(this, GAME_W / 2 - 32, 5.5, `SCORE ${this.score}`, {
-        originX: 0.5, fontFamily: FONT, fontSize: '4px', color: '#f3e7c3'
+        originX: 0.5, fontFamily: FONT, fontSize: primaryHudFont, color: '#f3e7c3'
       }).setDepth(2000);
       this.comboTxt = bodyText(this, GAME_W / 2 + 32, 5.5,
         this.combo > 1 ? `x${this.combo} COMBO` : `${this.goals} GOALS`, {
-          originX: 0.5, fontSize: '3px', color: '#74bde8', letterSpacing: 0.24
+          originX: 0.5, fontSize: tinyHudFont, color: '#74bde8', letterSpacing: 0.18
         }).setDepth(2000);
       const timer = makeStatChip(this, GAME_W - 27, 5.5, 42, 'icon-clock', Math.ceil(this.timeLeft), {
-        height: 8, fill: PAL.night, border: PAL.goldDark, color: '#f3c449', fontSize: '4px', iconScale: 0.42
+        height: 8, fill: PAL.night, border: PAL.goldDark, color: '#f3c449', fontSize: primaryHudFont, iconScale: 0.42
       }).setDepth(2000);
       this.timerTxt = timer.valueText;
     }
@@ -2002,7 +2045,7 @@ export class GameScene extends Phaser.Scene {
     // It stays in the lower safe area so the objective, swipe cue and goal
     // never compete with it at any responsive size.
     this.menuHint = bodyText(this, GAME_W - 7, GAME_H - 8, 'TAB  MATCH MENU', {
-      originX: 1, originY: 0.5, fontFamily: FONT, fontSize: '4px',
+      originX: 1, originY: 0.5, fontFamily: FONT, fontSize: this.compactHud ? '5px' : '4px',
       color: '#cfe8ff', letterSpacing: 0.28
     }).setDepth(2102);
 
@@ -2037,14 +2080,14 @@ export class GameScene extends Phaser.Scene {
     for (const hazard of this.hazards) {
       const chip = CONDITION_CHIPS[hazard.type];
       if (!chip) continue;
-      const width = chip.label.length * 2.4 + 10;
+      const width = chip.label.length * (this.compactHud ? 2.9 : 2.4) + 10;
       if (x + width > GAME_W - 4) break;
       const plate = this.add.graphics().setDepth(1988);
       drawPanel(plate, x, 11.5, width, 8, {
         fill: PAL.panelMuted, border: PAL.borderDark, corner: PAL.goldDark, alpha: 0.9
       });
       bodyText(this, x + width / 2, 15.5, chip.label, {
-        originX: 0.5, fontSize: '4px', color: chip.color, letterSpacing: 0.25
+        originX: 0.5, fontSize: this.compactHud ? '5px' : '4px', color: chip.color, letterSpacing: 0.18
       }).setDepth(2000);
       x += width + 4;
     }
@@ -2359,6 +2402,7 @@ export class GameScene extends Phaser.Scene {
   showShotReadout(outcome, point, rating) {
     const text = this.describeShot(outcome, point, rating);
     const scored = outcome === 'GOAL';
+    this.announceStatus(`${scored ? 'Goal' : String(outcome).toLowerCase()}. ${text}.`);
     if (!this.shotReadout) return;
     this.tweens.killTweensOf([this.shotReadout, this.shotReadoutPlate]);
 
@@ -2383,6 +2427,18 @@ export class GameScene extends Phaser.Scene {
     this.tweens.killTweensOf([this.shotReadout, this.shotReadoutPlate]);
     this.shotReadout.setAlpha(0);
     this.shotReadoutPlate.setAlpha(0);
+  }
+
+  announceStatus(message) {
+    const status = globalThis.document?.getElementById?.('game-status');
+    if (!status || !message) return false;
+    // Clearing first makes repeated outcomes (for example two saves) announce
+    // again instead of being swallowed as unchanged live-region text.
+    status.textContent = '';
+    globalThis.requestAnimationFrame?.(() => {
+      if (status.isConnected) status.textContent = String(message);
+    });
+    return true;
   }
 
   showBanner(text, color = '#f0e8d0') {

@@ -66,6 +66,22 @@ test('pausing during windup freezes contact and resumes into flight', async ({ p
   expect(await page.evaluate(() => window.__fkl.ball.flying)).toBe(true);
 });
 
+test('hiding the page automatically pauses an active match', async ({ page }) => {
+  const game = new GamePage(page);
+  await game.open({ width: 1280, height: 720 });
+  await game.startCareer();
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.waitForFunction(() => window.__fkl?.state === 'PAUSED');
+  expect(await page.evaluate(() => ({
+    timePaused: window.__fkl.time.paused,
+    swipeEnabled: window.__fkl.swipe.enabled
+  }))).toEqual({ timePaused: true, swipeEnabled: false });
+});
+
 test('specialist keeper atlases are deferred until gameplay', async ({ page }) => {
   // The selectable-player V3 set adds enough individual pose requests to fill
   // Chromium's small default Resource Timing buffer before deferred gameplay

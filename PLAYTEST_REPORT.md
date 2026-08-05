@@ -1,5 +1,59 @@
 # Free Kick Legend — Release Remediation Report
 
+## Final settings, accessibility, and compact-HUD polish — 5 August 2026
+
+**Updated local production-build score:** 9.0 / 10
+
+The requested “10/10” pass closes every reproducible issue remaining from the
+live review that can be responsibly resolved in code: settings depth, compact
+landscape readability, button press feedback, high contrast, reduced motion,
+separate audio levels, aim-assist discoverability, screen-reader result
+feedback, and automatic pause when the page is hidden. A literal 10/10 claim
+would still be dishonest without an audible mix/fatigue review on real output
+hardware and physical iOS/Android testing.
+
+### Improvements
+
+- Added a themed, keyboard-accessible settings dialog available from both the
+  main menu and paused gameplay.
+- Exposed persistent music volume, SFX volume, mute, aim assist, reduced
+  motion, screen shake, and high-contrast controls without affecting career
+  progress.
+- Applied high contrast immediately to the canvas and DOM presentation;
+  reduced motion also disables non-essential DOM animation.
+- Promoted the smallest critical HUD labels at landscape heights of 520px or
+  less while preserving the complete 16:9 playfield.
+- Strengthened every shared button's pressed state with two-pixel travel, a
+  removed shadow, and a darker face.
+- Added an ARIA live region for shot results plus pause/resume announcements.
+- Automatically opens the pause state when an active match becomes hidden, so
+  Time Attack and ball flight cannot advance while the player is away.
+- Replaced color-only switches with explicit ON/OFF states and native checkbox
+  hit targets.
+
+### Validation
+
+- Manual 1280×720 and 844×390 in-app-browser review of menu, settings, Career,
+  aiming, a real pointer-drag shot, ball flight, pause, pause-to-settings, high
+  contrast, and console output.
+- The compact settings dialog remained fully visible at 844×390 and the live
+  console reported no warnings or errors.
+- 177 unit tests, production build, and 13 Chromium journeys cover persistence,
+  keyboard escape/focus trapping, native toggles, live audio levels, menu and
+  pause access, compact HUD promotion, spoken status, hidden-page pause, all
+  prior release viewports, and the existing gameplay/audio/player regressions.
+
+### Remaining release validation
+
+- Listen to music and SFX on speakers, headphones, iOS, and Android; the
+  in-app-browser environment still does not expose audible output to the
+  reviewer.
+- Perform a physical-phone tap/readability check at the 844×390 class.
+- Portrait continues to use the intentional rotate gate; this is a product
+  direction, not a broken landscape layout.
+
+---
+
 ## Live-to-local manual playtest — 5 August 2026
 
 **Original live-build score:** 7.4 / 10

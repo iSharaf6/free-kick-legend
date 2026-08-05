@@ -119,16 +119,18 @@ function aimAssist(value, fallback) {
   return AIM_ASSIST_MODES.includes(value) ? value : fallback;
 }
 
+export const DEFAULT_SETTINGS = Object.freeze({
+  muted: false,
+  musicVolume: 0.3,
+  sfxVolume: 1,
+  reducedMotion: false,
+  screenShake: true,
+  highContrast: false,
+  aimAssist: 'full'
+});
+
 function defaultSettings() {
-  return {
-    muted: false,
-    musicVolume: 0.3,
-    sfxVolume: 1,
-    reducedMotion: false,
-    screenShake: true,
-    highContrast: false,
-    aimAssist: 'full'
-  };
+  return { ...DEFAULT_SETTINGS };
 }
 
 function normalizedSettings(rawSettings) {
