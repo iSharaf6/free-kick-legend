@@ -11,7 +11,7 @@ test('a selected striker persists from the locker through menu and gameplay', as
   const game = new GamePage(page);
   await game.open({ width: 1280, height: 720 });
 
-  await game.clickLogical(344, 228);
+  await game.clickLogical(350, 211);
   await page.waitForFunction(() => window.__game?.scene?.isActive('Locker'));
   await game.clickLogical(64, 51);
   await page.waitForFunction(() => window.__game.scene.getScene('Locker').category === 'character');

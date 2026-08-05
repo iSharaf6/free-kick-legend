@@ -105,13 +105,52 @@ test('specialist keeper atlases are deferred until gameplay', async ({ page }) =
 test('the Continue action acknowledges input and rejects re-entry', async ({ page }) => {
   const game = new GamePage(page);
   await game.open({ width: 1280, height: 720 });
-  await game.clickLogical(344, 112);
+
+  const frontMenu = await page.evaluate(() => {
+    const scene = window.__game.scene.getScene('Menu');
+    const objects = [];
+    const visit = (object) => {
+      objects.push(object);
+      for (const child of object?.list || []) visit(child);
+    };
+    for (const child of scene.children.list) visit(child);
+    const image = (key) => objects.find((object) => object?.texture?.key === key);
+    const snapshot = (object) => object && ({
+      scaleX: object.scaleX,
+      scaleY: object.scaleY,
+      displayAspect: object.displayWidth / object.displayHeight,
+      sourceAspect: object.width / object.height
+    });
+    return {
+      labels: objects.map((object) => object?.text).filter(Boolean),
+      crest: snapshot(image('kick-district-crest')),
+      studio: snapshot(image('calynx-logo-pixel')),
+      pitch: snapshot(image('pitch-grass-pixel-v3')),
+      fonts: {
+        display: document.fonts.check('12px Bungee'),
+        pixel: document.fonts.check('12px "Pixelify Sans"')
+      }
+    };
+  });
+  expect(frontMenu.labels).toEqual(expect.arrayContaining([
+    'KICK DISTRICT', 'OWN THE CURVE.', 'STUDIO', 'CONTINUE', 'LEVEL 01',
+    'CAREER', 'FIVE CUP TOUR', 'DAILY KICK', 'TIME ATTACK', 'LOCKER',
+    'SWIPE UP', 'BEND LATE', 'FIND THE CORNER'
+  ]));
+  expect(frontMenu.fonts).toEqual({ display: true, pixel: true });
+  for (const asset of [frontMenu.crest, frontMenu.studio, frontMenu.pitch]) {
+    expect(asset).toBeTruthy();
+    expect(asset.scaleX).toBeCloseTo(asset.scaleY, 8);
+    expect(asset.displayAspect).toBeCloseTo(asset.sourceAspect, 8);
+  }
+
+  await game.clickLogical(350, 64);
   const menuLabels = await page.evaluate(() => window.__game.scene.getScene('Menu').children.list
     .flatMap((child) => child?.list ?? [child])
     .map((child) => child?.text)
     .filter(Boolean));
   expect(menuLabels).toContain('KICKING OFF...');
-  await game.clickLogical(344, 112);
+  await game.clickLogical(350, 64);
 
   await page.waitForFunction(() => window.__game.scene.isActive('Game'));
   expect(await page.evaluate(() => window.__game.scene.getScenes(true)

@@ -38,9 +38,9 @@ test('menu music unlocks once, survives every menu panel, and persists mute', as
   });
 
   const panels = [
-    { button: [344, 141], scene: 'LevelSelect' },
-    { button: [344, 228], scene: 'Locker' },
-    { button: [288, 17], scene: 'Progress' }
+    { button: [350, 103], scene: 'LevelSelect' },
+    { button: [350, 211], scene: 'Locker' },
+    { button: [280, 22], scene: 'Progress' }
   ];
   for (const panel of panels) {
     await game.clickLogical(...panel.button);
@@ -58,7 +58,7 @@ test('menu music unlocks once, survives every menu panel, and persists mute', as
     await waitForScene(page, 'Menu');
   }
 
-  await game.clickLogical(25, 17);
+  await game.clickLogical(188, 22);
   await page.waitForFunction(() => window.__menuMusic?.getState().muted && window.__menuMusic.audio.paused);
   expect(await page.evaluate(() => ({
     icon: window.__game.scene.getScene('Menu').soundButton.buttonIcon.texture.key,
@@ -74,7 +74,7 @@ test('menu music unlocks once, survives every menu panel, and persists mute', as
     icon: window.__game.scene.getScene('Menu').soundButton.buttonIcon.texture.key
   }))).toEqual({ muted: true, paused: true, icon: 'icon-mute' });
 
-  await game.clickLogical(25, 17);
+  await game.clickLogical(188, 22);
   await page.waitForFunction(() => !window.__menuMusic?.getState().muted && !window.__menuMusic.audio.paused);
   expect((await musicState(page)).instanceCount).toBe(1);
 });
@@ -86,7 +86,7 @@ test('gameplay fades the menu track and returning resumes its position', async (
   await page.waitForFunction(() => window.__menuMusic?.getState().duration > 170);
   await page.evaluate(() => { window.__menuMusic.audio.currentTime = 80; });
 
-  await game.clickLogical(344, 199);
+  await game.clickLogical(350, 175);
   await page.waitForFunction(() => window.__fkl?.mode === 'arcade');
   await page.waitForFunction(() => {
     const state = window.__menuMusic.getState();
@@ -104,7 +104,7 @@ test('gameplay fades the menu track and returning resumes its position', async (
   await page.waitForFunction(() => window.__menuMusic.getState().active && !window.__menuMusic.audio.paused);
   expect((await musicState(page)).currentTime).toBeGreaterThanOrEqual(afterArcade);
 
-  await game.clickLogical(344, 170);
+  await game.clickLogical(350, 139);
   await page.waitForFunction(() => window.__fkl?.mode === 'daily');
   await page.waitForFunction(() => !window.__menuMusic.getState().active && window.__menuMusic.audio.paused);
   expect((await musicState(page)).instanceCount).toBe(1);

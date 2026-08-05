@@ -1,9 +1,6 @@
 import Phaser from 'phaser';
 import { GAME_W, GAME_H, STADIUM_Y } from '../config.js';
-import {
-  makeButton, makeIconButton, makeStatChip, titleText, bodyText,
-  drawPanel, addScanlines, sceneIntro, formatCompact, configureHdCamera, FONT
-} from '../ui.js';
+import { addScanlines, sceneIntro, formatCompact, configureHdCamera, crispText } from '../ui.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
 import { MenuMusic } from '../systems/MenuMusic.js';
@@ -16,8 +13,325 @@ import { utcDateKey } from '../data/progression.js';
 import { addAnimatedCrowdPanorama } from '../art/CrowdPanorama.js';
 import { getCosmetic } from '../data/cosmetics.js';
 
+const DISPLAY_FONT = '"Bungee", "Arial Black", sans-serif';
+const PIXEL_FONT = '"Pixelify Sans", "Courier New", monospace';
+const INK = 0x030a11;
+const NAVY = 0x07182a;
+const PANEL = 0x0b2035;
+const EDGE = 0x315a78;
+const CREAM = '#f7edd2';
+const GOLD = 0xf5c94b;
+const GOLD_HI = 0xffe785;
+const GOLD_DARK = 0x8f6326;
+
 function levelId(level, index) {
   return level?.id ?? index;
+}
+
+function shade(value, amount) {
+  const r = Phaser.Math.Clamp((value >> 16) + amount, 0, 255);
+  const g = Phaser.Math.Clamp(((value >> 8) & 0xff) + amount, 0, 255);
+  const b = Phaser.Math.Clamp((value & 0xff) + amount, 0, 255);
+  return (r << 16) | (g << 8) | b;
+}
+
+function menuText(scene, x, y, value, opts = {}) {
+  const text = crispText(scene.add.text(x, y, value, {
+    fontFamily: opts.fontFamily ?? PIXEL_FONT,
+    fontStyle: opts.fontStyle ?? 'bold',
+    fontSize: opts.fontSize ?? '8px',
+    color: opts.color ?? CREAM,
+    stroke: opts.stroke ?? '#02070d',
+    strokeThickness: opts.strokeThickness ?? 1,
+    align: opts.align ?? 'left',
+    lineSpacing: opts.lineSpacing ?? 0,
+    wordWrap: opts.wordWrap
+  }).setOrigin(opts.originX ?? 0, opts.originY ?? 0.5));
+  text.setLetterSpacing(opts.letterSpacing ?? 0.2);
+  if (opts.shadow !== false) text.setShadow(1, 2, '#010408', 0, false, true);
+  return text;
+}
+
+function drawCorners(g, x, y, w, h, color, size = 5) {
+  g.fillStyle(color, 1);
+  g.fillRect(x, y, size, 1);
+  g.fillRect(x, y, 1, size);
+  g.fillRect(x + w - size, y, size, 1);
+  g.fillRect(x + w - 1, y, 1, size);
+  g.fillRect(x, y + h - 1, size, 1);
+  g.fillRect(x, y + h - size, 1, size);
+  g.fillRect(x + w - size, y + h - 1, size, 1);
+  g.fillRect(x + w - 1, y + h - size, 1, size);
+}
+
+function drawPremiumPanel(g, x, y, w, h, opts = {}) {
+  const border = opts.border ?? EDGE;
+  const fill = opts.fill ?? PANEL;
+  const bottom = opts.bottom ?? NAVY;
+  g.fillStyle(INK, 0.82);
+  g.fillRect(x + 3, y + 4, w, h);
+  g.fillStyle(INK, 1);
+  g.fillRect(x, y, w, h);
+  g.fillStyle(border, 1);
+  g.fillRect(x + 1, y + 1, w - 2, h - 2);
+  g.fillStyle(0x07131f, 1);
+  g.fillRect(x + 2, y + 2, w - 4, h - 4);
+  g.fillGradientStyle(shade(fill, 10), shade(fill, 10), bottom, bottom, opts.alpha ?? 1);
+  g.fillRect(x + 4, y + 4, w - 8, h - 8);
+  g.fillStyle(shade(fill, 38), 0.72);
+  g.fillRect(x + 4, y + 4, w - 8, 1);
+  g.fillRect(x + 4, y + 4, 1, h - 8);
+  g.fillStyle(INK, 0.62);
+  g.fillRect(x + 4, y + h - 5, w - 8, 1);
+  g.fillRect(x + w - 5, y + 4, 1, h - 8);
+  g.fillStyle(0x86bce0, 0.045);
+  for (let row = y + 7; row < y + h - 5; row += 4) g.fillRect(x + 6, row, w - 12, 1);
+  drawCorners(g, x + 1, y + 1, w - 2, h - 2, opts.corner ?? GOLD_DARK, opts.cornerSize ?? 5);
+  return g;
+}
+
+function addCoverRegion(scene, key, x, y, width, height, depth) {
+  const image = scene.add.image(x, y, key).setOrigin(0.5).setDepth(depth);
+  const sourceWidth = Math.max(1, image.width || width);
+  const sourceHeight = Math.max(1, image.height || height);
+  image.setScale(Math.max(width / sourceWidth, height / sourceHeight));
+  return image;
+}
+
+function wireButton(container, render, onClick, enabled = true) {
+  let active = enabled;
+  let over = false;
+  let down = false;
+  const paint = () => render(!active ? 'disabled' : down ? 'pressed' : over ? 'hover' : 'idle');
+  if (active) container.setInteractive({ useHandCursor: true });
+  container.on('pointerover', () => { over = true; paint(); });
+  container.on('pointerout', () => { over = false; down = false; paint(); });
+  container.on('pointerdown', () => { if (active) { over = true; down = true; paint(); } });
+  container.on('pointerupoutside', () => { over = false; down = false; paint(); });
+  container.on('pointerup', () => {
+    if (!active || !down) return;
+    const fire = over;
+    down = false;
+    paint();
+    if (fire) {
+      Audio.ui();
+      onClick?.();
+    }
+  });
+  container.setButtonEnabled = (value) => {
+    active = Boolean(value);
+    over = false;
+    down = false;
+    if (active) container.setInteractive({ useHandCursor: true });
+    else container.disableInteractive();
+    paint();
+    return container;
+  };
+  paint();
+  return container;
+}
+
+function drawActionFace(g, w, h, color, accent, state, featured = false) {
+  const pressed = state === 'pressed';
+  const disabled = state === 'disabled';
+  const y = pressed ? 2 : 0;
+  const face = disabled ? 0x172532 : color;
+  g.clear();
+
+  if (featured && !disabled && !pressed) {
+    g.fillStyle(accent, 0.12);
+    g.fillRect(-w / 2 - 3, -h / 2 - 3, w + 6, h + 6);
+    g.fillStyle(accent, 0.08);
+    g.fillRect(-w / 2 - 5, -h / 2 - 1, w + 10, h + 2);
+  }
+  if (!pressed) {
+    g.fillStyle(INK, 0.86);
+    g.fillRect(-w / 2 + 4, -h / 2 + 5, w, h);
+  }
+  g.fillStyle(INK, 1);
+  g.fillRect(-w / 2, -h / 2 + y, w, h);
+  g.fillStyle(disabled ? 0x324653 : accent, 1);
+  g.fillRect(-w / 2 + 1, -h / 2 + 1 + y, w - 2, h - 2);
+  g.fillStyle(0x07121d, 1);
+  g.fillRect(-w / 2 + 2, -h / 2 + 2 + y, w - 4, h - 4);
+  g.fillGradientStyle(shade(face, 20), shade(face, -8), shade(face, -14), shade(face, -34), 1);
+  g.fillRect(-w / 2 + 4, -h / 2 + 4 + y, w - 8, h - 8);
+
+  const iconCellW = featured ? 42 : 39;
+  g.fillStyle(shade(face, 22), disabled ? 0.28 : 0.84);
+  g.fillRect(-w / 2 + 5, -h / 2 + 5 + y, iconCellW - 6, h - 10);
+  g.fillStyle(accent, disabled ? 0.3 : 0.92);
+  g.fillRect(-w / 2 + iconCellW, -h / 2 + 4 + y, 1, h - 8);
+  g.fillStyle(shade(face, 60), disabled ? 0.18 : 0.52);
+  g.fillRect(-w / 2 + 4, -h / 2 + 4 + y, w - 8, 1);
+  g.fillStyle(INK, 0.48);
+  g.fillRect(-w / 2 + 4, h / 2 - 5 + y, w - 8, 1);
+
+  // The reference uses diagonal perforations on the action edge. These sparse
+  // pixels retain that sports-console texture without reducing label contrast.
+  g.fillStyle(accent, disabled ? 0.04 : 0.14);
+  for (let dx = w / 2 - 48; dx < w / 2 - 17; dx += 5) {
+    for (let dy = -h / 2 + 7; dy < h / 2 - 5; dy += 5) {
+      if ((Math.round(dx + dy) & 1) === 0) g.fillRect(dx, dy + y, 1, 1);
+    }
+  }
+  drawCorners(g, -w / 2 + 1, -h / 2 + 1 + y, w - 2, h - 2, disabled ? 0x304552 : accent, 7);
+}
+
+function makeActionIcon(scene, type, color) {
+  if (type === 'career') return scene.add.image(0, 0, 'icon-cup').setScale(1.35);
+  const g = scene.add.graphics();
+  const dark = shade(color, -80);
+  g.lineStyle(2, color, 1);
+  g.fillStyle(dark, 0.82);
+
+  if (type === 'play') {
+    g.fillStyle(color, 1);
+    g.fillTriangle(-6, -9, -6, 9, 8, 0);
+    g.fillStyle(0xffffff, 0.35);
+    g.fillTriangle(-4, -6, -4, 0, 2, -2);
+  } else if (type === 'daily') {
+    g.fillRect(-8, -7, 16, 15);
+    g.strokeRect(-8, -7, 16, 15);
+    g.fillStyle(color, 1);
+    g.fillRect(-8, -7, 16, 4);
+    g.fillRect(-5, -10, 2, 5);
+    g.fillRect(3, -10, 2, 5);
+    g.fillRect(-2, -1, 4, 7);
+    g.fillRect(-5, 1, 10, 3);
+  } else if (type === 'time') {
+    g.fillCircle(0, 2, 8);
+    g.strokeCircle(0, 2, 8);
+    g.fillStyle(color, 1);
+    g.fillRect(-3, -9, 6, 3);
+    g.fillRect(5, -6, 4, 2);
+    g.lineStyle(2, color, 1);
+    g.beginPath().moveTo(0, 2).lineTo(0, -3).moveTo(0, 2).lineTo(4, 4).strokePath();
+    g.fillCircle(0, 2, 2);
+  } else {
+    g.beginPath();
+    g.moveTo(-4, -8);
+    g.lineTo(-9, -4);
+    g.lineTo(-6, 1);
+    g.lineTo(-4, -1);
+    g.lineTo(-4, 8);
+    g.lineTo(4, 8);
+    g.lineTo(4, -1);
+    g.lineTo(6, 1);
+    g.lineTo(9, -4);
+    g.lineTo(4, -8);
+    g.lineTo(2, -5);
+    g.lineTo(-2, -5);
+    g.closePath();
+    g.fillPath();
+    g.strokePath();
+    g.fillStyle(color, 1);
+    g.fillRect(-2, -4, 4, 2);
+  }
+  return g;
+}
+
+function makeMenuAction(scene, x, y, w, h, spec, onClick) {
+  const bg = scene.add.graphics();
+  const icon = makeActionIcon(scene, spec.iconType, spec.subtitleColorValue ?? spec.accent)
+    .setPosition(-w / 2 + (spec.featured ? 21 : 20), 0);
+  const labelX = -w / 2 + (spec.featured ? 51 : 48);
+  const label = menuText(scene, labelX, spec.featured ? -6 : -5, spec.label, {
+    fontFamily: DISPLAY_FONT,
+    fontSize: spec.featured ? '16px' : '14px',
+    color: CREAM,
+    strokeThickness: 2,
+    letterSpacing: -0.1
+  });
+  const subtitle = menuText(scene, labelX + 1, spec.featured ? 10 : 8, spec.subtitle, {
+    fontFamily: PIXEL_FONT,
+    fontSize: spec.featured ? '10px' : '9px',
+    color: spec.subtitleColor,
+    strokeThickness: 1,
+    letterSpacing: 0.65
+  });
+  const chevron = scene.add.graphics().setPosition(w / 2 - 14, 0);
+  const container = scene.add.container(x, y, [bg, icon, label, subtitle, chevron]);
+  container.setSize(w, h + 3);
+  const render = (state) => {
+    drawActionFace(bg, w, h, spec.color, spec.accent, state, spec.featured);
+    const offset = state === 'pressed' ? 2 : 0;
+    const alpha = state === 'disabled' ? 0.42 : 1;
+    icon.setY(offset).setAlpha(alpha);
+    label.setY((spec.featured ? -6 : -5) + offset).setAlpha(alpha);
+    subtitle.setY((spec.featured ? 10 : 8) + offset).setAlpha(alpha);
+    chevron.clear().setY(offset).setAlpha(alpha);
+    chevron.lineStyle(spec.featured ? 3 : 2, spec.subtitleColorValue ?? spec.accent, 1);
+    chevron.beginPath().moveTo(-3, -6).lineTo(3, 0).lineTo(-3, 6).strokePath();
+  };
+  wireButton(container, render, onClick, spec.disabled !== true);
+  container.buttonLabel = label;
+  container.buttonSubtitle = subtitle;
+  container.buttonIcon = icon;
+  return container;
+}
+
+function makeHeaderControl(scene, x, y, w, h, opts, onClick) {
+  const bg = scene.add.graphics();
+  const children = [bg];
+  let icon = null;
+  let gear = null;
+  if (opts.icon) {
+    icon = scene.add.image(opts.label ? -w / 2 + 14 : 0, 0, opts.icon).setScale(opts.iconScale ?? 1);
+    children.push(icon);
+  } else if (opts.gear) {
+    gear = scene.add.graphics().setPosition(-w / 2 + 14, 0);
+    children.push(gear);
+  }
+  const label = opts.label ? menuText(scene, opts.icon || opts.gear ? -w / 2 + 27 : 0, 0, opts.label, {
+    originX: opts.icon || opts.gear ? 0 : 0.5,
+    fontFamily: DISPLAY_FONT,
+    fontSize: opts.fontSize ?? '7px',
+    color: CREAM,
+    strokeThickness: 1,
+    letterSpacing: 0.2
+  }) : null;
+  if (label) children.push(label);
+  const container = scene.add.container(x, y, children).setSize(w, h);
+  const render = (state) => {
+    const pressed = state === 'pressed';
+    const fill = state === 'hover' ? shade(opts.color ?? PANEL, 18) : state === 'pressed' ? shade(opts.color ?? PANEL, -20) : (opts.color ?? PANEL);
+    bg.clear();
+    drawPremiumPanel(bg, -w / 2, -h / 2 + (pressed ? 2 : 0), w, h, {
+      fill,
+      bottom: shade(fill, -20),
+      border: opts.border ?? EDGE,
+      corner: opts.corner ?? GOLD_DARK,
+      cornerSize: 4
+    });
+    if (gear) {
+      const oy = pressed ? 2 : 0;
+      gear.clear().setY(oy);
+      gear.fillStyle(0xf7edd2, 1);
+      gear.fillRect(-4, -4, 8, 8);
+      gear.fillRect(-6, -2, 12, 4);
+      gear.fillRect(-2, -6, 4, 12);
+      gear.fillStyle(0x173047, 1);
+      gear.fillRect(-2, -2, 4, 4);
+    }
+    const oy = pressed ? 2 : 0;
+    if (icon) icon.setY(oy);
+    if (label) label.setY(oy);
+  };
+  wireButton(container, render, onClick, true);
+  container.buttonIcon = icon;
+  container.buttonLabel = label;
+  return container;
+}
+
+function playerRatings(player) {
+  const gameplay = player?.gameplay ?? {};
+  return {
+    POWER: Phaser.Math.Clamp(Math.round(78 + (gameplay.powerMultiplier ?? 1) * 12), 70, 99),
+    CURVE: Phaser.Math.Clamp(Math.round(74 + (gameplay.spinMultiplier ?? 1) * 15), 70, 99),
+    ACCURACY: Phaser.Math.Clamp(Math.round(68 + (gameplay.previewFraction ?? 0.55) * 37), 70, 99),
+    SPEED: Phaser.Math.Clamp(Math.round(75 + (gameplay.lateralMultiplier ?? 1) * 13), 70, 99)
+  };
 }
 
 export class MenuScene extends Phaser.Scene {
@@ -28,10 +342,8 @@ export class MenuScene extends Phaser.Scene {
   create() {
     configureHdCamera(this);
     this.add.image(0, 0, 'stadium-menu').setOrigin(0).setDepth(0);
-    this.add.image(0, STADIUM_Y, 'pitch-grass-pixel-v3')
-      .setOrigin(0)
-      .setDisplaySize(GAME_W, GAME_H - STADIUM_Y)
-      .setDepth(1);
+    addCoverRegion(this, 'pitch-grass-pixel-v3', GAME_W / 2, (STADIUM_Y + GAME_H) / 2,
+      GAME_W, GAME_H - STADIUM_Y, 1);
     const settings = SaveManager.getSettings?.() || {};
     addAnimatedCrowdPanorama(this, {
       depth: 2,
@@ -62,33 +374,10 @@ export class MenuScene extends Phaser.Scene {
 
     this.makeHeader(totalStars, coins, muted, readyClaims);
     this.makeHero(equippedKit, equippedCharacter, totalStars);
-    this.makeLogo();
     this.makeActions(continueIndex, daily, today);
+    this.makeFooter();
 
-    bodyText(this, GAME_W / 2, GAME_H - 8,
-      'SWIPE UP  ·  BEND LATE  ·  FIND THE CORNER', {
-        originX: 0.5,
-        fontSize: '7px',
-        color: '#b9c6c5',
-        strokeThickness: 1,
-        letterSpacing: 0.65
-      }).setDepth(310);
-
-    // Internal physics playground - dev builds only, never shipped to players.
-    if (import.meta.env.DEV) {
-      makeButton(this, 439, GAME_H - 9, 68, 16, 'PUPPET LAB', () => {
-        this.scene.start('PuppetLab');
-      }, {
-        color: PAL.panelHi,
-        hover: PAL.blue,
-        border: PAL.goldDark,
-        fontSize: '5px',
-        hitWidth: 76,
-        hitHeight: 22
-      }).setDepth(320);
-    }
-
-    addScanlines(this, 900, 0.035);
+    addScanlines(this, 900, 0.024);
     sceneIntro(this);
   }
 
@@ -101,53 +390,80 @@ export class MenuScene extends Phaser.Scene {
   }
 
   drawComposition() {
-    // A radial flood pool and long feathered action-side falloff provide the
-    // same focus as the former triangular wedges without reading as pitch
-    // markings or perspective geometry.
     this.add.image(0, 0, 'menu-lighting').setOrigin(0).setDepth(10);
+    const wash = this.add.graphics().setDepth(11);
+    wash.fillGradientStyle(0x02070d, 0x02070d, 0x02070d, 0x02070d, 0.02, 0.58, 0.04, 0.72);
+    wash.fillRect(215, 41, 260, 202);
+    wash.fillStyle(0x071018, 0.32);
+    wash.fillRect(0, 0, GAME_W, 43);
+
+    const lights = this.add.graphics().setDepth(12);
+    for (const x of [47, 433]) {
+      lights.fillStyle(0x66c8ff, 0.12);
+      lights.fillCircle(x, 57, 16);
+      for (let row = 0; row < 2; row++) {
+        for (let col = 0; col < 4; col++) {
+          lights.fillStyle(0xe8fbff, 0.9);
+          lights.fillRect(x - 7 + col * 5, 52 + row * 5, 3, 3);
+        }
+      }
+    }
   }
 
   makeHeader(totalStars, coins, muted, readyClaims) {
     const bar = this.add.graphics().setDepth(200);
-    drawPanel(bar, 7, 5, GAME_W - 14, 25, {
-      fill: PAL.panel,
-      border: PAL.borderDark,
-      corner: PAL.goldDark
+    drawPremiumPanel(bar, 5, 4, GAME_W - 10, 37, {
+      fill: 0x0b2035,
+      bottom: 0x061322,
+      border: 0x254a67,
+      corner: 0x2f90be,
+      cornerSize: 8
     });
-    bodyText(this, 47, 17, "NIGHT MATCH '98", {
-      originX: 0,
-      fontFamily: FONT,
-      fontSize: '8px',
-      color: '#f3c449',
-      letterSpacing: 0.65
-    }).setDepth(202);
 
-    makeStatChip(this, 340, 17, 66, 'icon-star', `${totalStars}/${LEVELS.length * 3}`, {
-      height: 19,
-      fill: PAL.night,
-      border: PAL.borderDark,
-      fontSize: '8px',
-      iconScale: 0.8
-    }).setDepth(202);
-    makeStatChip(this, 412, 17, 66, 'icon-coin', formatCompact(coins), {
-      height: 19,
-      fill: PAL.night,
-      border: PAL.borderDark,
-      fontSize: '8px',
-      iconScale: 0.8
-    }).setDepth(202);
+    const crest = this.add.image(29, 23, 'kick-district-crest').setDepth(205);
+    crest.setScale(39 / Math.max(1, crest.height));
+    menuText(this, 52, 16, 'KICK DISTRICT', {
+      fontFamily: DISPLAY_FONT,
+      fontSize: '15px',
+      color: CREAM,
+      strokeThickness: 2,
+      letterSpacing: -0.2
+    }).setDepth(205);
+    menuText(this, 53, 31, 'OWN THE CURVE.', {
+      fontFamily: PIXEL_FONT,
+      fontSize: '7px',
+      color: '#f5c94b',
+      letterSpacing: 0.9
+    }).setDepth(205);
+    menuText(this, 121, 31, '·', {
+      originX: 0.5,
+      fontSize: '7px',
+      color: '#587287'
+    }).setDepth(205);
+    const calynx = this.add.image(143, 31, 'calynx-logo-pixel').setScale(0.42).setDepth(205);
+    calynx.setTint(0x8fb8ff);
+    menuText(this, 160, 31, 'STUDIO', {
+      fontSize: '6px',
+      color: '#7895ad',
+      letterSpacing: 0.45
+    }).setDepth(205);
 
-    this.soundButton = makeIconButton(this, 25, 17, 19,
-      muted ? 'icon-mute' : 'icon-sound', () => this.toggleSound(), {
-        color: PAL.panelHi,
-        hover: PAL.blue,
-        border: PAL.borderDark,
-        iconScale: 0.75,
-        hitWidth: 30,
-        hitHeight: 27
-      }).setDepth(203);
+    this.soundButton = makeHeaderControl(this, 188, 22, 19, 23, {
+      icon: muted ? 'icon-mute' : 'icon-sound',
+      iconScale: 0.78,
+      color: 0x15324a,
+      border: 0x315a78,
+      corner: 0x315a78
+    }, () => this.toggleSound()).setDepth(206);
 
-    this.settingsButton = makeButton(this, 231, 17, 76, 19, 'SETTINGS', () => {
+    this.settingsButton = makeHeaderControl(this, 230, 22, 62, 23, {
+      gear: true,
+      label: 'SETTINGS',
+      fontSize: '7px',
+      color: 0x13283e,
+      border: 0x315a78,
+      corner: 0x315a78
+    }, () => {
       SettingsPanel.open({
         onChange: (nextSettings) => {
           if (!this.kicker) return;
@@ -156,35 +472,51 @@ export class MenuScene extends Phaser.Scene {
           else this.kicker.resumeAmbient?.();
         }
       });
-    }, {
-      color: PAL.panelHi,
-      hover: PAL.blue,
-      border: PAL.borderDark,
-      fontSize: '6px',
-      letterSpacing: 0.35,
-      hitWidth: 80,
-      hitHeight: 27
-    }).setDepth(203);
+    }).setDepth(206);
 
-    makeIconButton(this, 288, 17, 19, 'icon-cup', () => this.scene.start('Progress'), {
-      color: readyClaims ? PAL.green : PAL.panelHi,
-      hover: PAL.blue,
-      border: readyClaims ? PAL.gold : PAL.borderDark,
-      iconScale: 0.68,
-      hitWidth: 31,
-      hitHeight: 27
-    }).setDepth(203);
+    makeHeaderControl(this, 280, 22, 30, 23, {
+      icon: 'icon-cup',
+      iconScale: 1.05,
+      color: readyClaims ? PAL.green : 0x142c43,
+      border: readyClaims ? GOLD : GOLD_DARK,
+      corner: readyClaims ? GOLD : GOLD_DARK
+    }, () => this.scene.start('Progress')).setDepth(206);
+
+    this.makeHeaderStat(337, 22, 72, 'icon-star', `${totalStars}/${LEVELS.length * 3}`, 0x0c2135);
+    this.makeHeaderStat(423, 22, 80, 'icon-coin', formatCompact(coins), 0x0c2135);
+
     if (readyClaims) {
-      const badge = this.add.graphics().setDepth(205);
+      const badge = this.add.graphics().setDepth(208);
       badge.fillStyle(PAL.red, 1);
-      badge.fillCircle(296, 9, 5);
-      bodyText(this, 296, 9, String(Math.min(readyClaims, 9)), {
+      badge.fillCircle(291, 10, 5);
+      menuText(this, 291, 10, String(Math.min(readyClaims, 9)), {
         originX: 0.5,
+        fontFamily: DISPLAY_FONT,
         fontSize: '6px',
         color: '#ffffff',
-        strokeThickness: 0
-      }).setDepth(206);
+        strokeThickness: 0,
+        shadow: false
+      }).setDepth(209);
     }
+  }
+
+  makeHeaderStat(x, y, w, iconKey, value, fill) {
+    const panel = this.add.graphics();
+    drawPremiumPanel(panel, -w / 2, -11.5, w, 23, {
+      fill,
+      bottom: 0x061421,
+      border: 0x315a78,
+      corner: GOLD_DARK,
+      cornerSize: 4
+    });
+    const icon = this.add.image(-w / 2 + 15, 0, iconKey).setScale(1.05);
+    const label = menuText(this, -w / 2 + 28, 0, String(value), {
+      fontFamily: DISPLAY_FONT,
+      fontSize: '9px',
+      color: CREAM,
+      letterSpacing: 0
+    });
+    this.add.container(x, y, [panel, icon, label]).setDepth(206);
   }
 
   toggleSound() {
@@ -195,103 +527,129 @@ export class MenuScene extends Phaser.Scene {
   }
 
   makeHero(equippedKit, equippedCharacter, totalStars) {
-    const plate = this.add.graphics().setDepth(150);
-    drawPanel(plate, 17, 206, 180, 44, {
-      fill: PAL.panel,
-      border: PAL.goldDark,
-      corner: PAL.gold
-    });
     const player = getCosmetic(equippedCharacter) || getCosmetic('character-mica');
-    bodyText(this, 27, 218, `${player.name.toUpperCase()}  ·  #${player.number}`, {
-      fontFamily: FONT,
-      fontSize: '9px',
-      color: '#f3e7c3'
+    const ratings = playerRatings(player);
+    const card = this.add.graphics().setDepth(150);
+    drawPremiumPanel(card, 34, 178, 174, 63, {
+      fill: 0x0b1d30,
+      bottom: 0x061522,
+      border: GOLD_DARK,
+      corner: GOLD,
+      cornerSize: 7
+    });
+
+    drawPremiumPanel(card, 42, 183, 28, 28, {
+      fill: 0x261c51,
+      bottom: 0x160f31,
+      border: GOLD_DARK,
+      corner: GOLD,
+      cornerSize: 4
+    });
+    menuText(this, 56, 197, String(player.number), {
+      originX: 0.5,
+      fontFamily: DISPLAY_FONT,
+      fontSize: '14px',
+      color: CREAM,
+      strokeThickness: 2
     }).setDepth(154);
-    bodyText(this, 27, 235, `CUP RUN  ${totalStars} STARS`, {
+    menuText(this, 77, 188, `${player.name.toUpperCase()}  ·  #${player.number}`, {
+      fontFamily: DISPLAY_FONT,
+      fontSize: '9px',
+      color: CREAM,
+      letterSpacing: 0
+    }).setDepth(154);
+    menuText(this, 77, 202, 'CUP RUN', {
+      fontFamily: PIXEL_FONT,
       fontSize: '7px',
-      color: '#9fb3ba',
+      color: '#c5d2dc',
+      letterSpacing: 0.4
+    }).setDepth(154);
+    menuText(this, 110, 202, `${totalStars} STARS`, {
+      fontFamily: PIXEL_FONT,
+      fontSize: '7px',
+      color: '#6ee1df',
       letterSpacing: 0.35
     }).setDepth(154);
 
     const progress = Phaser.Math.Clamp(totalStars / Math.max(LEVELS.length * 3, 1), 0, 1);
-    plate.fillStyle(PAL.ink, 1);
-    plate.fillRect(101, 231, 84, 6);
-    plate.fillStyle(PAL.borderDark, 1);
-    plate.fillRect(102, 232, 82, 4);
-    plate.fillStyle(PAL.gold, 1);
-    plate.fillRect(102, 232, Math.floor(82 * progress), 4);
+    card.fillStyle(INK, 1);
+    card.fillRect(151, 198, 47, 6);
+    card.fillStyle(0x2e4b62, 1);
+    card.fillRect(152, 199, 45, 4);
+    card.fillStyle(GOLD, 1);
+    card.fillRect(152, 199, Math.floor(45 * progress), 4);
+    card.fillStyle(0x43657c, 0.65);
+    card.fillRect(41, 210, 160, 1);
 
-    // The plate is drawn at depth 150 and the striker at 130, so his boots used
-    // to disappear behind it and he read as cropped off mid-shin. He now stands
-    // on the turf just above the plate, which also gives the shadow somewhere
-    // believable to fall.
-    this.kicker = new Kicker(this, 104, 202, {
+    const rows = [
+      ['POWER', ratings.POWER, 0xef633e],
+      ['CURVE', ratings.CURVE, 0xa95adb],
+      ['ACCURACY', ratings.ACCURACY, 0x3aa9d8],
+      ['SPEED', ratings.SPEED, 0x66bf51]
+    ];
+    rows.forEach(([label, value, color], index) => {
+      const y = 216 + index * 6;
+      menuText(this, 44, y, label, {
+        fontFamily: PIXEL_FONT,
+        fontSize: '6px',
+        color: CREAM,
+        letterSpacing: 0.2
+      }).setDepth(154);
+      card.fillStyle(INK, 1);
+      card.fillRect(91, y - 2, 90, 4);
+      card.fillStyle(0x29445a, 1);
+      card.fillRect(92, y - 1, 88, 2);
+      card.fillStyle(color, 1);
+      card.fillRect(92, y - 1, Math.round(88 * value / 100), 2);
+      menuText(this, 199, y, String(value), {
+        originX: 1,
+        fontFamily: DISPLAY_FONT,
+        fontSize: '6px',
+        color: CREAM,
+        letterSpacing: 0
+      }).setDepth(154);
+    });
+
+    this.kicker = new Kicker(this, 111, 177, {
       kitId: equippedKit,
       characterId: equippedCharacter,
-      scale: 4.4,
+      scale: 5.0,
       depth: 130
     });
     const ballKey = SaveManager.getEquippedCosmetic?.('ball') || 'ball-classic';
     const texture = this.textures.exists(ballKey) ? ballKey : 'ball-classic';
-    const ball = this.add.image(158, 196, texture).setDepth(160);
-    ball.setScale(17 / (ball.texture.source[0]?.width || 12));
+    const ball = this.add.image(169, 172, texture).setDepth(145);
+    ball.setScale(18 / (ball.texture.source[0]?.width || 12));
     this.tweens.add({
       targets: ball,
-      y: 189,
+      y: 170,
       rotation: Math.PI * 2,
-      duration: 1800,
+      duration: 2100,
       ease: 'Sine.easeInOut',
       yoyo: true,
       repeat: -1
     });
   }
 
-  makeLogo() {
-    titleText(this, 343, 54, 'FREE KICK', '24px', '#f8f2df').setDepth(220);
-    titleText(this, 343, 78, 'LEGEND', '25px', '#f3c449').setDepth(220);
-
-    const tag = this.add.graphics().setDepth(219);
-    tag.fillStyle(PAL.ink, 0.9);
-    tag.fillRect(295, 88, 96, 11);
-    tag.fillStyle(PAL.goldDark, 1);
-    tag.fillRect(295, 88, 96, 1);
-    bodyText(this, 343, 94, 'FIVE CUPS. ONE LEGEND.', {
-      originX: 0.5,
-      fontSize: '6px',
-      color: '#b9c6c5',
-      letterSpacing: 0.45
-    }).setDepth(221);
-  }
-
   makeActions(continueIndex, daily, today) {
-    const actionX = 344;
-    const actionW = 198;
-    const actionH = 25;
-    // Left-aligned labels in a reserved column: the previous centred labels ran
-    // straight over the icon gutter once the copy got long ("DAILY KICK · NEW
-    // CHALLENGE" collided with its own star).
-    const make = (y, label, icon, cb, color, hover) => makeButton(
-      this, actionX, y, actionW, actionH, label, cb, {
-        color,
-        hover,
-        icon,
-        iconScale: 0.82,
-        iconX: 16,
-        labelAlign: 'left',
-        labelX: 31,
-        fontSize: '9px',
-        letterSpacing: 0.4,
-        hitHeight: 28
-      }
-    ).setDepth(230);
-
+    const actionX = 350;
+    const actionW = 210;
     let continueButton = null;
     let continuePending = false;
-    continueButton = make(112, `CONTINUE  ·  LV ${String(continueIndex + 1).padStart(2, '0')}`, 'icon-play', () => {
+    continueButton = makeMenuAction(this, actionX, 64, actionW, 36, {
+      label: 'CONTINUE',
+      subtitle: `LEVEL ${String(continueIndex + 1).padStart(2, '0')}`,
+      subtitleColor: '#91ed5d',
+      color: 0x145b25,
+      accent: 0x8ddd4b,
+      iconType: 'play',
+      subtitleColorValue: 0x91ed5d,
+      featured: true
+    }, () => {
       if (continuePending) return;
       continuePending = true;
       continueButton?.setButtonEnabled(false);
-      continueButton?.buttonLabel?.setText('KICKING OFF...');
+      continueButton?.buttonLabel?.setText('KICKING OFF...').setFontSize('11px');
       const level = LEVELS[continueIndex];
       SaveManager.setLastPlayed?.({ mode: 'career', levelId: levelId(level, continueIndex) });
       const started = this.kicker.previewStrike(() => {
@@ -300,31 +658,107 @@ export class MenuScene extends Phaser.Scene {
       if (started === false) {
         continuePending = false;
         continueButton?.setButtonEnabled(true);
-        continueButton?.buttonLabel?.setText(`CONTINUE  ·  LV ${String(continueIndex + 1).padStart(2, '0')}`);
+        continueButton?.buttonLabel?.setText('CONTINUE').setFontSize('16px');
       }
-    }, PAL.green, PAL.greenHi);
+    }).setDepth(230);
 
-    make(141, 'CAREER  ·  FIVE CUP TOUR', 'icon-cup', () => {
-      this.scene.start('LevelSelect');
-    }, PAL.blue, PAL.blueHi);
+    makeMenuAction(this, actionX, 103, actionW, 32, {
+      label: 'CAREER',
+      subtitle: 'FIVE CUP TOUR',
+      subtitleColor: '#58c6ff',
+      color: 0x0a477c,
+      accent: 0x47baf5,
+      iconType: 'career',
+      subtitleColorValue: 0x58c6ff
+    }, () => this.scene.start('LevelSelect')).setDepth(230);
 
-    const dailyLabel = daily.completed
-      ? `DAILY KICK  ·  BEST ${formatCompact(SaveManager.getBestDaily(today))}`
+    const dailySubtitle = daily.completed
+      ? `BEST ${formatCompact(SaveManager.getBestDaily(today))}`
       : daily.streak > 0
-        ? `DAILY KICK  ·  ${daily.streak} DAY STREAK`
-        : 'DAILY KICK  ·  NEW CHALLENGE';
-    make(170, dailyLabel, 'icon-star', () => {
+        ? `${daily.streak} DAY STREAK`
+        : 'NEW CHALLENGE';
+    makeMenuAction(this, actionX, 139, actionW, 32, {
+      label: 'DAILY KICK',
+      subtitle: dailySubtitle,
+      subtitleColor: '#f5c94b',
+      color: 0x6a4813,
+      accent: 0xe7a92e,
+      iconType: 'daily',
+      subtitleColorValue: 0xf5c94b
+    }, () => {
       SaveManager.setLastPlayed?.({ mode: 'daily', levelId: LEVELS[continueIndex]?.id });
       this.scene.start('Game', { mode: 'daily', dailyDate: today });
-    }, PAL.goldDark, PAL.gold);
+    }).setDepth(230);
 
-    make(199, 'TIME ATTACK  ·  60 SEC', 'icon-clock', () => {
+    makeMenuAction(this, actionX, 175, actionW, 32, {
+      label: 'TIME ATTACK',
+      subtitle: '60 SEC',
+      subtitleColor: '#ff8551',
+      color: 0x732417,
+      accent: 0xf06436,
+      iconType: 'time',
+      subtitleColorValue: 0xff8551
+    }, () => {
       SaveManager.setLastPlayed?.({ mode: 'arcade', levelId: null });
       this.scene.start('Game', { mode: 'arcade' });
-    }, PAL.orange, 0xe47c3e);
+    }).setDepth(230);
 
-    make(228, 'LOCKER  ·  MAKE IT YOURS', 'icon-locker', () => {
-      this.scene.start('Locker');
-    }, 0x594b82, 0x7664a2);
+    makeMenuAction(this, actionX, 211, actionW, 32, {
+      label: 'LOCKER',
+      subtitle: 'MAKE IT YOURS',
+      subtitleColor: '#da83ff',
+      color: 0x48245f,
+      accent: 0xad5bd9,
+      iconType: 'locker',
+      subtitleColorValue: 0xda83ff
+    }, () => this.scene.start('Locker')).setDepth(230);
+  }
+
+  makeFooter() {
+    const footer = this.add.graphics().setDepth(300);
+    drawPremiumPanel(footer, 0, 244, GAME_W, 26, {
+      fill: 0x081827,
+      bottom: 0x030b13,
+      border: 0x1e4059,
+      corner: 0x1e4059,
+      cornerSize: 3
+    });
+    footer.fillStyle(0x49657a, 0.55);
+    footer.fillRect(171, 249, 1, 16);
+    footer.fillRect(309, 249, 1, 16);
+    this.makeTip(83, 257, 'power', 'SWIPE UP', 'ADD POWER', 0x4bd7d1);
+    this.makeTip(240, 257, 'curve', 'BEND LATE', 'MORE CURVE', 0xb760dc);
+    this.makeTip(390, 257, 'target', 'FIND THE CORNER', 'MAX ACCURACY', 0xf0b837);
+  }
+
+  makeTip(x, y, type, title, subtitle, color) {
+    const icon = this.add.graphics().setPosition(x - 47, y).setDepth(304);
+    icon.fillStyle(0x071018, 0.9);
+    icon.fillCircle(0, 0, 11);
+    icon.lineStyle(2, color, 1);
+    if (type === 'power') {
+      icon.beginPath().moveTo(-5, 4).lineTo(0, -2).lineTo(5, 4).strokePath();
+      icon.beginPath().moveTo(-5, -1).lineTo(0, -7).lineTo(5, -1).strokePath();
+    } else if (type === 'curve') {
+      icon.beginPath().arc(0, 0, 6, 0.4, 5.1, false).strokePath();
+      icon.fillStyle(color, 1);
+      icon.fillTriangle(4, -6, 8, -4, 5, -1);
+    } else {
+      icon.strokeCircle(0, 0, 7);
+      icon.strokeCircle(0, 0, 2);
+      icon.beginPath().moveTo(-10, 0).lineTo(10, 0).moveTo(0, -10).lineTo(0, 10).strokePath();
+    }
+    menuText(this, x - 27, y - 4, title, {
+      fontFamily: DISPLAY_FONT,
+      fontSize: '7px',
+      color: CREAM,
+      letterSpacing: 0.15
+    }).setDepth(304);
+    menuText(this, x - 27, y + 6, subtitle, {
+      fontFamily: PIXEL_FONT,
+      fontSize: '6px',
+      color: `#${color.toString(16).padStart(6, '0')}`,
+      letterSpacing: 0.65
+    }).setDepth(304);
   }
 }
