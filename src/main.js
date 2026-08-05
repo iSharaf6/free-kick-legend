@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
-import '@fontsource/bungee/latin-400.css';
 import '@fontsource/pixelify-sans/latin-700.css';
+import '@fontsource/silkscreen/latin-400.css';
 import { RENDER_W, RENDER_H } from './config.js';
 import { BootScene } from './scenes/BootScene.js';
 import { MenuScene } from './scenes/MenuScene.js';

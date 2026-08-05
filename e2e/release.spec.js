@@ -115,6 +115,7 @@ test('the Continue action acknowledges input and rejects re-entry', async ({ pag
     };
     for (const child of scene.children.list) visit(child);
     const image = (key) => objects.find((object) => object?.texture?.key === key);
+    const wordmark = objects.find((object) => object?.text === 'KICK DISTRICT');
     const snapshot = (object) => object && ({
       scaleX: object.scaleX,
       scaleY: object.scaleY,
@@ -126,31 +127,64 @@ test('the Continue action acknowledges input and rejects re-entry', async ({ pag
       crest: snapshot(image('kick-district-crest')),
       studio: snapshot(image('calynx-logo-pixel')),
       pitch: snapshot(image('pitch-grass-pixel-v3')),
+      sponsorCount: objects.filter((object) => object?.texture?.key === 'calynx-logo-pixel' && object.depth === 7).length,
+      grounded: {
+        rootY: scene.kicker.sprite.y,
+        shadowY: scene.kicker.shadow.y,
+        originY: scene.kicker.sprite.originY
+      },
+      actionFit: scene.menuActionButtons.map((button) => {
+        const left = button.x - button.buttonWidth / 2 + 4;
+        const right = button.x + button.buttonWidth / 2 - 4;
+        const top = button.y - button.buttonHeight / 2 + 3;
+        const bottom = button.y + button.buttonHeight / 2 - 3;
+        return [button.buttonLabel, button.buttonSubtitle].map((text) => {
+          const bounds = text.getBounds();
+          return bounds.left >= left && bounds.right <= right && bounds.top >= top && bounds.bottom <= bottom;
+        }).every(Boolean);
+      }),
+      headerFit: [scene.settingsButton, ...scene.headerStatPanels].map((panel) => {
+        const width = panel.buttonWidth ?? panel.panelWidth;
+        const text = panel.buttonLabel ?? panel.valueLabel;
+        const bounds = text.getBounds();
+        return bounds.left >= panel.x - width / 2 + 4 && bounds.right <= panel.x + width / 2 - 4;
+      }),
+      wordmarkFit: (() => {
+        const bounds = wordmark.getBounds();
+        return bounds.left >= 9 && bounds.right <= 176 && bounds.top >= 6 && bounds.bottom <= 29;
+      })(),
       fonts: {
-        display: document.fonts.check('12px Bungee'),
-        pixel: document.fonts.check('12px "Pixelify Sans"')
+        display: document.fonts.check('12px "Pixelify Sans"'),
+        pixel: document.fonts.check('12px "Pixelify Sans"'),
+        data: document.fonts.check('12px "Silkscreen"')
       }
     };
   });
   expect(frontMenu.labels).toEqual(expect.arrayContaining([
     'KICK DISTRICT', 'OWN THE CURVE.', 'STUDIO', 'CONTINUE', 'LEVEL 01',
-    'CAREER', 'FIVE CUP TOUR', 'DAILY KICK', 'TIME ATTACK', 'LOCKER',
-    'SWIPE UP', 'BEND LATE', 'FIND THE CORNER'
+    'CAREER', 'FIVE CUP TOUR', 'DAILY KICK', 'TIME ATTACK', 'LOCKER'
   ]));
-  expect(frontMenu.fonts).toEqual({ display: true, pixel: true });
-  for (const asset of [frontMenu.crest, frontMenu.studio, frontMenu.pitch]) {
+  expect(frontMenu.labels).not.toEqual(expect.arrayContaining(['SWIPE UP', 'BEND LATE', 'FIND THE CORNER']));
+  expect(frontMenu.crest).toBeFalsy();
+  expect(frontMenu.sponsorCount).toBeGreaterThanOrEqual(4);
+  expect(frontMenu.grounded).toEqual({ rootY: 198, shadowY: 198, originY: 247 / 256 });
+  expect(frontMenu.actionFit).toEqual([true, true, true, true, true]);
+  expect(frontMenu.headerFit).toEqual([true, true, true]);
+  expect(frontMenu.wordmarkFit).toBe(true);
+  expect(frontMenu.fonts).toEqual({ display: true, pixel: true, data: true });
+  for (const asset of [frontMenu.studio, frontMenu.pitch]) {
     expect(asset).toBeTruthy();
     expect(asset.scaleX).toBeCloseTo(asset.scaleY, 8);
     expect(asset.displayAspect).toBeCloseTo(asset.sourceAspect, 8);
   }
 
-  await game.clickLogical(350, 64);
+  await game.clickLogical(350, 65);
   const menuLabels = await page.evaluate(() => window.__game.scene.getScene('Menu').children.list
     .flatMap((child) => child?.list ?? [child])
     .map((child) => child?.text)
     .filter(Boolean));
   expect(menuLabels).toContain('KICKING OFF...');
-  await game.clickLogical(350, 64);
+  await game.clickLogical(350, 65);
 
   await page.waitForFunction(() => window.__game.scene.isActive('Game'));
   expect(await page.evaluate(() => window.__game.scene.getScenes(true)
@@ -325,7 +359,7 @@ test('Five Cup Tour keeps every image proportional and launches the selected mat
         worldHeight: camera.worldView.height
       },
       fonts: {
-        display: document.fonts.check('16px Bungee'),
+        display: document.fonts.check('16px "Pixelify Sans"'),
         pixel: document.fonts.check('16px "Pixelify Sans"')
       },
       background: {

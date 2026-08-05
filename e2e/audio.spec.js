@@ -38,8 +38,8 @@ test('menu music unlocks once, survives every menu panel, and persists mute', as
   });
 
   const panels = [
-    { button: [350, 103], scene: 'LevelSelect' },
-    { button: [350, 211], scene: 'Locker' },
+    { button: [350, 107], scene: 'LevelSelect' },
+    { button: [350, 227], scene: 'Locker' },
     { button: [280, 22], scene: 'Progress' }
   ];
   for (const panel of panels) {
@@ -86,7 +86,7 @@ test('gameplay fades the menu track and returning resumes its position', async (
   await page.waitForFunction(() => window.__menuMusic?.getState().duration > 170);
   await page.evaluate(() => { window.__menuMusic.audio.currentTime = 80; });
 
-  await game.clickLogical(350, 175);
+  await game.clickLogical(350, 187);
   await page.waitForFunction(() => window.__fkl?.mode === 'arcade');
   await page.waitForFunction(() => {
     const state = window.__menuMusic.getState();
@@ -104,7 +104,7 @@ test('gameplay fades the menu track and returning resumes its position', async (
   await page.waitForFunction(() => window.__menuMusic.getState().active && !window.__menuMusic.audio.paused);
   expect((await musicState(page)).currentTime).toBeGreaterThanOrEqual(afterArcade);
 
-  await game.clickLogical(350, 139);
+  await game.clickLogical(350, 147);
   await page.waitForFunction(() => window.__fkl?.mode === 'daily');
   await page.waitForFunction(() => !window.__menuMusic.getState().active && window.__menuMusic.audio.paused);
   expect((await musicState(page)).instanceCount).toBe(1);

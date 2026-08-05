@@ -11,7 +11,7 @@ test('a selected striker persists from the locker through menu and gameplay', as
   const game = new GamePage(page);
   await game.open({ width: 1280, height: 720 });
 
-  await game.clickLogical(350, 211);
+  await game.clickLogical(350, 227);
   await page.waitForFunction(() => window.__game?.scene?.isActive('Locker'));
   await game.clickLogical(64, 51);
   await page.waitForFunction(() => window.__game.scene.getScene('Locker').category === 'character');
@@ -38,11 +38,17 @@ test('a selected striker persists from the locker through menu and gameplay', as
     return {
       characterId: menu.kicker.characterId,
       texture: menu.kicker.sprite.texture.key,
+      ground: {
+        rootY: menu.kicker.sprite.y,
+        shadowY: menu.kicker.shadow.y,
+        originY: menu.kicker.sprite.originY
+      },
       labels
     };
   });
   expect(menuState.characterId).toBe('character-islam-sharaf');
   expect(menuState.texture).toBe('kicker-hd-character-islam-sharaf-kit-home-idle');
+  expect(menuState.ground).toEqual({ rootY: 198, shadowY: 198, originY: 247 / 256 });
   expect(menuState.labels).toContain('ISLAM SHARAF  ·  #10');
   await testInfo.attach('islam-sharaf-menu', {
     body: await page.screenshot(),

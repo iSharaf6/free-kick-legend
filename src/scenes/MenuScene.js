@@ -13,8 +13,9 @@ import { utcDateKey } from '../data/progression.js';
 import { addAnimatedCrowdPanorama } from '../art/CrowdPanorama.js';
 import { getCosmetic } from '../data/cosmetics.js';
 
-const DISPLAY_FONT = '"Bungee", "Arial Black", sans-serif';
+const DISPLAY_FONT = '"Pixelify Sans", "Courier New", monospace';
 const PIXEL_FONT = '"Pixelify Sans", "Courier New", monospace';
+const NUMBER_FONT = '"Silkscreen", "Courier New", monospace';
 const INK = 0x030a11;
 const NAVY = 0x07182a;
 const PANEL = 0x0b2035;
@@ -23,6 +24,15 @@ const CREAM = '#f7edd2';
 const GOLD = 0xf5c94b;
 const GOLD_HI = 0xffe785;
 const GOLD_DARK = 0x8f6326;
+
+const MENU_SPONSOR_BOARDS = Object.freeze([
+  Object.freeze({ width: 104, fill: 0x1c4a9a, shade: 0x143676, trim: 0x6e93d3, logo: 0xf8f2df }),
+  Object.freeze({ width: 88, fill: 0x156b45, shade: 0x0e4a2f, trim: 0x49a760, logo: 0xeafff2 }),
+  Object.freeze({ width: 96, fill: 0x2b2413, shade: 0x1a1509, trim: 0xf3c449, logo: 0xffe6a8 }),
+  Object.freeze({ width: 82, fill: 0x8f2f2a, shade: 0x64201c, trim: 0xd75a3a, logo: 0xffe3d8 }),
+  Object.freeze({ width: 100, fill: 0x4a2a7a, shade: 0x321c55, trim: 0x9b5de5, logo: 0xece0ff }),
+  Object.freeze({ width: 90, fill: 0x14555e, shade: 0x0d3a41, trim: 0x66b7bf, logo: 0xdefaff })
+]);
 
 function levelId(level, index) {
   return level?.id ?? index;
@@ -244,10 +254,10 @@ function makeMenuAction(scene, x, y, w, h, spec, onClick) {
     fontFamily: DISPLAY_FONT,
     fontSize: spec.featured ? '16px' : '14px',
     color: CREAM,
-    strokeThickness: 2,
-    letterSpacing: -0.1
+    strokeThickness: 1,
+    letterSpacing: 0.25
   });
-  const subtitle = menuText(scene, labelX + 1, spec.featured ? 10 : 8, spec.subtitle, {
+  const subtitle = menuText(scene, labelX + 1, spec.featured ? 9 : 8, spec.subtitle, {
     fontFamily: PIXEL_FONT,
     fontSize: spec.featured ? '10px' : '9px',
     color: spec.subtitleColor,
@@ -263,7 +273,7 @@ function makeMenuAction(scene, x, y, w, h, spec, onClick) {
     const alpha = state === 'disabled' ? 0.42 : 1;
     icon.setY(offset).setAlpha(alpha);
     label.setY((spec.featured ? -6 : -5) + offset).setAlpha(alpha);
-    subtitle.setY((spec.featured ? 10 : 8) + offset).setAlpha(alpha);
+    subtitle.setY((spec.featured ? 9 : 8) + offset).setAlpha(alpha);
     chevron.clear().setY(offset).setAlpha(alpha);
     chevron.lineStyle(spec.featured ? 3 : 2, spec.subtitleColorValue ?? spec.accent, 1);
     chevron.beginPath().moveTo(-3, -6).lineTo(3, 0).lineTo(-3, 6).strokePath();
@@ -272,6 +282,8 @@ function makeMenuAction(scene, x, y, w, h, spec, onClick) {
   container.buttonLabel = label;
   container.buttonSubtitle = subtitle;
   container.buttonIcon = icon;
+  container.buttonWidth = w;
+  container.buttonHeight = h;
   return container;
 }
 
@@ -329,6 +341,8 @@ function makeHeaderControl(scene, x, y, w, h, opts, onClick) {
   wireButton(container, render, onClick, true);
   container.buttonIcon = icon;
   container.buttonLabel = label;
+  container.buttonWidth = w;
+  container.buttonHeight = h;
   return container;
 }
 
@@ -357,6 +371,7 @@ export class MenuScene extends Phaser.Scene {
       depth: 2,
       reducedMotion: Boolean(settings.reducedMotion)
     });
+    this.makeSponsorBoards();
     this.drawComposition();
 
     const muted = Boolean((settings.muted ?? settings.audioMuted ?? false) || PlatformService.shouldMuteAudio());
@@ -383,7 +398,6 @@ export class MenuScene extends Phaser.Scene {
     this.makeHeader(totalStars, coins, muted, readyClaims);
     this.makeHero(equippedKit, equippedCharacter, totalStars);
     this.makeActions(continueIndex, daily, today);
-    this.makeFooter();
 
     addScanlines(this, 900, 0.024);
     sceneIntro(this);
@@ -418,6 +432,36 @@ export class MenuScene extends Phaser.Scene {
     }
   }
 
+  makeSponsorBoards() {
+    const y = 83;
+    const h = STADIUM_Y - y;
+    const board = this.add.graphics().setDepth(6);
+    board.fillStyle(INK, 1).fillRect(0, y - 2, GAME_W, h + 3);
+
+    let x = -34;
+    let index = 0;
+    while (x < GAME_W) {
+      const spec = MENU_SPONSOR_BOARDS[index % MENU_SPONSOR_BOARDS.length];
+      const w = spec.width;
+      board.fillStyle(spec.fill, 1).fillRect(x + 1, y, w - 2, h);
+      board.fillStyle(spec.shade, 1).fillRect(x + 1, y + h - 4, w - 2, 3);
+      board.fillStyle(spec.trim, 0.82).fillRect(x + 2, y + 1, w - 4, 1);
+      board.fillStyle(spec.trim, 0.5).fillRect(x + 3, y + h - 6, w - 6, 1);
+      board.fillStyle(INK, 1).fillRect(x + w - 1, y - 1, 2, h + 1);
+
+      const centreX = x + w / 2;
+      if (centreX - 28 >= 1 && centreX + 28 <= GAME_W - 1 &&
+          this.textures.exists('calynx-logo-pixel')) {
+        this.add.image(centreX, y + h / 2, 'calynx-logo-pixel')
+          .setScale(0.8)
+          .setTint(spec.logo)
+          .setDepth(7);
+      }
+      x += w;
+      index++;
+    }
+  }
+
   makeHeader(totalStars, coins, muted, readyClaims) {
     const bar = this.add.graphics().setDepth(200);
     drawPremiumPanel(bar, 5, 4, GAME_W - 10, 37, {
@@ -428,32 +472,30 @@ export class MenuScene extends Phaser.Scene {
       cornerSize: 8
     });
 
-    const crest = this.add.image(29, 23, 'kick-district-crest').setDepth(205);
-    crest.setScale(39 / Math.max(1, crest.height));
-    menuText(this, 52, 16, 'KICK DISTRICT', {
+    menuText(this, 15, 16, 'KICK DISTRICT', {
       fontFamily: DISPLAY_FONT,
-      fontSize: '15px',
+      fontSize: '18px',
       color: CREAM,
-      strokeThickness: 2,
-      letterSpacing: -0.2
+      strokeThickness: 1,
+      letterSpacing: 0.5
     }).setDepth(205);
-    menuText(this, 53, 31, 'OWN THE CURVE.', {
+    menuText(this, 16, 32, 'OWN THE CURVE.', {
       fontFamily: PIXEL_FONT,
-      fontSize: '7px',
+      fontSize: '6px',
       color: '#f5c94b',
-      letterSpacing: 0.9
+      letterSpacing: 0.72
     }).setDepth(205);
-    menuText(this, 121, 31, '·', {
+    menuText(this, 87, 32, '·', {
       originX: 0.5,
-      fontSize: '7px',
+      fontSize: '6px',
       color: '#587287'
     }).setDepth(205);
-    const calynx = this.add.image(143, 31, 'calynx-logo-pixel').setScale(0.42).setDepth(205);
+    const calynx = this.add.image(110, 32, 'calynx-logo-pixel').setScale(0.48).setDepth(205);
     calynx.setTint(0x8fb8ff);
-    menuText(this, 160, 31, 'STUDIO', {
-      fontSize: '6px',
+    menuText(this, 128, 32, 'STUDIO', {
+      fontSize: '5px',
       color: '#7895ad',
-      letterSpacing: 0.45
+      letterSpacing: 0.35
     }).setDepth(205);
 
     this.soundButton = makeHeaderControl(this, 188, 22, 19, 23, {
@@ -467,7 +509,7 @@ export class MenuScene extends Phaser.Scene {
     this.settingsButton = makeHeaderControl(this, 230, 22, 62, 23, {
       gear: true,
       label: 'SETTINGS',
-      fontSize: '7px',
+      fontSize: '6px',
       color: 0x13283e,
       border: 0x315a78,
       corner: 0x315a78
@@ -490,8 +532,10 @@ export class MenuScene extends Phaser.Scene {
       corner: readyClaims ? GOLD : GOLD_DARK
     }, () => this.scene.start('Progress')).setDepth(206);
 
-    this.makeHeaderStat(337, 22, 72, 'icon-star', `${totalStars}/${LEVELS.length * 3}`, 0x0c2135);
-    this.makeHeaderStat(423, 22, 80, 'icon-coin', formatCompact(coins), 0x0c2135);
+    this.headerStatPanels = [
+      this.makeHeaderStat(337, 22, 72, 'icon-star', `${totalStars}/${LEVELS.length * 3}`, 0x0c2135),
+      this.makeHeaderStat(423, 22, 80, 'icon-coin', formatCompact(coins), 0x0c2135)
+    ];
 
     if (readyClaims) {
       const badge = this.add.graphics().setDepth(208);
@@ -500,7 +544,7 @@ export class MenuScene extends Phaser.Scene {
       menuText(this, 291, 10, String(Math.min(readyClaims, 9)), {
         originX: 0.5,
         fontFamily: DISPLAY_FONT,
-        fontSize: '6px',
+        fontSize: '7px',
         color: '#ffffff',
         strokeThickness: 0,
         shadow: false
@@ -519,12 +563,16 @@ export class MenuScene extends Phaser.Scene {
     });
     const icon = this.add.image(-w / 2 + 15, 0, iconKey).setScale(1.05);
     const label = menuText(this, -w / 2 + 28, 0, String(value), {
-      fontFamily: DISPLAY_FONT,
-      fontSize: '9px',
+      fontFamily: NUMBER_FONT,
+      fontStyle: 'normal',
+      fontSize: '8px',
       color: CREAM,
       letterSpacing: 0
     });
-    this.add.container(x, y, [panel, icon, label]).setDepth(206);
+    const container = this.add.container(x, y, [panel, icon, label]).setDepth(206);
+    container.panelWidth = w;
+    container.valueLabel = label;
+    return container;
   }
 
   toggleSound() {
@@ -538,7 +586,7 @@ export class MenuScene extends Phaser.Scene {
     const player = getCosmetic(equippedCharacter) || getCosmetic('character-mica');
     const ratings = playerRatings(player);
     const card = this.add.graphics().setDepth(150);
-    drawPremiumPanel(card, 34, 178, 174, 63, {
+    drawPremiumPanel(card, 28, 202, 192, 65, {
       fill: 0x0b1d30,
       bottom: 0x061522,
       border: GOLD_DARK,
@@ -546,48 +594,48 @@ export class MenuScene extends Phaser.Scene {
       cornerSize: 7
     });
 
-    drawPremiumPanel(card, 42, 183, 28, 28, {
+    drawPremiumPanel(card, 37, 207, 31, 30, {
       fill: 0x261c51,
       bottom: 0x160f31,
       border: GOLD_DARK,
       corner: GOLD,
       cornerSize: 4
     });
-    menuText(this, 56, 197, String(player.number), {
+    menuText(this, 52.5, 222, String(player.number), {
       originX: 0.5,
       fontFamily: DISPLAY_FONT,
       fontSize: '14px',
       color: CREAM,
-      strokeThickness: 2
+      strokeThickness: 1
     }).setDepth(154);
-    menuText(this, 77, 188, `${player.name.toUpperCase()}  ·  #${player.number}`, {
+    menuText(this, 75, 212, `${player.name.toUpperCase()}  ·  #${player.number}`, {
       fontFamily: DISPLAY_FONT,
       fontSize: '9px',
       color: CREAM,
-      letterSpacing: 0
+      letterSpacing: 0.35
     }).setDepth(154);
-    menuText(this, 77, 202, 'CUP RUN', {
+    menuText(this, 75, 228, 'CUP RUN', {
       fontFamily: PIXEL_FONT,
-      fontSize: '7px',
+      fontSize: '6px',
       color: '#c5d2dc',
       letterSpacing: 0.4
     }).setDepth(154);
-    menuText(this, 110, 202, `${totalStars} STARS`, {
+    menuText(this, 108, 228, `${totalStars} STARS`, {
       fontFamily: PIXEL_FONT,
-      fontSize: '7px',
+      fontSize: '6px',
       color: '#6ee1df',
       letterSpacing: 0.35
     }).setDepth(154);
 
     const progress = Phaser.Math.Clamp(totalStars / Math.max(LEVELS.length * 3, 1), 0, 1);
     card.fillStyle(INK, 1);
-    card.fillRect(151, 198, 47, 6);
+    card.fillRect(164, 224, 46, 6);
     card.fillStyle(0x2e4b62, 1);
-    card.fillRect(152, 199, 45, 4);
+    card.fillRect(165, 225, 44, 4);
     card.fillStyle(GOLD, 1);
-    card.fillRect(152, 199, Math.floor(45 * progress), 4);
+    card.fillRect(165, 225, Math.floor(44 * progress), 4);
     card.fillStyle(0x43657c, 0.65);
-    card.fillRect(41, 210, 160, 1);
+    card.fillRect(36, 236, 176, 1);
 
     const rows = [
       ['POWER', ratings.POWER, 0xef633e],
@@ -596,45 +644,49 @@ export class MenuScene extends Phaser.Scene {
       ['SPEED', ratings.SPEED, 0x66bf51]
     ];
     rows.forEach(([label, value, color], index) => {
-      const y = 216 + index * 6;
-      menuText(this, 44, y, label, {
+      const y = 242 + index * 6;
+      menuText(this, 38, y, label, {
         fontFamily: PIXEL_FONT,
         fontSize: '6px',
         color: CREAM,
         letterSpacing: 0.2
       }).setDepth(154);
       card.fillStyle(INK, 1);
-      card.fillRect(91, y - 2, 90, 4);
+      card.fillRect(91, y - 2, 104, 4);
       card.fillStyle(0x29445a, 1);
-      card.fillRect(92, y - 1, 88, 2);
+      card.fillRect(92, y - 1, 102, 2);
       card.fillStyle(color, 1);
-      card.fillRect(92, y - 1, Math.round(88 * value / 100), 2);
-      menuText(this, 199, y, String(value), {
+      card.fillRect(92, y - 1, Math.round(102 * value / 100), 2);
+      menuText(this, 211, y, String(value), {
         originX: 1,
         fontFamily: DISPLAY_FONT,
-        fontSize: '6px',
+        fontSize: '9px',
         color: CREAM,
         letterSpacing: 0
       }).setDepth(154);
     });
 
-    this.kicker = new Kicker(this, 111, 177, {
+    this.kicker = new Kicker(this, 116, 198, {
       kitId: equippedKit,
       characterId: equippedCharacter,
       scale: 5.0,
-      depth: 130
+      depth: 130,
+      shadowAlpha: 0.66,
+      ambient: false
     });
     const ballKey = SaveManager.getEquippedCosmetic?.('ball') || 'ball-classic';
     const texture = this.textures.exists(ballKey) ? ballKey : 'ball-classic';
-    const ball = this.add.image(169, 172, texture).setDepth(145);
+    this.add.image(176, 198, 'shadow')
+      .setDisplaySize(17, 4)
+      .setAlpha(0.52)
+      .setDepth(144);
+    const ball = this.add.image(176, 189, texture).setDepth(145);
     ball.setScale(18 / (ball.texture.source[0]?.width || 12));
     this.tweens.add({
       targets: ball,
-      y: 170,
       rotation: Math.PI * 2,
-      duration: 2100,
-      ease: 'Sine.easeInOut',
-      yoyo: true,
+      duration: 3200,
+      ease: 'Linear',
       repeat: -1
     });
   }
@@ -642,9 +694,10 @@ export class MenuScene extends Phaser.Scene {
   makeActions(continueIndex, daily, today) {
     const actionX = 350;
     const actionW = 210;
+    this.menuActionButtons = [];
     let continueButton = null;
     let continuePending = false;
-    continueButton = makeMenuAction(this, actionX, 64, actionW, 36, {
+    continueButton = makeMenuAction(this, actionX, 65, actionW, 37, {
       label: 'CONTINUE',
       subtitle: `LEVEL ${String(continueIndex + 1).padStart(2, '0')}`,
       subtitleColor: '#91ed5d',
@@ -669,8 +722,9 @@ export class MenuScene extends Phaser.Scene {
         continueButton?.buttonLabel?.setText('CONTINUE').setFontSize('16px');
       }
     }).setDepth(230);
+    this.menuActionButtons.push(continueButton);
 
-    makeMenuAction(this, actionX, 103, actionW, 32, {
+    this.menuActionButtons.push(makeMenuAction(this, actionX, 107, actionW, 35, {
       label: 'CAREER',
       subtitle: 'FIVE CUP TOUR',
       subtitleColor: '#58c6ff',
@@ -678,14 +732,14 @@ export class MenuScene extends Phaser.Scene {
       accent: 0x47baf5,
       iconType: 'career',
       subtitleColorValue: 0x58c6ff
-    }, () => this.scene.start('LevelSelect')).setDepth(230);
+    }, () => this.scene.start('LevelSelect')).setDepth(230));
 
     const dailySubtitle = daily.completed
       ? `BEST ${formatCompact(SaveManager.getBestDaily(today))}`
       : daily.streak > 0
         ? `${daily.streak} DAY STREAK`
         : 'NEW CHALLENGE';
-    makeMenuAction(this, actionX, 139, actionW, 32, {
+    this.menuActionButtons.push(makeMenuAction(this, actionX, 147, actionW, 35, {
       label: 'DAILY KICK',
       subtitle: dailySubtitle,
       subtitleColor: '#f5c94b',
@@ -696,9 +750,9 @@ export class MenuScene extends Phaser.Scene {
     }, () => {
       SaveManager.setLastPlayed?.({ mode: 'daily', levelId: LEVELS[continueIndex]?.id });
       this.scene.start('Game', { mode: 'daily', dailyDate: today });
-    }).setDepth(230);
+    }).setDepth(230));
 
-    makeMenuAction(this, actionX, 175, actionW, 32, {
+    this.menuActionButtons.push(makeMenuAction(this, actionX, 187, actionW, 35, {
       label: 'TIME ATTACK',
       subtitle: '60 SEC',
       subtitleColor: '#ff8551',
@@ -709,9 +763,9 @@ export class MenuScene extends Phaser.Scene {
     }, () => {
       SaveManager.setLastPlayed?.({ mode: 'arcade', levelId: null });
       this.scene.start('Game', { mode: 'arcade' });
-    }).setDepth(230);
+    }).setDepth(230));
 
-    makeMenuAction(this, actionX, 211, actionW, 32, {
+    this.menuActionButtons.push(makeMenuAction(this, actionX, 227, actionW, 35, {
       label: 'LOCKER',
       subtitle: 'MAKE IT YOURS',
       subtitleColor: '#da83ff',
@@ -719,54 +773,7 @@ export class MenuScene extends Phaser.Scene {
       accent: 0xad5bd9,
       iconType: 'locker',
       subtitleColorValue: 0xda83ff
-    }, () => this.scene.start('Locker')).setDepth(230);
+    }, () => this.scene.start('Locker')).setDepth(230));
   }
 
-  makeFooter() {
-    const footer = this.add.graphics().setDepth(300);
-    drawPremiumPanel(footer, 0, 244, GAME_W, 26, {
-      fill: 0x081827,
-      bottom: 0x030b13,
-      border: 0x1e4059,
-      corner: 0x1e4059,
-      cornerSize: 3
-    });
-    footer.fillStyle(0x49657a, 0.55);
-    footer.fillRect(171, 249, 1, 16);
-    footer.fillRect(309, 249, 1, 16);
-    this.makeTip(83, 257, 'power', 'SWIPE UP', 'ADD POWER', 0x4bd7d1);
-    this.makeTip(240, 257, 'curve', 'BEND LATE', 'MORE CURVE', 0xb760dc);
-    this.makeTip(390, 257, 'target', 'FIND THE CORNER', 'MAX ACCURACY', 0xf0b837);
-  }
-
-  makeTip(x, y, type, title, subtitle, color) {
-    const icon = this.add.graphics().setPosition(x - 47, y).setDepth(304);
-    icon.fillStyle(0x071018, 0.9);
-    icon.fillCircle(0, 0, 11);
-    icon.lineStyle(2, color, 1);
-    if (type === 'power') {
-      icon.beginPath().moveTo(-5, 4).lineTo(0, -2).lineTo(5, 4).strokePath();
-      icon.beginPath().moveTo(-5, -1).lineTo(0, -7).lineTo(5, -1).strokePath();
-    } else if (type === 'curve') {
-      icon.beginPath().arc(0, 0, 6, 0.4, 5.1, false).strokePath();
-      icon.fillStyle(color, 1);
-      icon.fillTriangle(4, -6, 8, -4, 5, -1);
-    } else {
-      icon.strokeCircle(0, 0, 7);
-      icon.strokeCircle(0, 0, 2);
-      icon.beginPath().moveTo(-10, 0).lineTo(10, 0).moveTo(0, -10).lineTo(0, 10).strokePath();
-    }
-    menuText(this, x - 27, y - 4, title, {
-      fontFamily: DISPLAY_FONT,
-      fontSize: '7px',
-      color: CREAM,
-      letterSpacing: 0.15
-    }).setDepth(304);
-    menuText(this, x - 27, y + 6, subtitle, {
-      fontFamily: PIXEL_FONT,
-      fontSize: '6px',
-      color: `#${color.toString(16).padStart(6, '0')}`,
-      letterSpacing: 0.65
-    }).setDepth(304);
-  }
 }

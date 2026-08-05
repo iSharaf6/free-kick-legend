@@ -47,7 +47,6 @@ export class BootScene extends Phaser.Scene {
 
   preload() {
     const base = import.meta.env.BASE_URL;
-    this.load.image('kick-district-crest', `${base}assets/brand/kick-district-crest.png`);
     this.load.image('pitch-grass-pixel-v3', `${base}assets/hd/pitch-grass-pixel-v3.png`);
     this.load.image(CROWD_PANORAMA.textureKey, `${base}${CROWD_PANORAMA.assetPath}`);
     getCosmeticsByCategory('character').forEach((character) => {

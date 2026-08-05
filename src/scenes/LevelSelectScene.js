@@ -10,7 +10,7 @@ import { PAL } from '../pixelart.js';
 const LEVELS_PER_CUP = 10;
 const CUP_COUNT = 5;
 const CUP_COLORS = [0x248c43, 0x2475b9, 0xb56a31, 0x67549a, 0xa9463b];
-const DISPLAY_FONT = '"Bungee", "Arial Black", sans-serif';
+const DISPLAY_FONT = '"Pixelify Sans", "Courier New", monospace';
 const PIXEL_FONT = '"Pixelify Sans", "Courier New", monospace';
 const CREAM = '#f6e9c7';
 const GOLD = 0xf4c84b;

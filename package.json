@@ -16,8 +16,8 @@
     "test:release": "npm test && npm run build && npm run test:e2e"
   },
   "dependencies": {
-    "@fontsource/bungee": "^5.3.0",
     "@fontsource/pixelify-sans": "^5.3.0",
+    "@fontsource/silkscreen": "^5.3.0",
     "phaser": "^3.90.0"
   },
   "devDependencies": {
