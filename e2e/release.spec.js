@@ -220,7 +220,9 @@ test('Career victory uses the trophy results card and advances to the next level
       }));
     const resultStars = scene.terminalOverlayObjects
       .filter((child) => child?.texture?.key === 'icon-star' || child?.texture?.key === 'icon-star-empty')
-      .filter((child) => child.displayWidth === 31)
+      // The entrance tween changes displayWidth for 450ms. Position identifies
+      // the three result stars without coupling the assertion to animation time.
+      .filter((child) => child.y === 106)
       .map((child) => child.texture.key);
     return { text, buttons, resultStars };
   });
@@ -238,4 +240,69 @@ test('Career victory uses the trophy results card and advances to the next level
 
   await game.clickLogical(128, 224);
   await page.waitForFunction(() => window.__fkl?.state === 'AIMING' && window.__fkl?.levelIndex === 1);
+});
+
+test('Five Cup Tour keeps every image proportional and launches the selected match', async ({ page }) => {
+  const game = new GamePage(page);
+  await game.open({ width: 844, height: 390 });
+  await page.evaluate(() => {
+    const menu = window.__game.scene.getScene('Menu');
+    menu.scene.start('LevelSelect');
+  });
+  await page.waitForFunction(() => window.__game.scene.isActive('LevelSelect'));
+
+  await page.evaluate(() => {
+    const scene = window.__game.scene.getScene('LevelSelect');
+    scene.unlocked = 4;
+    scene.selectedIndex = 0;
+    scene.cupIndex = 0;
+    scene.renderCupTabs();
+    scene.renderCupContent();
+  });
+  await game.clickLogical(208, 139);
+  await page.waitForFunction(() => window.__game.scene.getScene('LevelSelect').selectedIndex === 3);
+
+  const tour = await page.evaluate(() => {
+    const scene = window.__game.scene.getScene('LevelSelect');
+    const objects = [];
+    const visit = (object) => {
+      objects.push(object);
+      for (const child of object?.list || []) visit(child);
+    };
+    for (const child of scene.children.list) visit(child);
+    const distortedImages = objects
+      .filter((object) => object?.texture?.key)
+      .filter((object) => Math.abs(Math.abs(object.scaleX) - Math.abs(object.scaleY)) > 0.000001)
+      .map((object) => ({ key: object.texture.key, scaleX: object.scaleX, scaleY: object.scaleY }));
+    const labels = objects.map((object) => object?.text).filter(Boolean);
+    const bg = scene.backgroundImage;
+    return {
+      selectedIndex: scene.selectedIndex,
+      labels,
+      distortedImages,
+      background: {
+        sourceAspect: bg.width / bg.height,
+        displayAspect: bg.displayWidth / bg.displayHeight,
+        scaleX: bg.scaleX,
+        scaleY: bg.scaleY,
+        cover: bg.fklAspectCover
+      }
+    };
+  });
+
+  expect(tour.selectedIndex).toBe(3);
+  expect(tour.labels).toEqual(expect.arrayContaining([
+    'FIVE CUP TOUR', 'ROOKIE ACADEMY', 'PICK THE LEFT', '15 M', '1 PLAYER', 'ROOKIE', 'PLAY MATCH'
+  ]));
+  expect(tour.distortedImages).toEqual([]);
+  expect(tour.background.scaleX).toBeCloseTo(tour.background.scaleY, 8);
+  expect(tour.background.displayAspect).toBeCloseTo(tour.background.sourceAspect, 8);
+  expect(tour.background.cover).toEqual({
+    sourceWidth: 480,
+    sourceHeight: 270,
+    scale: 1
+  });
+
+  await game.clickLogical(389, 246);
+  await page.waitForFunction(() => window.__fkl?.state === 'AIMING' && window.__fkl?.levelIndex === 3);
 });

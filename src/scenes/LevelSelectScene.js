@@ -24,6 +24,20 @@ function stableId(level, index) {
   return level?.id ?? index;
 }
 
+function addAspectCoverImage(scene, key, width = GAME_W, height = GAME_H) {
+  const image = scene.add.image(width / 2, height / 2, key).setOrigin(0.5);
+  const sourceWidth = Math.max(1, Number(image.width) || width);
+  const sourceHeight = Math.max(1, Number(image.height) || height);
+  const uniformScale = Math.max(width / sourceWidth, height / sourceHeight);
+  image.setScale(uniformScale);
+  image.fklAspectCover = {
+    sourceWidth,
+    sourceHeight,
+    scale: uniformScale
+  };
+  return image;
+}
+
 export class LevelSelectScene extends Phaser.Scene {
   constructor() {
     super('LevelSelect');
@@ -32,9 +46,12 @@ export class LevelSelectScene extends Phaser.Scene {
   create() {
     configureHdCamera(this);
     MenuMusic.enterMenu();
-    this.add.image(0, 0, 'stadium-menu').setOrigin(0).setDepth(0);
+    // Cover the 16:9 canvas from the source dimensions with one uniform scale.
+    // Even if the stadium art changes aspect later, it may crop at the edges
+    // but can never be stretched wider or taller than its authored proportions.
+    this.backgroundImage = addAspectCoverImage(this, 'stadium-menu').setDepth(0);
     const wash = this.add.graphics().setDepth(1);
-    wash.fillStyle(PAL.ink, 0.76);
+    wash.fillStyle(PAL.ink, 0.68);
     wash.fillRect(0, 0, GAME_W, GAME_H);
 
     this.unlocked = SaveManager.unlockedCount(LEVELS.length);
@@ -57,40 +74,40 @@ export class LevelSelectScene extends Phaser.Scene {
 
   drawHeader() {
     const g = this.add.graphics().setDepth(100);
-    drawPanel(g, 7, 5, GAME_W - 14, 27, {
+    drawPanel(g, 6, 4, GAME_W - 12, 32, {
       fill: PAL.panel,
       border: PAL.borderDark,
-      corner: PAL.goldDark
+      corner: PAL.gold
     });
-    makeIconButton(this, 23, 18, 20, 'icon-back', () => this.scene.start('Menu'), {
+    makeIconButton(this, 23, 20, 23, 'icon-back', () => this.scene.start('Menu'), {
       color: PAL.panelHi,
       hover: PAL.blue,
       border: PAL.borderDark,
-      iconScale: 0.78,
-      hitWidth: 31,
-      hitHeight: 29
+      iconScale: 0.88,
+      hitWidth: 34,
+      hitHeight: 32
     }).setDepth(104);
-    titleText(this, 106, 18, 'FIVE CUP TOUR', '14px', '#f3e7c3').setOrigin(0, 0.5).setDepth(104);
+    titleText(this, GAME_W / 2, 20, 'FIVE CUP TOUR', '16px', '#f3e7c3').setDepth(104);
 
     const totalStars = SaveManager.getTotalStars?.()
       ?? LEVELS.reduce((sum, level, index) => sum + SaveManager.getStars(stableId(level, index)), 0);
-    makeStatChip(this, 424, 18, 82, 'icon-star', `${totalStars}/${LEVELS.length * 3}`, {
-      height: 21,
+    makeStatChip(this, 427, 20, 80, 'icon-star', `${totalStars}/${LEVELS.length * 3}`, {
+      height: 23,
       fill: PAL.night,
-      border: PAL.borderDark,
-      fontSize: '8px',
-      iconScale: 0.8
+      border: PAL.goldDark,
+      fontSize: '9px',
+      iconScale: 0.88
     }).setDepth(104);
   }
 
   drawPanels() {
     const g = this.add.graphics().setDepth(80);
-    drawPanel(g, 9, 73, 281, 187, {
+    drawPanel(g, 7, 76, 294, 188, {
       fill: PAL.panel,
       border: PAL.borderDark,
-      corner: PAL.goldDark
+      corner: PAL.gold
     });
-    drawPanel(g, 298, 73, 173, 187, {
+    drawPanel(g, 305, 76, 168, 188, {
       fill: PAL.panel,
       border: PAL.goldDark,
       corner: PAL.gold
@@ -104,13 +121,13 @@ export class LevelSelectScene extends Phaser.Scene {
     }
     this.tabLayer = this.add.container(0, 0).setDepth(110);
 
-    const xs = [87, 164, 241, 318, 395];
+    const xs = [70, 155, 240, 325, 410];
     CUP_VIEWS.forEach((cup, index) => {
       const firstLevel = index * LEVELS_PER_CUP;
       const hasLevels = firstLevel < LEVELS.length;
       const available = hasLevels && firstLevel < this.unlocked;
       const selected = index === this.cupIndex;
-      const btn = makeButton(this, xs[index], 51, 69, 29, cup.roman, () => {
+      const btn = makeButton(this, xs[index], 56, 78, 30, cup.roman, () => {
         this.cupIndex = index;
         const start = index * LEVELS_PER_CUP;
         const end = Math.min(start + LEVELS_PER_CUP, LEVELS.length);
@@ -124,11 +141,11 @@ export class LevelSelectScene extends Phaser.Scene {
         selected,
         disabled: !available,
         icon: available ? 'icon-cup' : 'icon-cup-locked',
-        iconScale: 0.62,
-        iconX: 14,
-        fontSize: '10px',
+        iconScale: 0.72,
+        iconX: 17,
+        fontSize: '11px',
         letterSpacing: 0.5,
-        hitHeight: 31
+        hitHeight: 34
       });
       this.tabLayer.add(btn);
     });
@@ -146,22 +163,32 @@ export class LevelSelectScene extends Phaser.Scene {
     const end = Math.min(start + LEVELS_PER_CUP, LEVELS.length);
     const cupLevels = LEVELS.slice(start, end);
 
-    const cupTitle = bodyText(this, 21, 88, `${cup.name}  /  ${cup.place}`, {
+    const cupName = bodyText(this, 20, 93, cup.name, {
       fontFamily: FONT,
-      fontSize: '8px',
+      fontSize: '10px',
       color: '#f3c449',
       letterSpacing: 0.4
     });
-    this.contentLayer.add(cupTitle);
+    const divider = bodyText(this, 20 + cupName.displayWidth + 8, 93, '/', {
+      fontFamily: FONT,
+      fontSize: '9px',
+      color: '#f3e7c3'
+    });
+    const cupPlace = bodyText(this, divider.x + divider.displayWidth + 8, 93, cup.place, {
+      fontSize: '8px',
+      color: '#9fb3ba',
+      letterSpacing: 0.25
+    });
+    this.contentLayer.add([cupName, divider, cupPlace]);
 
     if (cupLevels.length === 0) {
-      const soon = bodyText(this, 149, 165, 'QUALIFY IN THE PREVIOUS CUP', {
+      const soon = bodyText(this, 154, 171, 'QUALIFY IN THE PREVIOUS CUP', {
         originX: 0.5,
         fontSize: '8px',
         color: '#7f929d',
         letterSpacing: 0.4
       });
-      const lock = this.add.image(149, 137, 'icon-lock').setScale(1.7);
+      const lock = this.add.image(154, 143, 'icon-lock').setScale(1.7);
       this.contentLayer.add([soon, lock]);
       this.renderEmptyDetail(cup);
       return;
@@ -171,8 +198,8 @@ export class LevelSelectScene extends Phaser.Scene {
       const index = start + localIndex;
       const col = localIndex % 5;
       const row = Math.floor(localIndex / 5);
-      const x = 34 + col * 54;
-      const y = 125 + row * 59;
+      const x = 43 + col * 55;
+      const y = 139 + row * 68;
       this.contentLayer.add(this.makeLevelTile(x, y, index, level));
     });
 
@@ -186,7 +213,7 @@ export class LevelSelectScene extends Phaser.Scene {
     const selected = index === this.selectedIndex;
     const stars = SaveManager.getStars(stableId(level, index));
     const cupColor = CUP_VIEWS[this.cupIndex].color;
-    const tile = makeButton(this, x, y, 48, 47, unlocked ? String(index + 1).padStart(2, '0') : '', () => {
+    const tile = makeButton(this, x, y, 49, 56, unlocked ? String(index + 1).padStart(2, '0') : '', () => {
       this.selectedIndex = index;
       this.renderCupContent();
     }, {
@@ -196,15 +223,15 @@ export class LevelSelectScene extends Phaser.Scene {
       selected,
       disabled: !unlocked,
       fontFamily: FONT,
-      fontSize: '10px',
-      labelY: -7,
+      fontSize: '12px',
+      labelY: -9,
       letterSpacing: 0.3,
-      hitWidth: 50,
-      hitHeight: 51
+      hitWidth: 51,
+      hitHeight: 60
     });
 
     if (unlocked) {
-      const rating = makeStars(this, 0, 11, stars, { scale: 0.58, gap: 13 });
+      const rating = makeStars(this, 0, 15, stars, { scale: 0.66, gap: 13 });
       tile.add(rating);
     } else {
       tile.add(this.add.image(0, 0, 'icon-lock').setScale(0.9).setAlpha(0.55));
@@ -213,9 +240,9 @@ export class LevelSelectScene extends Phaser.Scene {
   }
 
   renderEmptyDetail(cup) {
-    const icon = this.add.image(384, 113, 'icon-cup-locked').setScale(2.4).setAlpha(0.55);
-    const name = titleText(this, 384, 149, cup.name, '11px', '#7f929d');
-    const copy = bodyText(this, 384, 175, 'WIN THE PREVIOUS CUP\nTO OPEN THIS STAGE', {
+    const icon = this.add.image(389, 118, 'icon-cup-locked').setScale(2.4).setAlpha(0.55);
+    const name = titleText(this, 389, 153, cup.name, '11px', '#7f929d');
+    const copy = bodyText(this, 389, 181, 'WIN THE PREVIOUS CUP\nTO OPEN THIS STAGE', {
       originX: 0.5,
       fontSize: '7px',
       color: '#7f929d',
@@ -231,47 +258,54 @@ export class LevelSelectScene extends Phaser.Scene {
     const stars = SaveManager.getStars(stableId(level, index));
     const cup = CUP_VIEWS[Math.floor(index / LEVELS_PER_CUP)] ?? CUP_VIEWS[0];
 
-    const label = bodyText(this, 313, 88, `MATCH ${String(index + 1).padStart(2, '0')}  ·  CUP ${cup.roman}`, {
+    const label = bodyText(this, 317, 92, `MATCH ${String(index + 1).padStart(2, '0')}  ·  CUP ${cup.roman}`, {
       fontSize: '7px',
-      color: '#9fb3ba',
+      color: '#86a8c4',
       letterSpacing: 0.4
     });
-    const name = titleText(this, 384, 111, String(level.name || 'Unnamed kick').toUpperCase(), '12px', '#f3e7c3');
-    name.setWordWrapWidth(144, true).setAlign('center');
-    const rating = makeStars(this, 384, 135, stars, { scale: 0.9, gap: 17 });
+    const name = titleText(this, 389, 116, String(level.name || 'Unnamed kick').toUpperCase(), '12px', '#f3e7c3');
+    name.setWordWrapWidth(146, true).setAlign('center');
+    const rating = makeStars(this, 389, 140, stars, { scale: 0.94, gap: 18 });
+
+    const detailRules = this.add.graphics();
+    detailRules.fillStyle(PAL.borderDark, 0.75);
+    detailRules.fillRect(316, 151, 146, 1);
+    detailRules.fillRect(316, 209, 146, 1);
+    this.contentLayer.add(detailRules);
 
     const metrics = [
-      ['DISTANCE', `${Math.round(level.distance || 0)} M`],
-      ['WALL', `${level.wall || 0} PLAYERS`],
-      ['KEEPER', this.keeperLabel(level.keeper)]
+      ['distance', 'DISTANCE', `${Math.round(level.distance || 0)} M`],
+      ['wall', 'WALL', `${level.wall || 0} PLAYER${level.wall === 1 ? '' : 'S'}`],
+      ['keeper', 'KEEPER', this.keeperLabel(level.keeper)]
     ];
-    metrics.forEach(([metric, value], row) => {
-      const y = 157 + row * 17;
-      const left = bodyText(this, 313, y, metric, {
+    metrics.forEach(([type, metric, value], row) => {
+      const y = 162 + row * 19;
+      const icon = this.makeMetricIcon(type, 320, y);
+      const left = bodyText(this, 333, y, metric, {
         fontSize: '7px',
-        color: '#7f929d',
+        color: '#86a8c4',
         letterSpacing: 0.3
       });
-      const right = bodyText(this, 456, y, value, {
+      const right = bodyText(this, 460, y, value, {
         originX: 1,
         fontFamily: FONT,
         fontSize: '7px',
         color: '#f3e7c3'
       });
-      this.contentLayer.add([left, right]);
+      this.contentLayer.add([icon, left, right]);
     });
 
     const reward = level.rewardCoins ?? level.reward?.coins ?? 0;
     if (reward > 0) {
-      const rewardIcon = this.add.image(316, 208, 'icon-coin').setScale(0.7);
-      const rewardText = bodyText(this, 326, 208, `${reward} FIRST-WIN`, {
-        fontSize: '6px',
+      const rewardIcon = this.add.image(320, 218, 'icon-coin').setScale(0.78);
+      const rewardText = bodyText(this, 332, 218, `${reward} FIRST-WIN`, {
+        fontSize: '7px',
         color: '#f3c449'
       });
       this.contentLayer.add([rewardIcon, rewardText]);
     }
 
-    const play = makeButton(this, 384, 236, 142, 29, unlocked ? 'PLAY MATCH' : 'LOCKED', () => {
+    const play = makeButton(this, 389, 246, 148, 29, unlocked ? 'PLAY MATCH' : 'LOCKED', () => {
       SaveManager.setLastPlayed?.({ mode: 'career', levelId: stableId(level, index) });
       this.scene.start('Game', { mode: 'career', levelIndex: index });
     }, {
@@ -280,13 +314,49 @@ export class LevelSelectScene extends Phaser.Scene {
       border: PAL.goldDark,
       icon: unlocked ? 'icon-play' : 'icon-lock',
       iconScale: 0.72,
-      iconX: 16,
-      fontSize: '9px',
+      iconX: 18,
+      fontSize: '10px',
       disabled: !unlocked,
-      hitHeight: 32
+      hitHeight: 34
     });
 
     this.contentLayer.add([label, name, rating, play]);
+  }
+
+  makeMetricIcon(type, x, y) {
+    const g = this.add.graphics().setPosition(x, y);
+    const hi = 0x86a8c4;
+    const shade = 0x3d6483;
+    g.fillStyle(shade, 1);
+
+    if (type === 'distance') {
+      g.fillRect(-5, -2, 10, 5);
+      g.fillStyle(hi, 1);
+      g.fillRect(-5, -3, 10, 3);
+      g.fillStyle(PAL.panel, 1);
+      [-3, 0, 3].forEach((mark) => g.fillRect(mark, -2, 1, 2));
+      g.setAngle(-35);
+    } else if (type === 'wall') {
+      g.fillRect(-6, -5, 12, 10);
+      g.fillStyle(hi, 1);
+      g.fillRect(-6, -5, 5, 3);
+      g.fillRect(1, -5, 5, 3);
+      g.fillRect(-4, -1, 5, 3);
+      g.fillRect(3, -1, 3, 3);
+      g.fillRect(-6, 3, 5, 2);
+      g.fillRect(1, 3, 5, 2);
+    } else {
+      // Compact goalkeeper glove silhouette: four fingers, palm and cuff.
+      g.fillRect(-4, -2, 9, 7);
+      g.fillRect(-5, -6, 2, 5);
+      g.fillRect(-2, -7, 2, 6);
+      g.fillRect(1, -6, 2, 5);
+      g.fillRect(4, -5, 2, 6);
+      g.fillStyle(hi, 1);
+      g.fillRect(-3, -1, 7, 5);
+      g.fillRect(-3, 5, 7, 2);
+    }
+    return g;
   }
 
   keeperLabel(skill = 0) {
