@@ -299,13 +299,13 @@ function makeHeaderControl(scene, x, y, w, h, opts, onClick) {
     gear = scene.add.graphics().setPosition(-w / 2 + 14, 0);
     children.push(gear);
   }
-  const label = opts.label ? menuText(scene, opts.icon || opts.gear ? -w / 2 + 27 : 0, 0, opts.label, {
+  const label = opts.label ? menuText(scene, opts.labelX ?? (opts.icon || opts.gear ? -w / 2 + 27 : 0), 0, opts.label, {
     originX: opts.icon || opts.gear ? 0 : 0.5,
     fontFamily: DISPLAY_FONT,
     fontSize: opts.fontSize ?? '7px',
     color: CREAM,
     strokeThickness: 1,
-    letterSpacing: 0.2
+    letterSpacing: opts.letterSpacing ?? 0.2
   }) : null;
   if (label) children.push(label);
   const container = scene.add.container(x, y, children).setSize(w, h);
@@ -509,6 +509,8 @@ export class MenuScene extends Phaser.Scene {
     this.settingsButton = makeHeaderControl(this, 230, 22, 62, 23, {
       gear: true,
       label: 'SETTINGS',
+      labelX: -5.5,
+      letterSpacing: 0,
       fontSize: '6px',
       color: 0x13283e,
       border: 0x315a78,
