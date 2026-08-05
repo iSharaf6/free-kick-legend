@@ -52,7 +52,9 @@ test('menu music unlocks once, survives every menu panel, and persists mute', as
       currentTime: window.__menuMusic.audio.currentTime
     }))).toMatchObject({ active: true, paused: false, instance: 'original' });
     expect((await musicState(page)).currentTime).toBeGreaterThanOrEqual(60);
-    await game.clickLogical(23, 18);
+    // Five Cup Tour preserves the supplied 3:2 composition inside the 16:9
+    // canvas, so its visible back control sits farther in from the screen edge.
+    await game.clickLogical(panel.scene === 'LevelSelect' ? 66 : 23, panel.scene === 'LevelSelect' ? 19 : 18);
     await waitForScene(page, 'Menu');
   }
 

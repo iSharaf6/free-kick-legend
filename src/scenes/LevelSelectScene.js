@@ -1,17 +1,30 @@
 import Phaser from 'phaser';
-import { GAME_W, GAME_H } from '../config.js';
-import {
-  makeButton, makeIconButton, makeStatChip, makeStars, titleText,
-  bodyText, drawPanel, addScanlines, sceneIntro, configureHdCamera, FONT
-} from '../ui.js';
+import { GAME_W, RENDER_W, RENDER_H } from '../config.js';
+import { crispText, sceneIntro } from '../ui.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { MenuMusic } from '../systems/MenuMusic.js';
+import { Audio } from '../systems/AudioSynth.js';
 import { LEVELS, CUPS as CUP_DATA } from '../data/levels.js';
 import { PAL } from '../pixelart.js';
 
 const LEVELS_PER_CUP = 10;
 const CUP_COUNT = 5;
-const CUP_COLORS = [PAL.green, PAL.blue, PAL.orange, 0x67549a, PAL.red];
+const CUP_COLORS = [0x248c43, 0x2475b9, 0xb56a31, 0x67549a, 0xa9463b];
+const DISPLAY_FONT = '"Bungee", "Arial Black", sans-serif';
+const PIXEL_FONT = '"Pixelify Sans", "Courier New", monospace';
+const CREAM = '#f6e9c7';
+const GOLD = 0xf4c84b;
+const GOLD_HI = 0xffe47b;
+const GOLD_DARK = 0x8f6326;
+const BLUE_EDGE = 0x365874;
+const BLUE_MID = 0x18334b;
+const BLUE_DEEP = 0x081b2d;
+const INK = 0x030a11;
+const TOUR_H = 320;
+const TOUR_ZOOM = RENDER_H / TOUR_H;
+const TOUR_VIEW_W = RENDER_W / TOUR_ZOOM;
+const TOUR_VIEW_X = (GAME_W - TOUR_VIEW_W) / 2;
+
 const CUP_VIEWS = CUP_DATA.map((cup, index) => ({
   ...cup,
   roman: ['I', 'II', 'III', 'IV', 'V'][index],
@@ -24,18 +37,219 @@ function stableId(level, index) {
   return level?.id ?? index;
 }
 
-function addAspectCoverImage(scene, key, width = GAME_W, height = GAME_H) {
-  const image = scene.add.image(width / 2, height / 2, key).setOrigin(0.5);
+function cssColor(value) {
+  return `#${value.toString(16).padStart(6, '0')}`;
+}
+
+function shade(value, amount) {
+  const r = Phaser.Math.Clamp((value >> 16) + amount, 0, 255);
+  const g = Phaser.Math.Clamp(((value >> 8) & 0xff) + amount, 0, 255);
+  const b = Phaser.Math.Clamp((value & 0xff) + amount, 0, 255);
+  return (r << 16) | (g << 8) | b;
+}
+
+function configureTourCamera(scene) {
+  const camera = scene.cameras.main;
+  camera.setViewport(0, 0, RENDER_W, RENDER_H);
+  camera.setZoom(TOUR_ZOOM);
+  camera.centerOn(GAME_W / 2, TOUR_H / 2);
+  camera.roundPixels = false;
+  return camera;
+}
+
+function addAspectCoverImage(scene, key, width = TOUR_VIEW_W, height = TOUR_H) {
+  const image = scene.add.image(GAME_W / 2, TOUR_H / 2, key).setOrigin(0.5);
   const sourceWidth = Math.max(1, Number(image.width) || width);
   const sourceHeight = Math.max(1, Number(image.height) || height);
   const uniformScale = Math.max(width / sourceWidth, height / sourceHeight);
   image.setScale(uniformScale);
-  image.fklAspectCover = {
-    sourceWidth,
-    sourceHeight,
-    scale: uniformScale
-  };
+  image.fklAspectCover = { sourceWidth, sourceHeight, scale: uniformScale };
   return image;
+}
+
+function addAspectCoverRegion(scene, key, x, y, width, height) {
+  const image = scene.add.image(x, y, key).setOrigin(0.5);
+  const sourceWidth = Math.max(1, Number(image.width) || width);
+  const sourceHeight = Math.max(1, Number(image.height) || height);
+  image.setScale(Math.max(width / sourceWidth, height / sourceHeight));
+  return image;
+}
+
+function tourText(scene, x, y, value, opts = {}) {
+  const text = crispText(scene.add.text(x, y, value, {
+    fontFamily: opts.fontFamily ?? PIXEL_FONT,
+    fontStyle: opts.fontStyle ?? 'bold',
+    fontSize: opts.fontSize ?? '9px',
+    color: opts.color ?? CREAM,
+    stroke: opts.stroke ?? '#030a11',
+    strokeThickness: opts.strokeThickness ?? 1,
+    align: opts.align ?? 'left',
+    lineSpacing: opts.lineSpacing ?? 0,
+    wordWrap: opts.wordWrap
+  }).setOrigin(opts.originX ?? 0, opts.originY ?? 0.5));
+  text.setLetterSpacing(opts.letterSpacing ?? 0.25);
+  if (opts.shadow !== false) text.setShadow(1, 2, '#02070c', 0, false, true);
+  return text;
+}
+
+function drawCornerBrackets(g, x, y, w, h, color = GOLD, size = 7) {
+  g.fillStyle(color, 1);
+  g.fillRect(x, y, size, 1);
+  g.fillRect(x, y, 1, size);
+  g.fillRect(x + w - size, y, size, 1);
+  g.fillRect(x + w - 1, y, 1, size);
+  g.fillRect(x, y + h - 1, size, 1);
+  g.fillRect(x, y + h - size, 1, size);
+  g.fillRect(x + w - size, y + h - 1, size, 1);
+  g.fillRect(x + w - 1, y + h - size, 1, size);
+
+  g.fillStyle(GOLD_DARK, 1);
+  g.fillRect(x + 1, y + 1, 2, 2);
+  g.fillRect(x + w - 3, y + 1, 2, 2);
+  g.fillRect(x + 1, y + h - 3, 2, 2);
+  g.fillRect(x + w - 3, y + h - 3, 2, 2);
+}
+
+function drawTourPanel(g, x, y, w, h, opts = {}) {
+  const border = opts.border ?? BLUE_EDGE;
+  const inner = opts.inner ?? BLUE_MID;
+  const bottom = opts.bottom ?? BLUE_DEEP;
+  const corner = opts.corner ?? GOLD_DARK;
+
+  g.fillStyle(INK, 0.78);
+  g.fillRect(x + 3, y + 4, w, h);
+  g.fillStyle(INK, 1);
+  g.fillRect(x, y, w, h);
+  g.fillStyle(border, 1);
+  g.fillRect(x + 1, y + 1, w - 2, h - 2);
+  g.fillStyle(0x081522, 1);
+  g.fillRect(x + 2, y + 2, w - 4, h - 4);
+  g.fillGradientStyle(inner, inner, bottom, bottom, opts.alpha ?? 1);
+  g.fillRect(x + 4, y + 4, w - 8, h - 8);
+
+  g.fillStyle(shade(inner, 34), 0.78);
+  g.fillRect(x + 4, y + 4, w - 8, 1);
+  g.fillRect(x + 4, y + 4, 1, h - 8);
+  g.fillStyle(INK, 0.68);
+  g.fillRect(x + 4, y + h - 5, w - 8, 1);
+  g.fillRect(x + w - 5, y + 4, 1, h - 8);
+
+  // Sparse horizontal weave gives the large fields the textured fabric finish
+  // of the reference without softening the deliberately hard pixel edges.
+  g.fillStyle(0x6d93ae, 0.055);
+  for (let row = y + 8; row < y + h - 5; row += 5) {
+    g.fillRect(x + 6, row, w - 12, 1);
+  }
+  drawCornerBrackets(g, x + 1, y + 1, w - 2, h - 2, corner, opts.cornerSize ?? 7);
+  return g;
+}
+
+function drawTourButton(g, w, h, fill, state, opts = {}) {
+  const pressed = state === 'pressed';
+  const disabled = state === 'disabled';
+  const selected = opts.selected && !disabled;
+  const y = pressed ? 2 : 0;
+  const edge = selected ? GOLD_HI : (opts.border ?? BLUE_EDGE);
+  const face = disabled ? 0x162634 : fill;
+
+  g.clear();
+  if (!pressed) {
+    g.fillStyle(INK, 0.88);
+    g.fillRect(-w / 2 + 3, -h / 2 + 4, w, h);
+  }
+  if (selected) {
+    g.fillStyle(GOLD, 0.18);
+    g.fillRect(-w / 2 - 2, -h / 2 - 2 + y, w + 4, h + 4);
+  }
+  g.fillStyle(INK, 1);
+  g.fillRect(-w / 2, -h / 2 + y, w, h);
+  g.fillStyle(edge, 1);
+  g.fillRect(-w / 2 + 1, -h / 2 + 1 + y, w - 2, h - 2);
+  g.fillStyle(selected ? GOLD_DARK : 0x0b1723, 1);
+  g.fillRect(-w / 2 + 2, -h / 2 + 2 + y, w - 4, h - 4);
+  g.fillGradientStyle(shade(face, disabled ? 2 : 24), shade(face, disabled ? 2 : 24), shade(face, -18), shade(face, -18), 1);
+  g.fillRect(-w / 2 + 4, -h / 2 + 4 + y, w - 8, h - 8);
+
+  g.fillStyle(disabled ? 0x294053 : shade(face, 52), disabled ? 0.45 : 0.95);
+  g.fillRect(-w / 2 + 4, -h / 2 + 4 + y, w - 8, 1);
+  g.fillRect(-w / 2 + 4, -h / 2 + 4 + y, 1, h - 8);
+  g.fillStyle(INK, 0.56);
+  g.fillRect(-w / 2 + 4, h / 2 - 5 + y, w - 8, 1);
+  g.fillRect(w / 2 - 5, -h / 2 + 4 + y, 1, h - 8);
+
+  if (!disabled) {
+    g.fillStyle(shade(face, 46), 0.11);
+    for (let row = -h / 2 + 8 + y; row < h / 2 - 5 + y; row += 4) {
+      g.fillRect(-w / 2 + 6, row, w - 12, 1);
+    }
+  }
+  drawCornerBrackets(g, -w / 2 + 1, -h / 2 + 1 + y, w - 2, h - 2, selected ? GOLD_HI : shade(edge, -16), 5);
+}
+
+function makeTourButton(scene, x, y, w, h, label, onClick, opts = {}) {
+  const bg = scene.add.graphics();
+  const labelOffset = opts.icon ? 7 : 0;
+  const text = tourText(scene, labelOffset, opts.labelY ?? 0, label, {
+    originX: 0.5,
+    fontFamily: opts.fontFamily ?? DISPLAY_FONT,
+    fontSize: opts.fontSize ?? '10px',
+    color: opts.textColor ?? CREAM,
+    strokeThickness: opts.strokeThickness ?? 1,
+    letterSpacing: opts.letterSpacing ?? 0.1
+  });
+  const children = [bg];
+  let icon = null;
+  if (opts.icon) {
+    icon = scene.add.image(-(w / 2) + (opts.iconX ?? 17), opts.iconY ?? 0, opts.icon)
+      .setScale(opts.iconScale ?? 1);
+    children.push(icon);
+  }
+  children.push(text);
+
+  const container = scene.add.container(x, y, children);
+  let enabled = opts.disabled !== true;
+  let over = false;
+  let down = false;
+  const render = () => {
+    const state = !enabled ? 'disabled' : down ? 'pressed' : over ? 'hover' : 'idle';
+    const fill = state === 'hover' ? shade(opts.color, 18) : state === 'pressed' ? shade(opts.color, -28) : opts.color;
+    drawTourButton(bg, w, h, fill, state, opts);
+    const offset = state === 'pressed' ? 2 : 0;
+    text.setY((opts.labelY ?? 0) + offset).setAlpha(enabled ? 1 : 0.45);
+    if (icon) icon.setY((opts.iconY ?? 0) + offset).setAlpha(enabled ? 1 : 0.32);
+  };
+
+  container.setSize(opts.hitWidth ?? Math.max(44, w), opts.hitHeight ?? Math.max(30, h));
+  if (enabled) container.setInteractive({ useHandCursor: true });
+  container.on('pointerover', () => { over = true; render(); });
+  container.on('pointerout', () => { over = false; down = false; render(); });
+  container.on('pointerdown', () => { if (enabled) { over = true; down = true; render(); } });
+  container.on('pointerupoutside', () => { over = false; down = false; render(); });
+  container.on('pointerup', () => {
+    if (!enabled || !down) return;
+    const fire = over;
+    down = false;
+    render();
+    if (fire) {
+      Audio.ui();
+      onClick?.();
+    }
+  });
+  container.setButtonEnabled = (value) => {
+    enabled = Boolean(value);
+    down = false;
+    over = false;
+    if (enabled) container.setInteractive({ useHandCursor: true });
+    else container.disableInteractive();
+    render();
+    return container;
+  };
+  container.buttonLabel = text;
+  container.buttonIcon = icon;
+  container.buttonWidth = w;
+  container.buttonHeight = h;
+  render();
+  return container;
 }
 
 export class LevelSelectScene extends Phaser.Scene {
@@ -44,15 +258,21 @@ export class LevelSelectScene extends Phaser.Scene {
   }
 
   create() {
-    configureHdCamera(this);
+    configureTourCamera(this);
     MenuMusic.enterMenu();
-    // Cover the 16:9 canvas from the source dimensions with one uniform scale.
-    // Even if the stadium art changes aspect later, it may crop at the edges
-    // but can never be stretched wider or taller than its authored proportions.
     this.backgroundImage = addAspectCoverImage(this, 'stadium-menu').setDepth(0);
+    this.crowdBackdrop = addAspectCoverRegion(
+      this, 'crowd-panorama-v3', GAME_W / 2, 69, TOUR_VIEW_W, 96
+    ).setDepth(0.2);
+    this.pitchBackdrop = addAspectCoverRegion(
+      this, 'pitch-grass-pixel-v3', GAME_W / 2, 209, TOUR_VIEW_W, 222
+    ).setDepth(0.3);
+
     const wash = this.add.graphics().setDepth(1);
-    wash.fillStyle(PAL.ink, 0.68);
-    wash.fillRect(0, 0, GAME_W, GAME_H);
+    wash.fillStyle(PAL.ink, 0.48);
+    wash.fillRect(TOUR_VIEW_X, 0, TOUR_VIEW_W, TOUR_H);
+    wash.fillGradientStyle(0x071018, 0x071018, 0x03110c, 0x03110c, 0.5, 0.5, 0.2, 0.2);
+    wash.fillRect(TOUR_VIEW_X, 0, TOUR_VIEW_W, TOUR_H);
 
     this.unlocked = SaveManager.unlockedCount(LEVELS.length);
     const lastPlayed = SaveManager.getLastPlayed?.();
@@ -68,49 +288,77 @@ export class LevelSelectScene extends Phaser.Scene {
     this.renderCupTabs();
     this.renderCupContent();
 
-    addScanlines(this, 2600, 0.03);
+    const scanlines = this.add.graphics().setDepth(2600);
+    scanlines.fillStyle(PAL.ink, 0.022);
+    for (let y = 1; y < TOUR_H; y += 4) scanlines.fillRect(TOUR_VIEW_X, y, TOUR_VIEW_W, 1);
+    scanlines.setBlendMode('MULTIPLY');
     sceneIntro(this);
   }
 
   drawHeader() {
-    const g = this.add.graphics().setDepth(100);
-    drawPanel(g, 6, 4, GAME_W - 12, 32, {
-      fill: PAL.panel,
-      border: PAL.borderDark,
-      corner: PAL.gold
+    const chrome = this.add.graphics().setDepth(100);
+    drawTourPanel(chrome, 16, 7, 450, 32, {
+      border: 0x294860,
+      inner: 0x142c42,
+      bottom: 0x0a1a29,
+      corner: GOLD_DARK,
+      cornerSize: 7
     });
-    makeIconButton(this, 23, 20, 23, 'icon-back', () => this.scene.start('Menu'), {
-      color: PAL.panelHi,
-      hover: PAL.blue,
-      border: PAL.borderDark,
-      iconScale: 0.88,
+
+    makeTourButton(this, 34, 23, 25, 23, '', () => this.scene.start('Menu'), {
+      color: 0x1d3e58,
+      border: 0x426884,
+      icon: 'icon-back',
+      iconScale: 1.02,
+      iconX: 12.5,
       hitWidth: 34,
       hitHeight: 32
     }).setDepth(104);
-    titleText(this, GAME_W / 2, 20, 'FIVE CUP TOUR', '16px', '#f3e7c3').setDepth(104);
+
+    tourText(this, GAME_W / 2, 23, 'FIVE CUP TOUR', {
+      originX: 0.5,
+      fontFamily: DISPLAY_FONT,
+      fontSize: '17px',
+      color: CREAM,
+      strokeThickness: 2,
+      letterSpacing: 0.1
+    }).setDepth(104);
 
     const totalStars = SaveManager.getTotalStars?.()
       ?? LEVELS.reduce((sum, level, index) => sum + SaveManager.getStars(stableId(level, index)), 0);
-    makeStatChip(this, 427, 20, 80, 'icon-star', `${totalStars}/${LEVELS.length * 3}`, {
-      height: 23,
-      fill: PAL.night,
-      border: PAL.goldDark,
-      fontSize: '9px',
-      iconScale: 0.88
-    }).setDepth(104);
+    const chip = this.add.graphics();
+    drawTourPanel(chip, -44, -11.5, 88, 23, {
+      border: GOLD_DARK,
+      inner: 0x102439,
+      bottom: 0x071725,
+      corner: GOLD_DARK,
+      cornerSize: 5
+    });
+    const star = this.add.image(-29, 0, 'icon-star').setScale(1.25);
+    const value = tourText(this, -16, 0, `${totalStars}/${LEVELS.length * 3}`, {
+      fontFamily: DISPLAY_FONT,
+      fontSize: '10px',
+      color: CREAM,
+      letterSpacing: 0.05
+    });
+    this.add.container(417, 23, [chip, star, value]).setDepth(104);
   }
 
   drawPanels() {
-    const g = this.add.graphics().setDepth(80);
-    drawPanel(g, 7, 76, 294, 188, {
-      fill: PAL.panel,
-      border: PAL.borderDark,
-      corner: PAL.gold
+    const panels = this.add.graphics().setDepth(80);
+    drawTourPanel(panels, 16, 82, 279, 219, {
+      border: 0x44637a,
+      inner: 0x15324a,
+      bottom: 0x071c2e,
+      corner: GOLD_DARK,
+      cornerSize: 7
     });
-    drawPanel(g, 305, 76, 168, 188, {
-      fill: PAL.panel,
-      border: PAL.goldDark,
-      corner: PAL.gold
+    drawTourPanel(panels, 301, 82, 164, 219, {
+      border: GOLD_DARK,
+      inner: 0x15324a,
+      bottom: 0x071c2e,
+      corner: GOLD,
+      cornerSize: 7
     });
   }
 
@@ -121,13 +369,13 @@ export class LevelSelectScene extends Phaser.Scene {
     }
     this.tabLayer = this.add.container(0, 0).setDepth(110);
 
-    const xs = [70, 155, 240, 325, 410];
+    const xs = [85, 162, 240, 318, 395];
     CUP_VIEWS.forEach((cup, index) => {
       const firstLevel = index * LEVELS_PER_CUP;
       const hasLevels = firstLevel < LEVELS.length;
       const available = hasLevels && firstLevel < this.unlocked;
       const selected = index === this.cupIndex;
-      const btn = makeButton(this, xs[index], 56, 78, 30, cup.roman, () => {
+      const button = makeTourButton(this, xs[index], 60, 72, 32, cup.roman, () => {
         this.cupIndex = index;
         const start = index * LEVELS_PER_CUP;
         const end = Math.min(start + LEVELS_PER_CUP, LEVELS.length);
@@ -135,19 +383,18 @@ export class LevelSelectScene extends Phaser.Scene {
         this.renderCupTabs();
         this.renderCupContent();
       }, {
-        color: selected ? cup.color : PAL.panelHi,
-        hover: cup.color,
-        border: selected ? PAL.gold : PAL.borderDark,
+        color: selected ? cup.color : 0x173148,
+        border: selected ? GOLD_HI : 0x365873,
         selected,
         disabled: !available,
         icon: available ? 'icon-cup' : 'icon-cup-locked',
-        iconScale: 0.72,
-        iconX: 17,
-        fontSize: '11px',
-        letterSpacing: 0.5,
-        hitHeight: 34
+        iconScale: 1.3,
+        iconX: 21,
+        fontSize: '15px',
+        letterSpacing: 0.1,
+        hitHeight: 36
       });
-      this.tabLayer.add(btn);
+      this.tabLayer.add(button);
     });
   }
 
@@ -163,33 +410,36 @@ export class LevelSelectScene extends Phaser.Scene {
     const end = Math.min(start + LEVELS_PER_CUP, LEVELS.length);
     const cupLevels = LEVELS.slice(start, end);
 
-    const cupName = bodyText(this, 20, 93, cup.name, {
-      fontFamily: FONT,
-      fontSize: '10px',
-      color: '#f3c449',
-      letterSpacing: 0.4
+    const cupName = tourText(this, 29, 103, cup.name, {
+      fontFamily: DISPLAY_FONT,
+      fontSize: '14px',
+      color: '#f5c94b',
+      strokeThickness: 1,
+      letterSpacing: 0
     });
-    const divider = bodyText(this, 20 + cupName.displayWidth + 8, 93, '/', {
-      fontFamily: FONT,
+    const divider = tourText(this, 29 + cupName.displayWidth + 7, 103, '/', {
+      fontFamily: DISPLAY_FONT,
+      fontSize: '12px',
+      color: CREAM,
+      strokeThickness: 1
+    });
+    const cupPlace = tourText(this, divider.x + divider.displayWidth + 7, 103, cup.place, {
       fontSize: '9px',
-      color: '#f3e7c3'
-    });
-    const cupPlace = bodyText(this, divider.x + divider.displayWidth + 8, 93, cup.place, {
-      fontSize: '8px',
-      color: '#9fb3ba',
-      letterSpacing: 0.25
+      color: '#aac1d3',
+      strokeThickness: 1,
+      letterSpacing: 0.2
     });
     this.contentLayer.add([cupName, divider, cupPlace]);
 
     if (cupLevels.length === 0) {
-      const soon = bodyText(this, 154, 171, 'QUALIFY IN THE PREVIOUS CUP', {
+      const lock = this.add.image(155, 166, 'icon-cup-locked').setScale(3.2).setAlpha(0.62);
+      const soon = tourText(this, 155, 202, 'QUALIFY IN THE PREVIOUS CUP', {
         originX: 0.5,
-        fontSize: '8px',
-        color: '#7f929d',
-        letterSpacing: 0.4
+        fontSize: '10px',
+        color: '#7792a5',
+        letterSpacing: 0.25
       });
-      const lock = this.add.image(154, 143, 'icon-lock').setScale(1.7);
-      this.contentLayer.add([soon, lock]);
+      this.contentLayer.add([lock, soon]);
       this.renderEmptyDetail(cup);
       return;
     }
@@ -198,14 +448,11 @@ export class LevelSelectScene extends Phaser.Scene {
       const index = start + localIndex;
       const col = localIndex % 5;
       const row = Math.floor(localIndex / 5);
-      const x = 43 + col * 55;
-      const y = 139 + row * 68;
-      this.contentLayer.add(this.makeLevelTile(x, y, index, level));
+      this.contentLayer.add(this.makeLevelTile(48 + col * 53, 150 + row * 71, index, level));
     });
 
     const selected = LEVELS[this.selectedIndex] || cupLevels[0];
-    const selectedIndex = LEVELS.indexOf(selected);
-    this.renderDetail(selected, selectedIndex);
+    this.renderDetail(selected, LEVELS.indexOf(selected));
   }
 
   makeLevelTile(x, y, index, level) {
@@ -213,41 +460,52 @@ export class LevelSelectScene extends Phaser.Scene {
     const selected = index === this.selectedIndex;
     const stars = SaveManager.getStars(stableId(level, index));
     const cupColor = CUP_VIEWS[this.cupIndex].color;
-    const tile = makeButton(this, x, y, 49, 56, unlocked ? String(index + 1).padStart(2, '0') : '', () => {
+    const tile = makeTourButton(this, x, y, 47, 62, unlocked ? String(index + 1).padStart(2, '0') : '', () => {
       this.selectedIndex = index;
       this.renderCupContent();
     }, {
-      color: selected ? cupColor : 0x203b36,
-      hover: cupColor,
-      border: selected ? PAL.gold : PAL.borderDark,
+      color: selected ? cupColor : 0x123c35,
+      border: selected ? GOLD_HI : 0x31504e,
       selected,
       disabled: !unlocked,
-      fontFamily: FONT,
-      fontSize: '12px',
-      labelY: -9,
-      letterSpacing: 0.3,
+      fontSize: '16px',
+      labelY: -10,
+      strokeThickness: 2,
       hitWidth: 51,
-      hitHeight: 60
+      hitHeight: 66
     });
 
     if (unlocked) {
-      const rating = makeStars(this, 0, 15, stars, { scale: 0.66, gap: 13 });
-      tile.add(rating);
+      tile.add(this.makeStars(0, 18, stars, { scale: 1.0, gap: 14 }));
     } else {
-      tile.add(this.add.image(0, 0, 'icon-lock').setScale(0.9).setAlpha(0.55));
+      tile.add(this.add.image(0, 1, 'icon-lock').setScale(1.02).setAlpha(0.62));
     }
     return tile;
   }
 
+  makeStars(x, y, count, opts = {}) {
+    const stars = [];
+    for (let index = 0; index < 3; index++) {
+      stars.push(this.add.image((index - 1) * (opts.gap ?? 13), 0,
+        index < count ? 'icon-star' : 'icon-star-empty').setScale(opts.scale ?? 1));
+    }
+    return this.add.container(x, y, stars);
+  }
+
   renderEmptyDetail(cup) {
-    const icon = this.add.image(389, 118, 'icon-cup-locked').setScale(2.4).setAlpha(0.55);
-    const name = titleText(this, 389, 153, cup.name, '11px', '#7f929d');
-    const copy = bodyText(this, 389, 181, 'WIN THE PREVIOUS CUP\nTO OPEN THIS STAGE', {
+    const icon = this.add.image(383, 137, 'icon-cup-locked').setScale(3.2).setAlpha(0.58);
+    const name = tourText(this, 383, 174, cup.name, {
       originX: 0.5,
-      fontSize: '7px',
-      color: '#7f929d',
+      fontFamily: DISPLAY_FONT,
+      fontSize: '13px',
+      color: '#70899a'
+    });
+    const copy = tourText(this, 383, 207, 'WIN THE PREVIOUS CUP\nTO OPEN THIS STAGE', {
+      originX: 0.5,
+      fontSize: '10px',
+      color: '#7891a2',
       align: 'center',
-      lineSpacing: 2
+      lineSpacing: 1
     });
     this.contentLayer.add([icon, name, copy]);
   }
@@ -258,66 +516,79 @@ export class LevelSelectScene extends Phaser.Scene {
     const stars = SaveManager.getStars(stableId(level, index));
     const cup = CUP_VIEWS[Math.floor(index / LEVELS_PER_CUP)] ?? CUP_VIEWS[0];
 
-    const label = bodyText(this, 317, 92, `MATCH ${String(index + 1).padStart(2, '0')}  ·  CUP ${cup.roman}`, {
-      fontSize: '7px',
-      color: '#86a8c4',
-      letterSpacing: 0.4
+    const label = tourText(this, 313, 100, `MATCH ${String(index + 1).padStart(2, '0')}  ·  CUP ${cup.roman}`, {
+      fontSize: '10px',
+      color: '#86aac6',
+      letterSpacing: 0.3
     });
-    const name = titleText(this, 389, 116, String(level.name || 'Unnamed kick').toUpperCase(), '12px', '#f3e7c3');
-    name.setWordWrapWidth(146, true).setAlign('center');
-    const rating = makeStars(this, 389, 140, stars, { scale: 0.94, gap: 18 });
+    const name = tourText(this, 383, 123, String(level.name || 'Unnamed kick').toUpperCase(), {
+      originX: 0.5,
+      fontFamily: DISPLAY_FONT,
+      fontSize: '13px',
+      color: CREAM,
+      strokeThickness: 2,
+      align: 'center',
+      wordWrap: { width: 145, useAdvancedWrap: true }
+    });
+    const rating = this.makeStars(383, 145, stars, { scale: 1.3, gap: 20 });
 
-    const detailRules = this.add.graphics();
-    detailRules.fillStyle(PAL.borderDark, 0.75);
-    detailRules.fillRect(316, 151, 146, 1);
-    detailRules.fillRect(316, 209, 146, 1);
-    this.contentLayer.add(detailRules);
+    const rules = this.add.graphics();
+    rules.fillStyle(0x36546b, 0.9);
+    rules.fillRect(311, 159, 144, 1);
+    rules.fillRect(311, 221, 144, 1);
+    rules.fillStyle(0x7897ad, 0.16);
+    rules.fillRect(311, 160, 144, 1);
+    this.contentLayer.add(rules);
 
     const metrics = [
       ['distance', 'DISTANCE', `${Math.round(level.distance || 0)} M`],
-      ['wall', 'WALL', `${level.wall || 0} PLAYER${level.wall === 1 ? '' : 'S'}`],
+      ['wall', 'WALL', `${level.wall || 0} PLAYERS`],
       ['keeper', 'KEEPER', this.keeperLabel(level.keeper)]
     ];
     metrics.forEach(([type, metric, value], row) => {
-      const y = 162 + row * 19;
-      const icon = this.makeMetricIcon(type, 320, y);
-      const left = bodyText(this, 333, y, metric, {
-        fontSize: '7px',
-        color: '#86a8c4',
-        letterSpacing: 0.3
+      const y = 175 + row * 20;
+      const icon = this.makeMetricIcon(type, 316, y);
+      const left = tourText(this, 328, y, metric, {
+        fontSize: '10px',
+        color: '#86aac6',
+        letterSpacing: 0.2
       });
-      const right = bodyText(this, 460, y, value, {
+      const right = tourText(this, 452, y, value, {
         originX: 1,
-        fontFamily: FONT,
-        fontSize: '7px',
-        color: '#f3e7c3'
+        fontFamily: DISPLAY_FONT,
+        fontSize: '9px',
+        color: CREAM,
+        letterSpacing: 0
       });
       this.contentLayer.add([icon, left, right]);
     });
 
     const reward = level.rewardCoins ?? level.reward?.coins ?? 0;
     if (reward > 0) {
-      const rewardIcon = this.add.image(320, 218, 'icon-coin').setScale(0.78);
-      const rewardText = bodyText(this, 332, 218, `${reward} FIRST-WIN`, {
-        fontSize: '7px',
-        color: '#f3c449'
+      const rewardIcon = this.add.image(317, 237, 'icon-coin').setScale(1.2);
+      const rewardText = tourText(this, 330, 237, `${reward} FIRST-WIN`, {
+        fontFamily: DISPLAY_FONT,
+        fontSize: '10px',
+        color: '#f5c94b',
+        letterSpacing: 0.15
       });
       this.contentLayer.add([rewardIcon, rewardText]);
     }
 
-    const play = makeButton(this, 389, 246, 148, 29, unlocked ? 'PLAY MATCH' : 'LOCKED', () => {
+    const play = makeTourButton(this, 381, 273, 143, 37, unlocked ? 'PLAY MATCH' : 'LOCKED', () => {
       SaveManager.setLastPlayed?.({ mode: 'career', levelId: stableId(level, index) });
       this.scene.start('Game', { mode: 'career', levelIndex: index });
     }, {
       color: cup.color,
-      hover: cup.color === PAL.green ? PAL.greenHi : Phaser.Display.Color.IntegerToColor(cup.color).brighten(14).color,
-      border: PAL.goldDark,
+      border: GOLD_HI,
+      selected: unlocked,
       icon: unlocked ? 'icon-play' : 'icon-lock',
-      iconScale: 0.72,
-      iconX: 18,
-      fontSize: '10px',
+      iconScale: 1.25,
+      iconX: 20,
+      fontSize: '13px',
+      strokeThickness: 2,
       disabled: !unlocked,
-      hitHeight: 34
+      hitHeight: 41
     });
 
     this.contentLayer.add([label, name, rating, play]);
@@ -325,15 +596,15 @@ export class LevelSelectScene extends Phaser.Scene {
 
   makeMetricIcon(type, x, y) {
     const g = this.add.graphics().setPosition(x, y);
-    const hi = 0x86a8c4;
-    const shade = 0x3d6483;
-    g.fillStyle(shade, 1);
+    const hi = 0x86aac6;
+    const shadeColor = 0x3e6789;
+    g.fillStyle(shadeColor, 1);
 
     if (type === 'distance') {
       g.fillRect(-5, -2, 10, 5);
       g.fillStyle(hi, 1);
       g.fillRect(-5, -3, 10, 3);
-      g.fillStyle(PAL.panel, 1);
+      g.fillStyle(BLUE_DEEP, 1);
       [-3, 0, 3].forEach((mark) => g.fillRect(mark, -2, 1, 2));
       g.setAngle(-35);
     } else if (type === 'wall') {
@@ -346,7 +617,6 @@ export class LevelSelectScene extends Phaser.Scene {
       g.fillRect(-6, 3, 5, 2);
       g.fillRect(1, 3, 5, 2);
     } else {
-      // Compact goalkeeper glove silhouette: four fingers, palm and cuff.
       g.fillRect(-4, -2, 9, 7);
       g.fillRect(-5, -6, 2, 5);
       g.fillRect(-2, -7, 2, 6);

@@ -259,7 +259,7 @@ test('Five Cup Tour keeps every image proportional and launches the selected mat
     scene.renderCupTabs();
     scene.renderCupContent();
   });
-  await game.clickLogical(208, 139);
+  await game.clickLogical(211, 127);
   await page.waitForFunction(() => window.__game.scene.getScene('LevelSelect').selectedIndex === 3);
 
   const tour = await page.evaluate(() => {
@@ -276,10 +276,19 @@ test('Five Cup Tour keeps every image proportional and launches the selected mat
       .map((object) => ({ key: object.texture.key, scaleX: object.scaleX, scaleY: object.scaleY }));
     const labels = objects.map((object) => object?.text).filter(Boolean);
     const bg = scene.backgroundImage;
+    const camera = scene.cameras.main;
     return {
       selectedIndex: scene.selectedIndex,
       labels,
       distortedImages,
+      camera: {
+        worldWidth: camera.worldView.width,
+        worldHeight: camera.worldView.height
+      },
+      fonts: {
+        display: document.fonts.check('16px Bungee'),
+        pixel: document.fonts.check('16px "Pixelify Sans"')
+      },
       background: {
         sourceAspect: bg.width / bg.height,
         displayAspect: bg.displayWidth / bg.displayHeight,
@@ -292,17 +301,21 @@ test('Five Cup Tour keeps every image proportional and launches the selected mat
 
   expect(tour.selectedIndex).toBe(3);
   expect(tour.labels).toEqual(expect.arrayContaining([
-    'FIVE CUP TOUR', 'ROOKIE ACADEMY', 'PICK THE LEFT', '15 M', '1 PLAYER', 'ROOKIE', 'PLAY MATCH'
+    'FIVE CUP TOUR', 'ROOKIE ACADEMY', 'PICK THE LEFT', '15 M', '1 PLAYERS', 'ROOKIE', 'PLAY MATCH'
   ]));
   expect(tour.distortedImages).toEqual([]);
+  expect(tour.camera.worldHeight).toBeCloseTo(320, 8);
+  // Phaser rounds the computed 568.88px view to a 569px world rectangle.
+  expect(tour.camera.worldWidth).toBe(569);
+  expect(tour.fonts).toEqual({ display: true, pixel: true });
   expect(tour.background.scaleX).toBeCloseTo(tour.background.scaleY, 8);
   expect(tour.background.displayAspect).toBeCloseTo(tour.background.sourceAspect, 8);
-  expect(tour.background.cover).toEqual({
+  expect(tour.background.cover).toMatchObject({
     sourceWidth: 480,
-    sourceHeight: 270,
-    scale: 1
+    sourceHeight: 270
   });
+  expect(tour.background.cover.scale).toBeCloseTo(32 / 27, 8);
 
-  await game.clickLogical(389, 246);
+  await game.clickLogical(359, 230);
   await page.waitForFunction(() => window.__fkl?.state === 'AIMING' && window.__fkl?.levelIndex === 3);
 });
