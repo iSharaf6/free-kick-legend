@@ -197,8 +197,12 @@ function makeActionIcon(scene, type, color) {
     g.fillRect(-8, -7, 16, 4);
     g.fillRect(-5, -10, 2, 5);
     g.fillRect(3, -10, 2, 5);
-    g.fillRect(-2, -1, 4, 7);
-    g.fillRect(-5, 1, 10, 3);
+    const star = Array.from({ length: 10 }, (_, index) => {
+      const angle = -Math.PI / 2 + index * Math.PI / 5;
+      const radius = index % 2 === 0 ? 5 : 2.2;
+      return new Phaser.Geom.Point(Math.cos(angle) * radius, 1 + Math.sin(angle) * radius);
+    });
+    g.fillPoints(star, true);
   } else if (type === 'time') {
     g.fillCircle(0, 2, 8);
     g.strokeCircle(0, 2, 8);
@@ -308,11 +312,15 @@ function makeHeaderControl(scene, x, y, w, h, opts, onClick) {
       const oy = pressed ? 2 : 0;
       gear.clear().setY(oy);
       gear.fillStyle(0xf7edd2, 1);
-      gear.fillRect(-4, -4, 8, 8);
-      gear.fillRect(-6, -2, 12, 4);
-      gear.fillRect(-2, -6, 4, 12);
+      gear.fillCircle(0, 0, 5);
+      gear.fillRect(-2, -7, 4, 14);
+      gear.fillRect(-7, -2, 14, 4);
+      gear.fillRect(-5, -5, 3, 3);
+      gear.fillRect(2, -5, 3, 3);
+      gear.fillRect(-5, 2, 3, 3);
+      gear.fillRect(2, 2, 3, 3);
       gear.fillStyle(0x173047, 1);
-      gear.fillRect(-2, -2, 4, 4);
+      gear.fillCircle(0, 0, 2);
     }
     const oy = pressed ? 2 : 0;
     if (icon) icon.setY(oy);
