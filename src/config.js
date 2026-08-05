@@ -66,7 +66,11 @@ export const SHOT = {
   maxSpin: 1.0,
   spinPx: 22,
   minSpeedPxMs: 0.10,
-  maxSpeedPxMs: 0.68,
+  // A normal decisive flick used to hit the ceiling almost immediately: even
+  // a minimum-length 26px logical gesture could read 95% power. Preserve the
+  // speed-based control, but give touch and mouse players a useful middle
+  // third before only genuinely fast releases reach maximum power.
+  maxSpeedPxMs: 1.35,
   maxSamples: 32,
   resampleCount: 12,
   minSwipePx: 22    // shorter swipes are ignored

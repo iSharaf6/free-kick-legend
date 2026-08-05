@@ -5,7 +5,15 @@ import { PlatformAdapter } from '../src/systems/PlatformService.js';
 
 test('standalone platform adapter is fully no-op safe', async () => {
   const platform = new PlatformAdapter({ lifecycleSettleMs: 0, lifecycleMinIntervalMs: 0 });
-  assert.equal(await platform.init({ sdk: null }), false);
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    CrazyGames: { SDK: { init: () => { throw new Error('must not auto-detect'); } } }
+  };
+  try {
+    assert.equal(await platform.init({ sdk: null }), false);
+  } finally {
+    globalThis.window = previousWindow;
+  }
   assert.equal(platform.isReady(), true);
   assert.equal(platform.isAvailable(), false);
   assert.equal(platform.getEnvironment(), 'standalone');

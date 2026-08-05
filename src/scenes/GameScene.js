@@ -282,6 +282,10 @@ export class GameScene extends Phaser.Scene {
     this.goals = data.goals || 0;
     this.combo = data.combo || 0;
     this.timeLeft = data.timeLeft ?? ARCADE_TIME;
+    // Time Attack is a play clock, not a menu/orientation tax. A fresh run
+    // waits at 60 until the first valid shot is actually committed. Sessions
+    // restored with elapsed time are already live.
+    this.arcadeStarted = this.mode !== 'arcade' || this.timeLeft < ARCADE_TIME;
     this.level = this.mode === 'career'
       ? LEVELS[this.levelIndex]
       : this.mode === 'daily'
@@ -1988,6 +1992,12 @@ export class GameScene extends Phaser.Scene {
       fontFamily: FONT, fontSize: '9px', color: '#f3e7c3',
       stroke: '#071018', strokeThickness: 3
     }).setOrigin(0.5).setDepth(2100).setAlpha(0));
+    if (this.mode === 'arcade' && !this.arcadeStarted) {
+      this.inputHint
+        .setText('SWIPE TO START THE 60-SECOND RUN')
+        .setY(COACHING_HINT_Y)
+        .setAlpha(1);
+    }
     // A small, permanently visible route to the only match-control surface.
     // It stays in the lower safe area so the objective, swipe cue and goal
     // never compete with it at any responsive size.
@@ -2431,6 +2441,13 @@ export class GameScene extends Phaser.Scene {
     // Aiming has begun: the striker loads into the ready stance. Until now he
     // has been standing, which is what the frame should show before any input.
     if (this.state === 'AIMING') this.kicker?.setPose('ready');
+    if (this.mode === 'arcade' && !this.arcadeStarted && this.inputHint?.active) {
+      // The ready CTA occupies the same lower lane as the truthful live meter.
+      // Clear it as soon as aiming begins; an invalid release supplies its own
+      // corrective message, while a valid release starts the clock.
+      this.tweens?.killTweensOf?.(this.inputHint);
+      this.inputHint.setAlpha(0);
+    }
     this.setTutorialCopyAlpha(0.12, 110);
     if (!this.objectiveUi) return;
     this.tweens.killTweensOf(this.objectiveUi);
@@ -2525,6 +2542,7 @@ export class GameScene extends Phaser.Scene {
 
   takeShot(inputShot) {
     if (this.state !== 'AIMING' || this.over) return;
+    this.startArcadeClock();
     const shot = this.prepareShot(inputShot);
     this.state = 'WINDUP';
     this.flightT = 0;
@@ -2658,6 +2676,10 @@ export class GameScene extends Phaser.Scene {
 
   updateArcadeClock(rawDt) {
     if (this.mode !== 'arcade' || this.over || this.state === 'OVERLAY') return false;
+    if (!this.arcadeStarted) {
+      this.timerTxt?.setText(`${Math.max(Math.ceil(this.timeLeft), 0)}`);
+      return false;
+    }
     // Wall-clock seconds: cinematic slow motion and result cards never stretch
     // the advertised 60-second round. Explicit pause returns before this call.
     this.timeLeft -= rawDt;
@@ -2669,6 +2691,21 @@ export class GameScene extends Phaser.Scene {
     }
     if (this.timeLeft > 0) return false;
     this.endArcade();
+    return true;
+  }
+
+  startArcadeClock() {
+    if (this.mode !== 'arcade' || this.arcadeStarted) return false;
+    this.arcadeStarted = true;
+    if (this.inputHint?.active) {
+      this.tweens?.killTweensOf?.(this.inputHint);
+      this.tweens?.add?.({
+        targets: this.inputHint,
+        alpha: 0,
+        duration: 120,
+        ease: 'Cubic.easeOut'
+      });
+    }
     return true;
   }
 
@@ -3242,7 +3279,7 @@ export class GameScene extends Phaser.Scene {
       else if (!curveOk) reason = 'MORE BEND NEEDED — ARC THE END OF YOUR SWIPE';
       else if (!highEnough) reason = 'TOO LOW — SWIPE LONGER AND STEEPER';
       else if (!lowEnough) reason = 'TOO HIGH — USE A SHORTER, FLATTER SWIPE';
-      else if (objective.type === 'power') reason = 'MORE POWER NEEDED — USE A LONGER SWIPE';
+      else if (objective.type === 'power') reason = 'MORE POWER NEEDED — SWIPE FASTER';
       else reason = 'GOAL SCORED, BUT THE OBJECTIVE WAS NOT MET';
     }
     return { qualifies, finish, reason };

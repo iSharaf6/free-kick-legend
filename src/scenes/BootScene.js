@@ -110,7 +110,15 @@ export class BootScene extends Phaser.Scene {
       this.scene.start('Menu');
     };
 
-    PlatformService.init()
+    const bootNote = document.querySelector('.boot-note');
+    if (bootNote) bootNote.textContent = 'Syncing matchday';
+    // The public GitHub Pages build is standalone. Asking the CrazyGames SDK
+    // to initialize on that origin adds a dead loading tail and can emit a
+    // minified GeneralError; portal-hosted builds keep automatic detection.
+    const platformOptions = globalThis.location?.hostname?.endsWith('.github.io')
+      ? { sdk: null }
+      : {};
+    PlatformService.init(platformOptions)
       .then(async (available) => {
         // SDK methods are unusable until init resolves. If the fail-safe has
         // already handed off, do not start an orphaned loading interval.

@@ -240,7 +240,7 @@ test('Tab is captured, prevents browser focus, and toggles the pause menu once',
   assert.equal(toggles, 1);
 });
 
-test('Time Attack clock continues through result feedback', () => {
+test('Time Attack clock waits for the first valid shot, then continues through result feedback', () => {
   const scene = Object.create(GameScene.prototype);
   let displayed = null;
   Object.assign(scene, {
@@ -248,14 +248,42 @@ test('Time Attack clock continues through result feedback', () => {
     over: false,
     state: 'RESULT',
     timeLeft: 12,
+    arcadeStarted: false,
     lastTickSecond: -1,
     timerTxt: { setText: (value) => { displayed = value; } },
     endArcade: noop
   });
 
+  assert.equal(scene.updateArcadeClock(4), false);
+  assert.equal(scene.timeLeft, 12);
+  assert.equal(displayed, '12');
+
+  assert.equal(scene.startArcadeClock(), true);
+  assert.equal(scene.startArcadeClock(), false, 'starting is idempotent');
   assert.equal(scene.updateArcadeClock(1.25), false);
   assert.equal(scene.timeLeft, 10.75);
   assert.equal(displayed, '11');
+});
+
+test('starting a Time Attack aim clears the ready prompt before drawing the live meter', () => {
+  const scene = Object.create(GameScene.prototype);
+  let hintAlpha = 1;
+  let killed = 0;
+  Object.assign(scene, {
+    mode: 'arcade',
+    arcadeStarted: false,
+    state: 'AIMING',
+    kicker: { setPose: noop },
+    inputHint: { active: true, setAlpha: (value) => { hintAlpha = value; } },
+    tweens: { killTweensOf: () => { killed++; } },
+    setTutorialCopyAlpha: noop,
+    objectiveUi: null
+  });
+
+  scene.onSwipeStart();
+
+  assert.equal(killed, 1);
+  assert.equal(hintAlpha, 0);
 });
 
 test('buildKeepers wires separate homes and scaled goal bounds into each keeper', () => {

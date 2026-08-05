@@ -24,7 +24,10 @@ const game = new Phaser.Game({
   },
   scale: {
     mode: Phaser.Scale.FIT,
-    autoCenter: Phaser.Scale.CENTER_BOTH,
+    // #app owns centering through flexbox. Letting ScaleManager add canvas
+    // margins as well double-centered letterboxed sizes (notably 1440x900),
+    // leaving a large top gap and a much smaller one below the game.
+    autoCenter: Phaser.Scale.NO_CENTER,
     width: RENDER_W,
     height: RENDER_H
   },

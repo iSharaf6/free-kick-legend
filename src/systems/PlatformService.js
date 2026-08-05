@@ -64,7 +64,9 @@ export class PlatformAdapter {
   async init({ sdk = undefined, force = false } = {}) {
     if (this._ready && !force) return this._available;
 
-    const candidate = sdk ?? browserSdk();
+    // `undefined` means auto-detect. An explicit null is how a standalone
+    // distribution opts out even when shared HTML exposes a portal SDK global.
+    const candidate = sdk === undefined ? browserSdk() : sdk;
     this._sdk = candidate;
     this._ready = true;
     this._lastError = null;

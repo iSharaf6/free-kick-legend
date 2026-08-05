@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { SHOT } from '../src/config.js';
-import { SwipeInput } from '../src/systems/SwipeInput.js';
+import { SwipeInput, computeShotFromPath } from '../src/systems/SwipeInput.js';
 
 class ScopedEmitter {
   constructor() {
@@ -68,6 +68,25 @@ test('a two-point flick is a valid bounded shot', () => {
   assert.ok(shot.vy >= SHOT.minVy && shot.vy <= SHOT.maxVy);
   assert.ok(shot.vz >= SHOT.minVz && shot.vz <= SHOT.maxVz);
   assert.equal(shot.spin, 0);
+});
+
+test('power calibration leaves room for weak, medium and maximum-speed shots', () => {
+  const shot = (distance, duration) => computeShotFromPath([
+    { x: 240, y: 220, t: 0 },
+    { x: 240, y: 220 - distance, t: duration }
+  ]).shot;
+
+  const weak = shot(90, 720);
+  const medium = shot(70, 100);
+  const powerful = shot(120, 72);
+  const minimumFastFlick = shot(26, 40);
+
+  assert.ok(weak.power < 0.1, `slow drag should stay weak, got ${weak.power}`);
+  assert.ok(medium.power > 0.4 && medium.power < 0.6,
+    `ordinary flick should land in the useful middle band, got ${medium.power}`);
+  assert.equal(powerful.power, 1, 'a genuinely fast, long release can still reach maximum power');
+  assert.ok(minimumFastFlick.power < 0.5,
+    `minimum-length flick must not jump to maximum power, got ${minimumFastFlick.power}`);
 });
 
 test('HD renderer gestures use camera world coordinates instead of doubled canvas pixels', () => {

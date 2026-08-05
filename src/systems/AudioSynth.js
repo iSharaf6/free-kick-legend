@@ -1,6 +1,6 @@
 // Tiny WebAudio sound synth - zero audio assets keeps the bundle small and
 // portals happy. Context is created lazily on the first user gesture.
-class Synth {
+export class Synth {
   constructor() {
     this.ctx = null;
     this.master = null;
@@ -22,8 +22,20 @@ class Synth {
       this.master.gain.value = this.muted ? 0 : this.volume;
       this.master.connect(this.ctx.destination);
     }
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    this._resumeContext();
     return this.ctx;
+  }
+
+  _resumeContext() {
+    if (!this.ctx || this.ctx.state !== 'suspended') return;
+    try {
+      // Browsers commonly reject resume() before the first trusted gesture.
+      // It is an expected autoplay-policy result, not a gameplay failure, and
+      // leaving the promise unobserved can surface as a minified GeneralError.
+      this.ctx.resume()?.catch?.(() => false);
+    } catch {
+      // A denied/closed audio context must never block menus or gameplay.
+    }
   }
 
   _applyMasterGain() {
@@ -50,7 +62,10 @@ class Synth {
 
   setMuted(muted) {
     this.muted = Boolean(muted);
-    if (!this.muted) this._ensure();
+    // Do not construct or resume WebAudio while Boot is still loading. The
+    // first actual UI/kick sound runs inside a trusted gesture and calls
+    // _ensure(); an existing context can still be resumed when unmuted.
+    if (!this.muted && this.ctx) this._resumeContext();
     this._applyMasterGain();
   }
 

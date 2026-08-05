@@ -27,6 +27,8 @@ test('full logical frame is visible at every release landscape viewport', async 
     expect(box.y).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 0.5);
     expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 0.5);
+    expect(Math.abs(box.x - (viewport.width - box.width) / 2)).toBeLessThan(1);
+    expect(Math.abs(box.y - (viewport.height - box.height) / 2)).toBeLessThan(1);
   }
 
   const snapshot = await game.sceneSnapshot();
