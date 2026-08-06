@@ -1,4 +1,5 @@
 import { getCosmeticsByCategory, kickerHdTextureKey, STARTER_COSMETICS } from './cosmetics.js';
+import { assetUrl } from './assetBase.js';
 
 // Every selectable striker exists as four characters x six kits x eight poses.
 // Booting all 192 of those frames cost 5.6 MB and 192 requests before the menu
@@ -14,7 +15,7 @@ export const KICKER_STILL_POSE = 'idle';
 
 function queueImage(scene, key) {
   if (!key || scene.textures?.exists?.(key)) return 0;
-  scene.load.image(key, `${import.meta.env.BASE_URL}assets/hd/${key}.png`);
+  scene.load.image(key, assetUrl(`hd/${key}.png`));
   return 1;
 }
 

@@ -1,4 +1,5 @@
 import { KEEPER_SHEETS, queueKeeperSheets } from './keeperAssets.js';
+import { assetUrl } from './assetBase.js';
 
 // Sprites that only ever appear once a match is on the pitch. They used to boot
 // with the title screen, which put roughly 4.3 MB of goalkeeper and defender
@@ -26,12 +27,11 @@ const MATCH_SPRITES = Object.freeze([
  * files added so callers can avoid starting an empty loader batch.
  */
 export function queueMatchPack(scene) {
-  const base = import.meta.env.BASE_URL;
   let queued = queueKeeperSheets(scene, { initial: true });
 
   for (const sprite of MATCH_SPRITES) {
     if (scene.textures?.exists?.(sprite.key)) continue;
-    const path = `${base}assets/hd/${sprite.file}`;
+    const path = assetUrl(`hd/${sprite.file}`);
     if (sprite.frameWidth) {
       scene.load.spritesheet(sprite.key, path, {
         frameWidth: sprite.frameWidth,
@@ -62,13 +62,12 @@ export function queueMatchPack(scene) {
  */
 export function prefetchMatchPack() {
   if (typeof fetch !== 'function') return 0;
-  const base = import.meta.env.BASE_URL;
   const files = [
     ...KEEPER_SHEETS.filter((sheet) => sheet.initial).map((sheet) => sheet.file),
     ...MATCH_SPRITES.map((sprite) => sprite.file)
   ];
   for (const file of files) {
-    fetch(`${base}assets/hd/${file}`, { priority: 'low', mode: 'same-origin' })
+    fetch(assetUrl(`hd/${file}`), { priority: 'low', mode: 'same-origin' })
       // Draining the body is what actually commits the response to the cache.
       .then((response) => response.ok && response.blob())
       .catch(() => {});

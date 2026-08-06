@@ -1,3 +1,5 @@
+import { assetUrl } from './assetBase.js';
+
 const DEFAULT_FRAME = Object.freeze({ frameWidth: 320, frameHeight: 280 });
 
 // Boot only the atlases needed to render a complete, readable first save.
@@ -26,11 +28,10 @@ export const KEEPER_SHEETS = Object.freeze([
 ]);
 
 export function queueKeeperSheets(scene, { initial }) {
-  const base = import.meta.env.BASE_URL;
   let queued = 0;
   for (const sheet of KEEPER_SHEETS) {
     if (Boolean(sheet.initial) !== Boolean(initial) || scene.textures?.exists?.(sheet.key)) continue;
-    scene.load.spritesheet(sheet.key, `${base}assets/hd/${sheet.file}`, {
+    scene.load.spritesheet(sheet.key, assetUrl(`hd/${sheet.file}`), {
       ...DEFAULT_FRAME,
       frameHeight: sheet.frameHeight ?? DEFAULT_FRAME.frameHeight
     });

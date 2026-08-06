@@ -21,6 +21,7 @@ A polished, portal-ready pixel football game built with Phaser 3 and Vite. Draw 
 - A layered stadium: two aspect-locked crowd tiers that read as depth rather than one flat band, a CALYNX hoarding run in six colourways and uneven widths, stewards, a photographers' pit, broadcast camera positions, stand entrances and wind-lean corner flags. The hoardings are a physical backstop - shots that miss thump into the advertising and rebound onto the pitch.
 - Hoop challenges drawn as one continuous golden thread running from the ball through every gate to the finish, with the gates as pixel-rim eyes on it that light one at a time - so the route reads without the objective text. Gate centres are sampled from real scoring trajectories rather than placed by eye, which is what makes them threadable at all.
 - Aim before you commit: a predicted opening arc from the real solver (wind, drag and curl included), a goal-plane reticle, a wind-drift tell, and live power/loft/curl meters.
+- Scene-scoped asset streaming. Boot fetches the menu chrome plus the one equipped striker; the menu and cup browser warm the goalkeeper/defender match pack into the HTTP cache while the player reads the screen, and the locker streams only the still frames its grid draws. Measured on the production build at 1280×720, that is 22 requests and 3.72 MB before first paint instead of 214 requests and 13.05 MB, and time-to-interactive on a 5 Mbps connection falls from 19.8 s to 4.6 s.
 
 ## Run and verify
 
@@ -60,8 +61,11 @@ src/
 ├── data/
 │   ├── levels.js               50 levels, five cups, targets, seeded arcade/daily
 │   ├── progression.js          daily missions, streak rewards, achievements
-│   ├── keeperAssets.js          boot/deferred goalkeeper atlas manifest
-│   ├── keeperMoveset.js         complete keeper animation catalog and frame maps
+│   ├── assetBase.js            BASE_URL resolution shared by the asset manifests
+│   ├── kickerAssets.js         per-scene striker pose streaming (menu/locker/match)
+│   ├── matchAssets.js          keeper + defender match pack, and its HTTP prefetch
+│   ├── keeperAssets.js         boot/deferred goalkeeper atlas manifest
+│   ├── keeperMoveset.js        complete keeper animation catalog and frame maps
 │   └── cosmetics.js            kits, player techniques, ball profiles, utility trails
 ├── systems/
 │   ├── SwipeInput.js           gesture capture, smoothing, shot mapping
