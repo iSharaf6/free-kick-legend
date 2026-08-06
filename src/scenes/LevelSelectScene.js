@@ -1,10 +1,11 @@
 import Phaser from 'phaser';
 import { GAME_W, RENDER_W, RENDER_H } from '../config.js';
-import { crispText, sceneIntro } from '../ui.js';
+import { crispText, sceneIntro, PIXEL_TEXT_WEIGHT } from '../ui.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { MenuMusic } from '../systems/MenuMusic.js';
 import { Audio } from '../systems/AudioSynth.js';
 import { LEVELS, CUPS as CUP_DATA } from '../data/levels.js';
+import { prefetchMatchPack } from '../data/matchAssets.js';
 import { PAL } from '../pixelart.js';
 
 const LEVELS_PER_CUP = 10;
@@ -78,7 +79,7 @@ function addAspectCoverRegion(scene, key, x, y, width, height) {
 function tourText(scene, x, y, value, opts = {}) {
   const text = crispText(scene.add.text(x, y, value, {
     fontFamily: opts.fontFamily ?? PIXEL_FONT,
-    fontStyle: opts.fontStyle ?? 'bold',
+    fontStyle: opts.fontStyle ?? PIXEL_TEXT_WEIGHT,
     fontSize: opts.fontSize ?? '9px',
     color: opts.color ?? CREAM,
     stroke: opts.stroke ?? '#030a11',
@@ -293,6 +294,13 @@ export class LevelSelectScene extends Phaser.Scene {
     for (let y = 1; y < TOUR_H; y += 4) scanlines.fillRect(TOUR_VIEW_X, y, TOUR_VIEW_W, 1);
     scanlines.setBlendMode('MULTIPLY');
     sceneIntro(this);
+
+    // Choosing a level is the last quiet moment before kick-off. Warm the match
+    // atlases here too, so arriving from a cold Career tap is as instant as
+    // arriving from Continue.
+    this.time.delayedCall(200, () => {
+      if (this.scene.isActive()) prefetchMatchPack();
+    });
   }
 
   drawHeader() {

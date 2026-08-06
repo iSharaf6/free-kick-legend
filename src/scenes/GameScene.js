@@ -4,7 +4,9 @@ import {
 } from '../config.js';
 import { LEVELS, dailyScenario, randomScenario } from '../data/levels.js';
 import { utcDateKey } from '../data/progression.js';
-import { getCosmetic } from '../data/cosmetics.js';
+import { getCosmetic, STARTER_COSMETICS } from '../data/cosmetics.js';
+import { queueKickerSet } from '../data/kickerAssets.js';
+import { queueMatchPack } from '../data/matchAssets.js';
 import { Ball } from '../objects/Ball.js';
 import { Wall } from '../objects/Wall.js';
 import { Goalkeeper } from '../objects/Goalkeeper.js';
@@ -345,6 +347,24 @@ export class GameScene extends Phaser.Scene {
       : this.mode === 'daily'
         ? dailyScenario(this.dailyDate)
         : randomScenario();
+  }
+
+  // Boot no longer ships the goalkeeper, defender or striker atlases, so the
+  // match tops up whatever the menu prefetch did not already warm. Phaser runs
+  // this between init() and create(); when the packs are resident it queues
+  // nothing and costs a single frame.
+  preload() {
+    queueMatchPack(this);
+    try {
+      queueKickerSet(
+        this,
+        SaveManager.getEquippedCosmetic('character') || STARTER_COSMETICS.character,
+        SaveManager.getEquippedCosmetic('kit') || STARTER_COSMETICS.kit
+      );
+    } catch (error) {
+      console.warn('[Game] equipped loadout unavailable, using the starter kit', error);
+      queueKickerSet(this, STARTER_COSMETICS.character, STARTER_COSMETICS.kit);
+    }
   }
 
   create() {
@@ -3922,18 +3942,15 @@ export class GameScene extends Phaser.Scene {
       .setDepth(2999).setInteractive();
     overlayObjects.push(dim);
 
-    const panel = this.add.graphics().setDepth(3000);
-    drawPanel(panel, GAME_W / 2 - 145, 43, 290, 184, {
-      fill: PAL.panel, border: PAL.goldDark, corner: PAL.gold
-    });
-    overlayObjects.push(panel);
-
-    overlayObjects.push(titleText(this, GAME_W / 2, 73, title, '17px', '#f3c449').setDepth(3001));
-
     // One wrapped text block keeps failure explanations inside the card at
     // every backing resolution. The former 11px unwrapped lines were wider
     // than the 250px panel and produced the broken Try Again screenshot.
-    overlayObjects.push(bodyText(this, GAME_W / 2, 123, lines.join('\n'), {
+    //
+    // Measure it before the panel exists: a fixed 184px card left roughly 57px
+    // of dead space under the two-line "TRY AGAIN" copy, which read as an
+    // unfinished screen. The card is sized to its content and re-centred, so
+    // failure, daily and Time Attack all look deliberately composed.
+    const body = bodyText(this, GAME_W / 2, 0, lines.join('\n'), {
       originX: 0.5,
       originY: 0.5,
       align: 'center',
@@ -3941,14 +3958,35 @@ export class GameScene extends Phaser.Scene {
       color: '#cfe8ff',
       lineSpacing: 5,
       wordWrap: { width: 250, useAdvancedWrap: true }
-    }).setDepth(3001));
+    }).setDepth(3001);
+
+    const TITLE_H = 20;
+    const BUTTON_H = 26;
+    const PAD = 15;
+    const GAP = 17;
+    const bodyH = Math.max(body.height, 10);
+    const panelH = PAD + TITLE_H + GAP + bodyH + GAP + BUTTON_H + PAD;
+    const panelTop = Math.round((GAME_H - panelH) / 2);
+    const titleY = panelTop + PAD + TITLE_H / 2;
+    const bodyY = panelTop + PAD + TITLE_H + GAP + bodyH / 2;
+    const buttonY = panelTop + panelH - PAD - BUTTON_H / 2;
+
+    const panel = this.add.graphics().setDepth(3000);
+    drawPanel(panel, GAME_W / 2 - 145, panelTop, 290, panelH, {
+      fill: PAL.panel, border: PAL.goldDark, corner: PAL.gold
+    });
+    overlayObjects.push(panel);
+
+    overlayObjects.push(titleText(this, GAME_W / 2, titleY, title, '17px', '#f3c449').setDepth(3001));
+    body.setY(bodyY);
+    overlayObjects.push(body);
 
     const buttonW = buttons.length >= 3 ? 82 : 112;
     const gap = 8;
     const totalW = buttons.length * buttonW + (buttons.length - 1) * gap;
     buttons.forEach((b, i) => {
       const button = makeButton(this,
-        GAME_W / 2 - totalW / 2 + buttonW / 2 + i * (buttonW + gap), 203, buttonW, 26,
+        GAME_W / 2 - totalW / 2 + buttonW / 2 + i * (buttonW + gap), buttonY, buttonW, BUTTON_H,
         b.label, b.cb, {
           color: b.color, hover: b.hover, border: i === 0 ? PAL.goldDark : PAL.borderDark,
           fontSize: '8px', hitHeight: 30

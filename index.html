@@ -146,9 +146,12 @@
       margin-bottom: 14px;
     }
 
+    /* Pixelify Sans is loaded at 400 only. Faux-bold closes the C aperture and
+       turns every "C" into an "O", so DOM chrome must pin the real weight. */
     .settings-heading h2 {
       margin: 0;
       color: var(--gold);
+      font-weight: 400;
       font-size: clamp(20px, 4vw, 30px);
       line-height: 1;
       letter-spacing: -0.035em;
@@ -209,7 +212,7 @@
       border-radius: 0;
       color: var(--cream);
       background: var(--panel);
-      font: 700 12px/1 "Pixelify Sans", "Courier New", monospace;
+      font: 400 12px/1 "Pixelify Sans", "Courier New", monospace;
     }
 
     .setting-toggle {
@@ -417,6 +420,7 @@
     .rotate-card strong {
       display: block;
       color: var(--gold);
+      font-weight: 400;
       font-size: 19px;
       line-height: 1.05;
       letter-spacing: 0.03em;

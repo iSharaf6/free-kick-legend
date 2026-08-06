@@ -1,5 +1,10 @@
 import Phaser from 'phaser';
-import '@fontsource/pixelify-sans/latin-700.css';
+// Pixelify Sans is loaded at weight 400 deliberately. Its 700 cut draws an
+// uppercase C that is bitmap-identical to O, so the wordmark rendered as
+// "KIOK DISTRIOT" and every CUP/CAREER/ACCURACY label lost its C. Faux-bold
+// synthesised from 400 closes the same aperture, which is why no UI text may
+// ask for `bold` in this family - see PIXEL_TEXT_WEIGHT in the pixel scenes.
+import '@fontsource/pixelify-sans/latin-400.css';
 import '@fontsource/silkscreen/latin-400.css';
 import { RENDER_W, RENDER_H } from './config.js';
 import { BootScene } from './scenes/BootScene.js';

@@ -82,21 +82,49 @@ test('hiding the page automatically pauses an active match', async ({ page }) =>
   }))).toEqual({ timePaused: true, swipeEnabled: false });
 });
 
-test('specialist keeper atlases are deferred until gameplay', async ({ page }) => {
-  // The selectable-player V3 set adds enough individual pose requests to fill
-  // Chromium's small default Resource Timing buffer before deferred gameplay
-  // assets arrive. Expand the observation buffer before navigation so this
-  // assertion measures network behavior instead of silently dropping entries.
-  await page.addInitScript(() => performance.setResourceTimingBufferSize(1000));
+test('match atlases stay off the boot critical path', async ({ page }) => {
+  // Chromium's default Resource Timing buffer is small enough to drop entries
+  // once deferred gameplay assets arrive, so widen it before navigation and
+  // stamp the exact moment the boot overlay clears. Everything requested at or
+  // before that stamp is what a player waits on to reach the menu.
+  await page.addInitScript(() => {
+    performance.setResourceTimingBufferSize(1000);
+    const stamp = () => {
+      const overlay = document.getElementById('loading');
+      if (overlay?.classList.contains('is-hidden')) {
+        window.__bootDoneAt = performance.now();
+        return true;
+      }
+      return false;
+    };
+    const tick = () => { if (!stamp()) requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  });
+
   const game = new GamePage(page);
   await game.open({ width: 1280, height: 720 });
-  const bootKeeperAssets = await page.evaluate(() => performance.getEntriesByType('resource')
-    .map((entry) => entry.name)
-    .filter((name) => name.includes('/keeper-') && name.includes('-sheet-hd.png')));
+  await page.waitForFunction(() => typeof window.__bootDoneAt === 'number');
 
-  expect(bootKeeperAssets).toHaveLength(5);
-  expect(bootKeeperAssets.some((name) => name.includes('practical-recovery'))).toBe(false);
+  const boot = await page.evaluate(() => {
+    const cutoff = window.__bootDoneAt;
+    const names = performance.getEntriesByType('resource')
+      .filter((entry) => entry.startTime <= cutoff)
+      .map((entry) => entry.name);
+    return {
+      keeper: names.filter((n) => n.includes('/keeper-') && n.includes('-sheet-hd.png')),
+      defender: names.filter((n) => n.includes('/defender-')),
+      kicker: names.filter((n) => n.includes('/kicker-hd-'))
+    };
+  });
 
+  // Goalkeeper and defender art is only ever seen inside a match.
+  expect(boot.keeper).toEqual([]);
+  expect(boot.defender).toEqual([]);
+  // The menu hero wears exactly one striker: eight poses, not the 192-frame
+  // character x kit x pose matrix that used to gate first paint.
+  expect(boot.kicker.length).toBeLessThanOrEqual(8);
+
+  // The specialist sheets still only stream once a match is actually running.
   await game.startCareer();
   await page.waitForFunction(() => performance.getEntriesByType('resource')
     .some((entry) => entry.name.includes('keeper-practical-recovery-sheet-hd.png')));

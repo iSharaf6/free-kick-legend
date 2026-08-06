@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
 import { GAME_W, GAME_H, STADIUM_Y } from '../config.js';
-import { addScanlines, sceneIntro, formatCompact, configureHdCamera, crispText } from '../ui.js';
+import {
+  addScanlines, sceneIntro, formatCompact, configureHdCamera, crispText, PIXEL_TEXT_WEIGHT
+} from '../ui.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
 import { MenuMusic } from '../systems/MenuMusic.js';
@@ -12,6 +14,7 @@ import { Kicker } from '../objects/Kicker.js';
 import { utcDateKey } from '../data/progression.js';
 import { addAnimatedCrowdPanorama } from '../art/CrowdPanorama.js';
 import { getCosmetic } from '../data/cosmetics.js';
+import { prefetchMatchPack } from '../data/matchAssets.js';
 
 const DISPLAY_FONT = '"Pixelify Sans", "Courier New", monospace';
 const PIXEL_FONT = '"Pixelify Sans", "Courier New", monospace';
@@ -48,7 +51,7 @@ function shade(value, amount) {
 function menuText(scene, x, y, value, opts = {}) {
   const text = crispText(scene.add.text(x, y, value, {
     fontFamily: opts.fontFamily ?? PIXEL_FONT,
-    fontStyle: opts.fontStyle ?? 'bold',
+    fontStyle: opts.fontStyle ?? PIXEL_TEXT_WEIGHT,
     fontSize: opts.fontSize ?? '8px',
     color: opts.color ?? CREAM,
     stroke: opts.stroke ?? '#02070d',
@@ -401,6 +404,14 @@ export class MenuScene extends Phaser.Scene {
 
     addScanlines(this, 900, 0.024);
     sceneIntro(this);
+
+    // The menu is the player's thinking time, so spend it warming the match.
+    // Deferred by a beat so the first painted frame is never sharing bandwidth
+    // with 4 MB of goalkeeper atlases. This only fills the HTTP cache - the
+    // match scene stays the sole owner of those texture keys.
+    this.time.delayedCall(240, () => {
+      if (this.scene.isActive()) prefetchMatchPack();
+    });
   }
 
   resolveContinueIndex(lastPlayed, unlocked) {
