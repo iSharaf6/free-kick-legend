@@ -49,16 +49,6 @@ export function queueLockerThumbnails(scene, characterId = STARTER_COSMETICS.cha
 }
 
 /**
- * Run a queue function as a background top-up: if it queued nothing the scene
- * is already warm and nothing starts.
- */
-export function streamInBackground(scene, queue) {
-  if (!scene?.load || queue(scene) === 0) return false;
-  scene.load.start();
-  return true;
-}
-
-/**
  * Await a queue function before continuing. Resolves immediately when the
  * frames are already cached, and still resolves if the scene shuts down, so a
  * missing optional frame can never strand the player on a dead screen.

@@ -14,8 +14,7 @@ import { Kicker } from '../objects/Kicker.js';
 import { utcDateKey } from '../data/progression.js';
 import { addAnimatedCrowdPanorama } from '../art/CrowdPanorama.js';
 import { getCosmetic } from '../data/cosmetics.js';
-import { streamInBackground } from '../data/kickerAssets.js';
-import { queueMatchPack } from '../data/matchAssets.js';
+import { prefetchMatchPack } from '../data/matchAssets.js';
 
 const DISPLAY_FONT = '"Pixelify Sans", "Courier New", monospace';
 const PIXEL_FONT = '"Pixelify Sans", "Courier New", monospace';
@@ -408,11 +407,10 @@ export class MenuScene extends Phaser.Scene {
 
     // The menu is the player's thinking time, so spend it warming the match.
     // Deferred by a beat so the first painted frame is never sharing bandwidth
-    // or main-thread decode with 4 MB of goalkeeper atlases. If the player is
-    // faster than the prefetch, GameScene.preload finishes the job.
+    // with 4 MB of goalkeeper atlases. This only fills the HTTP cache - the
+    // match scene stays the sole owner of those texture keys.
     this.time.delayedCall(240, () => {
-      if (!this.scene.isActive()) return;
-      streamInBackground(this, queueMatchPack);
+      if (this.scene.isActive()) prefetchMatchPack();
     });
   }
 
