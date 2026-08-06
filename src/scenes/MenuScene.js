@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
 import { GAME_W, GAME_H, STADIUM_Y } from '../config.js';
-import { addScanlines, sceneIntro, formatCompact, configureHdCamera, crispText } from '../ui.js';
+import {
+  addScanlines, sceneIntro, formatCompact, configureHdCamera, crispText, PIXEL_TEXT_WEIGHT
+} from '../ui.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
 import { MenuMusic } from '../systems/MenuMusic.js';
@@ -48,7 +50,7 @@ function shade(value, amount) {
 function menuText(scene, x, y, value, opts = {}) {
   const text = crispText(scene.add.text(x, y, value, {
     fontFamily: opts.fontFamily ?? PIXEL_FONT,
-    fontStyle: opts.fontStyle ?? 'bold',
+    fontStyle: opts.fontStyle ?? PIXEL_TEXT_WEIGHT,
     fontSize: opts.fontSize ?? '8px',
     color: opts.color ?? CREAM,
     stroke: opts.stroke ?? '#02070d',

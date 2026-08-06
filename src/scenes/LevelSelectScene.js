@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { GAME_W, RENDER_W, RENDER_H } from '../config.js';
-import { crispText, sceneIntro } from '../ui.js';
+import { crispText, sceneIntro, PIXEL_TEXT_WEIGHT } from '../ui.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { MenuMusic } from '../systems/MenuMusic.js';
 import { Audio } from '../systems/AudioSynth.js';
@@ -78,7 +78,7 @@ function addAspectCoverRegion(scene, key, x, y, width, height) {
 function tourText(scene, x, y, value, opts = {}) {
   const text = crispText(scene.add.text(x, y, value, {
     fontFamily: opts.fontFamily ?? PIXEL_FONT,
-    fontStyle: opts.fontStyle ?? 'bold',
+    fontStyle: opts.fontStyle ?? PIXEL_TEXT_WEIGHT,
     fontSize: opts.fontSize ?? '9px',
     color: opts.color ?? CREAM,
     stroke: opts.stroke ?? '#030a11',

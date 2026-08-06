@@ -7,6 +7,13 @@ import { GAME_W, GAME_H, RENDER_SCALE, RENDER_W, RENDER_H } from './config.js';
 export const FONT = '"Arial Black", "Trebuchet MS", sans-serif';
 export const MONO_FONT = '"Courier New", monospace';
 
+// Pixelify Sans ships only one usable cut here (400, loaded in main.js). Asking
+// a canvas for `bold` in that family synthesises a faux-bold that thickens the
+// stems into the counters: uppercase C becomes indistinguishable from O, so
+// "KICK DISTRICT" renders as "KIOK DISTRIOT". Every Pixelify text style must
+// therefore pass this weight rather than 'bold'.
+export const PIXEL_TEXT_WEIGHT = '400';
+
 export const UI_DEPTH = {
   backdrop: 0,
   content: 100,
