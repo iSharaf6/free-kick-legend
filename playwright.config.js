@@ -6,9 +6,11 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
-  // Phaser decodes several large sprite atlases during boot. One CI worker is
-  // faster and much more stable than two browsers competing for runner CPU.
-  workers: process.env.CI ? 1 : undefined,
+  // Every spec boots a Phaser game that decodes several megabyte-scale sprite
+  // atlases. Auto-scaled local workers put N of those on one machine at once
+  // and half the suite times out at 30s - failures that say nothing about the
+  // build. Serial is both trustworthy and, once retries stop, no slower.
+  workers: 1,
   reporter: [['list'], ['html', { open: 'never', outputFolder: 'playwright-report' }]],
   use: {
     baseURL: 'http://127.0.0.1:4173',

@@ -10,6 +10,7 @@ import { MenuMusic } from '../systems/MenuMusic.js';
 import {
   COSMETIC_CATEGORIES, getCosmetic, getCosmeticsByCategory, kickerHdTextureKey
 } from '../data/cosmetics.js';
+import { ensureLoaded, queueLockerThumbnails } from '../data/kickerAssets.js';
 import { CUPS } from '../data/levels.js';
 import { PAL } from '../pixelart.js';
 import { Kicker } from '../objects/Kicker.js';
@@ -40,6 +41,20 @@ export class LockerScene extends Phaser.Scene {
   init(data = {}) {
     this.category = COSMETIC_CATEGORIES.includes(data.category) ? data.category : 'kit';
     this.requestedSelection = data.selectedId || null;
+  }
+
+  // Locker art is the one place the whole striker roster is on screen. Boot no
+  // longer ships it, so the still frames this screen actually draws - every
+  // character in the home kit, every kit on the previewed character - stream
+  // on the way in. Roughly 10 frames rather than the full 192.
+  preload() {
+    let characterId;
+    try {
+      characterId = SaveManager.getEquippedCosmetic('character');
+    } catch (error) {
+      console.warn('[Locker] equipped character unavailable', error);
+    }
+    queueLockerThumbnails(this, characterId || undefined);
   }
 
   create() {
@@ -186,6 +201,21 @@ export class LockerScene extends Phaser.Scene {
     this.renderPreview(selected);
     this.renderCatalog(items, selected);
     this.coinChip.valueText.setText(formatCompact(SaveManager.getCoins()));
+    this.streamMissingPreviewArt();
+  }
+
+  // Browsing a different striker needs that striker's kit thumbnails. Both the
+  // grid tiles and the Kicker preview already fall back to procedural art, so
+  // this upgrades the screen rather than gating it. It converges: the re-render
+  // queues nothing the second time, so no further load is started.
+  async streamMissingPreviewArt() {
+    const characterId = this.category === 'character'
+      ? this.selectedId
+      : SaveManager.getEquippedCosmetic('character');
+    const token = this.selectedId;
+    const loaded = await ensureLoaded(this, (scene) => queueLockerThumbnails(scene, characterId));
+    if (!loaded || !this.scene.isActive() || this.selectedId !== token) return;
+    this.renderContent();
   }
 
   renderPreview(selected) {

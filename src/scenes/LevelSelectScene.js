@@ -5,6 +5,8 @@ import { SaveManager } from '../systems/SaveManager.js';
 import { MenuMusic } from '../systems/MenuMusic.js';
 import { Audio } from '../systems/AudioSynth.js';
 import { LEVELS, CUPS as CUP_DATA } from '../data/levels.js';
+import { streamInBackground } from '../data/kickerAssets.js';
+import { queueMatchPack } from '../data/matchAssets.js';
 import { PAL } from '../pixelart.js';
 
 const LEVELS_PER_CUP = 10;
@@ -293,6 +295,13 @@ export class LevelSelectScene extends Phaser.Scene {
     for (let y = 1; y < TOUR_H; y += 4) scanlines.fillRect(TOUR_VIEW_X, y, TOUR_VIEW_W, 1);
     scanlines.setBlendMode('MULTIPLY');
     sceneIntro(this);
+
+    // Choosing a level is the last quiet moment before kick-off. Warm the match
+    // atlases here too, so arriving from a cold Career tap is as instant as
+    // arriving from Continue.
+    this.time.delayedCall(200, () => {
+      if (this.scene.isActive()) streamInBackground(this, queueMatchPack);
+    });
   }
 
   drawHeader() {

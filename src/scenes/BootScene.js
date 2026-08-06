@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
 import { GAME_W, GAME_H, STADIUM_Y } from '../config.js';
 import { textureFromMap, MAPS, PAL } from '../pixelart.js';
-import { getCosmeticsByCategory, kickerHdTextureKey } from '../data/cosmetics.js';
+import { getCosmeticsByCategory, STARTER_COSMETICS } from '../data/cosmetics.js';
+import { queueKickerSet } from '../data/kickerAssets.js';
 import { PlatformService } from '../systems/PlatformService.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
@@ -9,7 +10,6 @@ import { MenuMusic } from '../systems/MenuMusic.js';
 import { applyDocumentSettings } from '../systems/SettingsPanel.js';
 import { makePuppetTextures } from '../art/PuppetTextures.js';
 import { CROWD_PANORAMA } from '../data/crowdPanorama.js';
-import { queueKeeperSheets } from '../data/keeperAssets.js';
 
 const KICKER_POSES = {
   idle: MAPS.kickerIdle,
@@ -17,7 +17,6 @@ const KICKER_POSES = {
   strike: MAPS.kickerStrike,
   celebrate: MAPS.kickerCelebrate
 };
-const HD_KICKER_POSES = ['idle', 'ready', 'windup', 'strike', 'follow', 'recover', 'watch', 'celebrate'];
 const BALL_ASSET_IDS = Object.freeze([
   'ball-snowball', 'ball-basketball', 'ball-golf',
   'ball-volleyball', 'ball-beachball', 'ball-tennis'
@@ -45,29 +44,34 @@ export class BootScene extends Phaser.Scene {
     super('Boot');
   }
 
+  // Boot loads the main menu and nothing else. Every striker frame the player
+  // is not currently wearing, plus the goalkeeper and defender atlases, are
+  // streamed later by the scene that first needs them - see kickerAssets.js and
+  // matchAssets.js. That is the difference between 214 requests / 13 MB before
+  // first paint and roughly a tenth of it.
   preload() {
     const base = import.meta.env.BASE_URL;
     this.load.image('pitch-grass-pixel-v3', `${base}assets/hd/pitch-grass-pixel-v3.png`);
     this.load.image(CROWD_PANORAMA.textureKey, `${base}${CROWD_PANORAMA.assetPath}`);
-    getCosmeticsByCategory('character').forEach((character) => {
-      getCosmeticsByCategory('kit').forEach((kit) => {
-        HD_KICKER_POSES.forEach((pose) => {
-          const key = kickerHdTextureKey(character.id, kit.id, pose);
-          this.load.image(key, `${base}assets/hd/${key}.png`);
-        });
-      });
-    });
-    queueKeeperSheets(this, { initial: true });
-    this.load.image('defender-hd', `${base}assets/hd/defender-hd.png`);
-    this.load.spritesheet('defender-collapse-hd', `${base}assets/hd/defender-collapse-sheet-hd.png`, {
-      frameWidth: 256,
-      frameHeight: 256
-    });
-    this.load.spritesheet('security-guards-hd', `${base}assets/hd/security-guards-sheet-hd.png`, {
-      frameWidth: 88,
-      frameHeight: 204
-    });
     this.load.image('calynx-logo-pixel', `${base}assets/hd/calynx-logo-pixel.png`);
+
+    // The menu hero wears exactly one striker. Reading the save this early is
+    // best-effort: corrupt storage must not stop the game from booting, and the
+    // starter combination is a correct fallback in every failure mode.
+    let characterId = STARTER_COSMETICS.character;
+    let kitId = STARTER_COSMETICS.kit;
+    try {
+      characterId = SaveManager.getEquippedCosmetic('character') || characterId;
+      kitId = SaveManager.getEquippedCosmetic('kit') || kitId;
+    } catch (error) {
+      console.warn('[Boot] equipped loadout unavailable, booting the starter kit', error);
+    }
+    queueKickerSet(this, characterId, kitId);
+
+    // Balls stay on the boot path: the whole set is 0.6 MB, the menu draws the
+    // equipped one, and BootScene.makeCosmeticSprites bakes a procedural
+    // stand-in under the same key when a file is missing - so deferring them
+    // would let the fallback win the key and permanently mask the real art.
     this.load.image('ball-classic', `${base}assets/hd/ball-classic-hd.png`);
     BALL_ASSET_IDS.forEach((id) => this.load.image(id, `${base}assets/balls/${id}.png`));
   }

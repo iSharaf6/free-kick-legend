@@ -4,7 +4,9 @@ import {
 } from '../config.js';
 import { LEVELS, dailyScenario, randomScenario } from '../data/levels.js';
 import { utcDateKey } from '../data/progression.js';
-import { getCosmetic } from '../data/cosmetics.js';
+import { getCosmetic, STARTER_COSMETICS } from '../data/cosmetics.js';
+import { queueKickerSet } from '../data/kickerAssets.js';
+import { queueMatchPack } from '../data/matchAssets.js';
 import { Ball } from '../objects/Ball.js';
 import { Wall } from '../objects/Wall.js';
 import { Goalkeeper } from '../objects/Goalkeeper.js';
@@ -345,6 +347,24 @@ export class GameScene extends Phaser.Scene {
       : this.mode === 'daily'
         ? dailyScenario(this.dailyDate)
         : randomScenario();
+  }
+
+  // Boot no longer ships the goalkeeper, defender or striker atlases, so the
+  // match tops up whatever the menu prefetch did not already warm. Phaser runs
+  // this between init() and create(); when the packs are resident it queues
+  // nothing and costs a single frame.
+  preload() {
+    queueMatchPack(this);
+    try {
+      queueKickerSet(
+        this,
+        SaveManager.getEquippedCosmetic('character') || STARTER_COSMETICS.character,
+        SaveManager.getEquippedCosmetic('kit') || STARTER_COSMETICS.kit
+      );
+    } catch (error) {
+      console.warn('[Game] equipped loadout unavailable, using the starter kit', error);
+      queueKickerSet(this, STARTER_COSMETICS.character, STARTER_COSMETICS.kit);
+    }
   }
 
   create() {
