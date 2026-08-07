@@ -13,8 +13,22 @@ test('goal scorer card copy is stable for every football ordinal edge case', () 
     scorerCardCopy({ scorerName: 'Malik Rook', shirtNumber: 9, goalNumber: 1 }),
     {
       heading: 'GOAL SCORED!',
-      player: '9  MALIK ROOK',
+      player: '#9  MALIK ROOK',
       detail: '1ST GOAL OF THE MATCH'
+    }
+  );
+  assert.deepEqual(
+    scorerCardCopy({
+      scorerName: 'Malik Rook',
+      shirtNumber: 9,
+      scoreDelta: 1454,
+      shotLabel: 'clean finish',
+      contextLabel: '1 goal · x1 combo · 59 sec'
+    }),
+    {
+      heading: '+1454 · CLEAN FINISH',
+      player: '#9  MALIK ROOK',
+      detail: '1 GOAL · X1 COMBO · 59 SEC'
     }
   );
 });

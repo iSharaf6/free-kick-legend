@@ -86,15 +86,18 @@ test('locker thumbnails cover every character and the previewed kits only', () =
   );
 });
 
-test('the match pack carries the initial keeper sheets and the defenders', () => {
+test('the match pack carries initial keepers, defenders and authored goal celebration art', () => {
   const scene = fakeScene();
   const queued = queueMatchPack(scene);
 
   const keys = scene.requested.map((file) => file.key);
   const initialSheets = KEEPER_SHEETS.filter((sheet) => sheet.initial);
-  assert.equal(queued, initialSheets.length + 3);
+  assert.equal(queued, initialSheets.length + 5);
   for (const sheet of initialSheets) assert.ok(keys.includes(sheet.key), `missing ${sheet.key}`);
   for (const key of ['defender-hd', 'defender-collapse-hd', 'security-guards-hd']) {
+    assert.ok(keys.includes(key), `missing ${key}`);
+  }
+  for (const key of ['goal-celebration-stand-v1', 'goal-pyro-fountain-v1']) {
     assert.ok(keys.includes(key), `missing ${key}`);
   }
   // Specialist sheets still wait for gameplay to ask for them.

@@ -19,6 +19,16 @@ const MATCH_SPRITES = Object.freeze([
     file: 'security-guards-sheet-hd.png',
     frameWidth: 88,
     frameHeight: 204
+  }),
+  Object.freeze({
+    key: 'goal-celebration-stand-v1',
+    path: 'fx/goal-celebration-stand-v1.png'
+  }),
+  Object.freeze({
+    key: 'goal-pyro-fountain-v1',
+    path: 'fx/goal-pyro-fountain-strip-v1.png',
+    frameWidth: 96,
+    frameHeight: 256
   })
 ]);
 
@@ -31,7 +41,7 @@ export function queueMatchPack(scene) {
 
   for (const sprite of MATCH_SPRITES) {
     if (scene.textures?.exists?.(sprite.key)) continue;
-    const path = assetUrl(`hd/${sprite.file}`);
+    const path = assetUrl(sprite.path || `hd/${sprite.file}`);
     if (sprite.frameWidth) {
       scene.load.spritesheet(sprite.key, path, {
         frameWidth: sprite.frameWidth,
@@ -63,11 +73,11 @@ export function queueMatchPack(scene) {
 export function prefetchMatchPack() {
   if (typeof fetch !== 'function') return 0;
   const files = [
-    ...KEEPER_SHEETS.filter((sheet) => sheet.initial).map((sheet) => sheet.file),
-    ...MATCH_SPRITES.map((sprite) => sprite.file)
+    ...KEEPER_SHEETS.filter((sheet) => sheet.initial).map((sheet) => `hd/${sheet.file}`),
+    ...MATCH_SPRITES.map((sprite) => sprite.path || `hd/${sprite.file}`)
   ];
   for (const file of files) {
-    fetch(assetUrl(`hd/${file}`), { priority: 'low', mode: 'same-origin' })
+    fetch(assetUrl(file), { priority: 'low', mode: 'same-origin' })
       // Draining the body is what actually commits the response to the cache.
       .then((response) => response.ok && response.blob())
       .catch(() => {});

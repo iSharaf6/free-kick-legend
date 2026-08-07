@@ -562,16 +562,6 @@ export class GameScene extends Phaser.Scene {
       emitting: false
     }).setDepth(1255);
 
-    this.confetti = this.add.particles(0, 0, 'spark', {
-      speed: { min: 60, max: 170 },
-      angle: { min: 200, max: 340 },
-      gravityY: 260,
-      lifespan: 800,
-      scale: { start: 1.4, end: 0 },
-      tint: [PAL.gold, 0xff5252, 0x40c4ff, 0x69f0ae, 0xffffff],
-      emitting: false
-    }).setDepth(1800);
-
     // white burst on saves / wall blocks / post hits
     this.impact = this.add.particles(0, 0, 'spark', {
       speed: { min: 30, max: 80 },
@@ -2548,10 +2538,12 @@ export class GameScene extends Phaser.Scene {
     this.tweens.killTweensOf(layers);
     const reduced = Boolean(this.settings.reducedMotion);
     this.bannerPlate.clear();
-    this.bannerPlate.fillGradientStyle(style.glow, style.glow, 0x071018, 0x071018, 0.26, 0.26, 0, 0);
-    this.bannerPlate.fillRect(GAME_W / 2 - 132, 29, 264, 58);
-    this.bannerPlate.fillStyle(style.glow, 0.7).fillRect(GAME_W / 2 - 86, 82, 172, 1);
-    this.bannerPlate.setAlpha(reduced ? 0.48 : 0).setScale(1);
+    if (!style.stadiumCelebration) {
+      this.bannerPlate.fillGradientStyle(style.glow, style.glow, 0x071018, 0x071018, 0.26, 0.26, 0, 0);
+      this.bannerPlate.fillRect(GAME_W / 2 - 132, 29, 264, 58);
+      this.bannerPlate.fillStyle(style.glow, 0.7).fillRect(GAME_W / 2 - 86, 82, 172, 1);
+    }
+    this.bannerPlate.setAlpha(reduced && !style.stadiumCelebration ? 0.48 : 0).setScale(1);
 
     this.bannerExtrusion
       .setText(style.text)
@@ -2572,7 +2564,7 @@ export class GameScene extends Phaser.Scene {
 
     this.tweens.add({
       targets: this.bannerPlate,
-      alpha: 1,
+      alpha: style.stadiumCelebration ? 0 : 1,
       duration: reduced ? 80 : 130,
       ease: 'Cubic.easeOut'
     });
@@ -3255,8 +3247,6 @@ export class GameScene extends Phaser.Scene {
         });
         this.netFront?.setVisible(true);
         this.schedule(150, () => this.keepers.forEach((keeper) => keeper.reactToGoal()));
-        const spos = project(pt.x, pt.y, this.zGoal);
-        this.confetti.explode(this.trailStyle.mode === 'confetti' ? 92 : 48, spos.x, spos.y);
         const scorer = getCosmetic(this.loadout.character);
         const goalNumber = this.mode === 'career' ? this.goalsThisLevel + 1 : this.goals + 1;
         this.showBanner(isTopCorner ? 'TOP BINS!' : shotRating.grade === 'S' ? 'WORLD CLASS!' : 'GOAL!', '#f2c832');
@@ -3265,7 +3255,10 @@ export class GameScene extends Phaser.Scene {
           shirtNumber: scorer?.number,
           goalNumber,
           ballTexture: this.ballTexture,
-          kicker: this.kicker
+          kicker: this.kicker,
+          scoreDelta: shotRating.points,
+          shotLabel: shotRating.label,
+          contextLabel: this.goalCardContext(pt, shotRating)
         });
         Audio.goal();
         this.playCrowdGoal();
@@ -3355,6 +3348,27 @@ export class GameScene extends Phaser.Scene {
       curvedGoals: curvedGoal ? 1 : 0,
       score: rating.points || 0
     });
+  }
+
+  goalCardContext(point, rating) {
+    if (this.mode === 'arcade') {
+      const nextGoals = this.goals + 1;
+      const nextCombo = this.combo + 1;
+      return `${nextGoals} ${nextGoals === 1 ? 'GOAL' : 'GOALS'} · x${nextCombo} COMBO · ${Math.ceil(this.timeLeft)} SEC`;
+    }
+    if (this.mode === 'daily') {
+      const nextGoals = this.goals + 1;
+      return `SHOT ${this.attempt}/${this.maxAttempts} · ${nextGoals} ${nextGoals === 1 ? 'GOAL' : 'GOALS'} · ${this.score + (rating.points || 0)} TOTAL`;
+    }
+
+    const objective = this.level.objective || { goals: 1 };
+    const needed = Math.max(1, objective.goals || 1);
+    const check = this.objectiveCheck('GOAL', point, rating);
+    const progress = Math.min(this.goalsThisLevel + (check.qualifies ? 1 : 0), needed);
+    const remaining = Math.max(this.maxAttempts - this.attempt, 0);
+    return check.qualifies
+      ? `${progress}/${needed} TARGETS · ${remaining} ${remaining === 1 ? 'SHOT' : 'SHOTS'} LEFT`
+      : `OBJECTIVE MISSED · ${remaining} ${remaining === 1 ? 'SHOT' : 'SHOTS'} LEFT`;
   }
 
   handleDailyOutcome(outcome, rating) {
@@ -3525,7 +3539,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   resultResetDelay(outcome, minimum = 750) {
-    if (outcome === 'GOAL') return Math.max(minimum, 2450);
     if (outcome !== 'SAVE' && outcome !== 'CAUGHT') return minimum;
     const keeperHold = Math.max(
       minimum,

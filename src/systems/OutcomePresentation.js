@@ -8,13 +8,22 @@ export function ordinal(value) {
   return `${number}TH`;
 }
 
-export function scorerCardCopy({ scorerName, shirtNumber, goalNumber = 1 } = {}) {
+export function scorerCardCopy({
+  scorerName,
+  shirtNumber,
+  goalNumber = 1,
+  scoreDelta = 0,
+  shotLabel = 'GOAL SCORED',
+  contextLabel = ''
+} = {}) {
   const name = String(scorerName || 'KICK DISTRICT').trim().toUpperCase();
   const number = Math.max(0, Math.round(Number(shirtNumber) || 0));
+  const points = Math.max(0, Math.round(Number(scoreDelta) || 0));
+  const result = String(shotLabel || 'GOAL SCORED').trim().toUpperCase();
   return Object.freeze({
-    heading: 'GOAL SCORED!',
-    player: `${number}  ${name}`,
-    detail: `${ordinal(goalNumber)} GOAL OF THE MATCH`
+    heading: points ? `+${points} · ${result}` : `${result}!`,
+    player: `#${number}  ${name}`,
+    detail: String(contextLabel || `${ordinal(goalNumber)} GOAL OF THE MATCH`).trim().toUpperCase()
   });
 }
 
@@ -32,11 +41,12 @@ export function outcomeBannerStyle(label, fallbackColor = '#f0e8d0') {
         : ['#ffe4d2', '#ff8b61', '#d94534'];
   return Object.freeze({
     text,
+    stadiumCelebration: text === 'GOAL!' || text === 'TOP BINS!' || text === 'WORLD CLASS!',
     fontSize: Math.max(18, Math.min(44, Math.floor(270 / Math.max(text.length * 0.62, 1)))),
     fill,
     extrusion: positive ? '#d86a00' : frame ? '#b24c1e' : neutral ? '#526b7a' : '#a92f28',
     glow: positive ? 0xffa51d : frame ? 0xff6e2c : neutral ? 0x7396ad : 0xff493b,
     fallbackColor,
-    holdMs: positive ? 1850 : 620
+    holdMs: positive ? 760 : 620
   });
 }

@@ -265,6 +265,24 @@ test('Time Attack clock waits for the first valid shot, then continues through r
   assert.equal(displayed, '11');
 });
 
+test('goals return to the original fast result cadence and expose useful mode context', () => {
+  const scene = Object.create(GameScene.prototype);
+  Object.assign(scene, {
+    mode: 'arcade',
+    goals: 2,
+    combo: 1,
+    timeLeft: 42.2,
+    keepers: []
+  });
+
+  assert.equal(scene.resultResetDelay('GOAL'), 750);
+  assert.equal(scene.resultResetDelay('GOAL', 1150), 1150);
+  assert.equal(
+    scene.goalCardContext({ x: 0, y: 1.4 }, { points: 1454 }),
+    '3 GOALS · x2 COMBO · 43 SEC'
+  );
+});
+
 test('starting a Time Attack aim clears the ready prompt before drawing the live meter', () => {
   const scene = Object.create(GameScene.prototype);
   let hintAlpha = 1;

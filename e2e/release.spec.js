@@ -238,7 +238,7 @@ test('live swipe copy clears the gesture and feedback lanes', async ({ page }) =
   expect(lanes.readoutY - lanes.hintY).toBeGreaterThan(30);
 });
 
-test('goal celebration layers fireworks, scorer card, and fitted outcome typography', async ({ page }) => {
+test('goal celebration layers authored stand art, fountain sprites, useful scorer data, and fitted typography', async ({ page }) => {
   const game = new GamePage(page);
   await game.open({ width: 1280, height: 720 });
   await page.evaluate(() => {
@@ -268,15 +268,30 @@ test('goal celebration layers fireworks, scorer card, and fitted outcome typogra
       banner: scene.banner.text,
       bounds: { left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom },
       layers: [...scene.goalCelebration.objects].map((object) => object.depth).sort((a, b) => a - b),
-      scorer: text.filter((line) => line === 'GOAL SCORED!' || line.includes('MICA VALE') || line.includes('GOAL OF THE MATCH'))
+      textures: [...scene.goalCelebration.objects]
+        .map((object) => object.texture?.key)
+        .filter(Boolean),
+      scorer: text.filter((line) => line.startsWith('+') || line.includes('MICA VALE') || line.includes('COMBO')),
+      shaking: scene.cameras.main.shakeEffect.isRunning,
+      resetDelay: scene.resultResetDelay('GOAL', 1150)
     };
   });
 
   expect(goal.banner).toBe('GOAL!');
   expect(goal.bounds.left).toBeGreaterThan(8);
   expect(goal.bounds.right).toBeLessThan(472);
-  expect(goal.layers).toEqual(expect.arrayContaining([1.2, 1.36, 1880, 2220]));
-  expect(goal.scorer).toEqual(['GOAL SCORED!', '17  MICA VALE', '1ST GOAL OF THE MATCH']);
+  expect(goal.layers).toEqual(expect.arrayContaining([1.34, 1880, 2220]));
+  expect(goal.textures).toEqual(expect.arrayContaining([
+    'goal-celebration-stand-v1',
+    'goal-pyro-fountain-v1'
+  ]));
+  expect(goal.scorer).toEqual([
+    expect.stringMatching(/^\+\d+ · /),
+    '#17  MICA VALE',
+    '1 GOAL · X1 COMBO · 60 SEC'
+  ]);
+  expect(goal.shaking).toBe(false);
+  expect(goal.resetDelay).toBe(1150);
 
   const labels = ['SAVED!', 'OFF TARGET', 'OFF THE POST!', 'BLOCKED!', 'WALL FLATTENED!'];
   const fits = await page.evaluate((outcomes) => outcomes.map((label) => {
