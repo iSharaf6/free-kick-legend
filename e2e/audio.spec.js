@@ -10,6 +10,10 @@ async function musicState(page) {
   return await page.evaluate(() => window.__menuMusic.getState());
 }
 
+async function ambienceState(page) {
+  return await page.evaluate(() => window.__gameplayAmbience.getState());
+}
+
 async function unlockMusic(page) {
   await page.keyboard.press('Space');
   await page.waitForFunction(() => {
@@ -25,7 +29,7 @@ async function waitForScene(page, key) {
 test('menu music unlocks once, survives every menu panel, and persists mute', async ({ page }) => {
   const game = new GamePage(page);
   await game.open({ width: 1280, height: 720 });
-  await page.waitForFunction(() => window.__menuMusic?.getState().duration > 170);
+  await page.waitForFunction(() => window.__menuMusic?.getState().duration > 165);
 
   const initial = await musicState(page);
   expect(initial.active).toBe(true);
@@ -45,6 +49,11 @@ test('menu music unlocks once, survives every menu panel, and persists mute', as
   for (const panel of panels) {
     await game.clickLogical(...panel.button);
     await waitForScene(page, panel.scene);
+    expect(await page.evaluate(() => window.__audio?.lastSample)).toMatchObject({
+      name: 'ui',
+      key: 'audio-ui-button-press',
+      duration: 0.18
+    });
     expect(await page.evaluate(() => ({
       active: window.__menuMusic.getState().active,
       paused: window.__menuMusic.audio.paused,
@@ -83,7 +92,7 @@ test('gameplay fades the menu track and returning resumes its position', async (
   const game = new GamePage(page);
   await game.open({ width: 1280, height: 720 });
   await unlockMusic(page);
-  await page.waitForFunction(() => window.__menuMusic?.getState().duration > 170);
+  await page.waitForFunction(() => window.__menuMusic?.getState().duration > 165);
   await page.evaluate(() => { window.__menuMusic.audio.currentTime = 80; });
 
   await game.clickLogical(350, 187);
@@ -92,6 +101,16 @@ test('gameplay fades the menu track and returning resumes its position', async (
     const state = window.__menuMusic.getState();
     return !state.active && state.paused && state.outputVolume === 0;
   });
+  await page.waitForFunction(() => {
+    const state = window.__gameplayAmbience?.getState();
+    return state?.active && !state.paused && state.duration > 29;
+  });
+  expect(await ambienceState(page)).toMatchObject({
+    trackId: 'stadium-crowd',
+    loopMode: 'full-track',
+    nativeLoop: true
+  });
+  expect((await ambienceState(page)).src).toContain('/assets/audio/stadium-crowd-loop.mp3');
   const afterArcade = (await musicState(page)).currentTime;
   expect(afterArcade).toBeGreaterThanOrEqual(80);
   // A slow runner can spend several seconds constructing the match while the
@@ -102,6 +121,7 @@ test('gameplay fades the menu track and returning resumes its position', async (
   await page.evaluate(() => window.__fkl.startScene('Menu'));
   await waitForScene(page, 'Menu');
   await page.waitForFunction(() => window.__menuMusic.getState().active && !window.__menuMusic.audio.paused);
+  await page.waitForFunction(() => !window.__gameplayAmbience.getState().active && window.__gameplayAmbience.audio.paused);
   expect((await musicState(page)).currentTime).toBeGreaterThanOrEqual(afterArcade);
 
   await game.clickLogical(350, 147);
@@ -114,7 +134,7 @@ test('visibility recovery and native full-track looping reuse the same track', a
   const game = new GamePage(page);
   await game.open({ width: 1280, height: 720 });
   await unlockMusic(page);
-  await page.waitForFunction(() => window.__menuMusic?.getState().duration > 170);
+  await page.waitForFunction(() => window.__menuMusic?.getState().duration > 165);
 
   await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
@@ -128,8 +148,8 @@ test('visibility recovery and native full-track looping reuse the same track', a
   await page.waitForFunction(() => !window.__menuMusic.audio.paused);
 
   const duration = (await musicState(page)).duration;
-  expect(duration).toBeGreaterThan(173);
-  expect(duration).toBeLessThan(174);
+  expect(duration).toBeGreaterThan(167);
+  expect(duration).toBeLessThan(168);
 
   // Cross the real encoded end-to-start boundary three times. This catches a
   // paused/ended element, a scripted replacement instance, or a one-shot loop.

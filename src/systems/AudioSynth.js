@@ -1,5 +1,21 @@
-// Tiny WebAudio sound synth - zero audio assets keeps the bundle small and
-// portals happy. Context is created lazily on the first user gesture.
+export const AUDIO_SAMPLES = Object.freeze({
+  ui: Object.freeze({
+    key: 'audio-ui-button-press',
+    path: 'assets/audio/ui-button-press.mp3',
+    duration: 0.18,
+    volume: 0.5
+  }),
+  post: Object.freeze({
+    key: 'audio-post-impact',
+    path: 'assets/audio/post-impact.mp3',
+    duration: 0.82,
+    volume: 0.72
+  })
+});
+
+// WebAudio synth plus two short, authored samples. The context remains lazy;
+// Phaser decodes the supplied clips during Boot and hands us its shared sound
+// manager, so the first real pointer gesture can play without a second fetch.
 export class Synth {
   constructor() {
     this.ctx = null;
@@ -7,6 +23,14 @@ export class Synth {
     this.muted = false;
     this.volume = 0.85;
     this.noiseBuffer = null;
+    this.soundManager = null;
+    this.activeSamples = new Set();
+    this.lastSample = null;
+  }
+
+  bindSoundManager(soundManager) {
+    this.soundManager = soundManager || null;
+    return this;
   }
 
   _ensure() {
@@ -46,6 +70,57 @@ export class Synth {
     this.master.gain.setTargetAtTime(target, this.ctx.currentTime, 0.01);
   }
 
+  _applySampleMix() {
+    for (const voice of this.activeSamples) {
+      if (!voice.sound?.isPlaying) continue;
+      voice.sound.setVolume?.(this.muted ? 0 : this.volume * voice.mix);
+    }
+  }
+
+  _playSample(name, { rate = 1 } = {}) {
+    const sample = AUDIO_SAMPLES[name];
+    const manager = this.soundManager;
+    if (!sample || this.muted || !manager?.add) return false;
+
+    let sound;
+    try {
+      sound = manager.add(sample.key);
+      if (!sound?.addMarker) return false;
+      const marker = `fkl-${name}`;
+      sound.addMarker({ name: marker, start: 0, duration: sample.duration });
+      const voice = { sound, mix: sample.volume };
+      let cleaned = false;
+      const cleanup = () => {
+        if (cleaned) return;
+        cleaned = true;
+        this.activeSamples.delete(voice);
+        sound.destroy?.();
+      };
+      sound.once?.('complete', cleanup);
+      sound.once?.('stop', cleanup);
+      this.activeSamples.add(voice);
+      const played = sound.play(marker, {
+        volume: this.volume * sample.volume,
+        rate
+      });
+      if (!played) {
+        cleanup();
+        return false;
+      }
+      this.lastSample = {
+        name,
+        key: sample.key,
+        duration: sample.duration,
+        rate,
+        volume: this.volume * sample.volume
+      };
+      return true;
+    } catch {
+      sound?.destroy?.();
+      return false;
+    }
+  }
+
   _makeNoiseBuffer(ctx, seconds) {
     const len = Math.ceil(ctx.sampleRate * seconds);
     const buffer = ctx.createBuffer(1, len, ctx.sampleRate);
@@ -67,6 +142,7 @@ export class Synth {
     // _ensure(); an existing context can still be resumed when unmuted.
     if (!this.muted && this.ctx) this._resumeContext();
     this._applyMasterGain();
+    this._applySampleMix();
   }
 
   toggleMuted() {
@@ -79,6 +155,7 @@ export class Synth {
     // Volume lives on the SFX bus so changes also affect voices that are
     // already ringing out rather than only the next synthesized sound.
     this._applyMasterGain();
+    this._applySampleMix();
   }
 
   prepare() {
@@ -133,10 +210,13 @@ export class Synth {
   }
 
   post(frame = 'post') {
+    const sampled = this._playSample('post', { rate: frame === 'crossbar' ? 1.08 : 0.98 });
     const high = frame === 'crossbar' ? 2650 : 2200;
-    this._tone({ freq: high, end: high * 0.78, time: 0.28, type: 'square', vol: 0.1 });
-    this._tone({ freq: high * 0.5, end: high * 0.39, time: 0.36, type: 'triangle', vol: 0.17 });
-    this._tone({ freq: high * 0.25, end: high * 0.2, time: 0.24, type: 'sine', vol: 0.08, when: 0.025 });
+    this._tone({ freq: high, end: high * 0.78, time: 0.24, type: 'square', vol: sampled ? 0.045 : 0.1 });
+    this._tone({ freq: high * 0.5, end: high * 0.39, time: 0.32, type: 'triangle', vol: sampled ? 0.07 : 0.17 });
+    if (!sampled) {
+      this._tone({ freq: high * 0.25, end: high * 0.2, time: 0.24, type: 'sine', vol: 0.08, when: 0.025 });
+    }
   }
 
   goal() {
@@ -180,6 +260,7 @@ export class Synth {
   }
 
   ui() {
+    if (this._playSample('ui')) return;
     this._tone({ freq: 700, end: 900, time: 0.08, type: 'sine', vol: 0.15 });
   }
 

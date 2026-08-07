@@ -14,7 +14,8 @@ import { LockerScene } from './scenes/LockerScene.js';
 import { ProgressScene } from './scenes/ProgressScene.js';
 import { GameScene } from './scenes/GameScene.js';
 import { PuppetLabScene } from './scenes/PuppetLabScene.js';
-import { MenuMusic } from './systems/MenuMusic.js';
+import { GameplayAmbience, MenuMusic } from './systems/MenuMusic.js';
+import { Audio } from './systems/AudioSynth.js';
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,
@@ -73,4 +74,6 @@ const game = new Phaser.Game({
 if (import.meta.env.DEV) {
   window.__game = game;
   window.__menuMusic = MenuMusic;
+  window.__gameplayAmbience = GameplayAmbience;
+  window.__audio = Audio;
 }

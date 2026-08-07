@@ -238,6 +238,71 @@ test('live swipe copy clears the gesture and feedback lanes', async ({ page }) =
   expect(lanes.readoutY - lanes.hintY).toBeGreaterThan(30);
 });
 
+test('goal celebration layers fireworks, scorer card, and fitted outcome typography', async ({ page }) => {
+  const game = new GamePage(page);
+  await game.open({ width: 1280, height: 720 });
+  await page.evaluate(() => {
+    const menu = window.__game.scene.getScene('Menu');
+    menu.scene.start('Game', { mode: 'arcade' });
+  });
+  await page.waitForFunction(() => window.__fkl?.state === 'AIMING');
+
+  await page.evaluate(() => {
+    Object.assign(window.__fkl, {
+      lastShot: { power: 0.94, spin: 0.22, vx: 0, vy: 7.5, vz: 24 },
+      activeTarget: null
+    });
+    window.__fkl.resolve('GOAL', { x: 0, y: 1.45 });
+  });
+  await page.waitForFunction(() => [...(window.__fkl?.goalCelebration?.objects ?? [])]
+    .some((object) => object.type === 'Container'));
+
+  const goal = await page.evaluate(() => {
+    const scene = window.__fkl;
+    const text = scene.children.list
+      .flatMap((child) => child?.list ?? [child])
+      .map((child) => child?.text)
+      .filter(Boolean);
+    const bounds = scene.banner.getBounds();
+    return {
+      banner: scene.banner.text,
+      bounds: { left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom },
+      layers: [...scene.goalCelebration.objects].map((object) => object.depth).sort((a, b) => a - b),
+      scorer: text.filter((line) => line === 'GOAL SCORED!' || line.includes('MICA VALE') || line.includes('GOAL OF THE MATCH'))
+    };
+  });
+
+  expect(goal.banner).toBe('GOAL!');
+  expect(goal.bounds.left).toBeGreaterThan(8);
+  expect(goal.bounds.right).toBeLessThan(472);
+  expect(goal.layers).toEqual(expect.arrayContaining([1.2, 1.36, 1880, 2220]));
+  expect(goal.scorer).toEqual(['GOAL SCORED!', '17  MICA VALE', '1ST GOAL OF THE MATCH']);
+
+  const labels = ['SAVED!', 'OFF TARGET', 'OFF THE POST!', 'BLOCKED!', 'WALL FLATTENED!'];
+  const fits = await page.evaluate((outcomes) => outcomes.map((label) => {
+    const scene = window.__fkl;
+    scene.showBanner(label);
+    const bounds = scene.banner.getBounds();
+    return {
+      label: scene.banner.text,
+      fits: bounds.left >= 8 && bounds.right <= 472,
+      font: scene.banner.style.fontFamily
+    };
+  }), labels);
+  expect(fits).toEqual(labels.map((label) => ({
+    label,
+    fits: true,
+    font: '"Pixelify Sans", "Courier New", monospace'
+  })));
+
+  await page.evaluate(() => window.__audio.post('post'));
+  expect(await page.evaluate(() => window.__audio.lastSample)).toMatchObject({
+    name: 'post',
+    key: 'audio-post-impact',
+    duration: 0.82
+  });
+});
+
 test('Time Attack ends on the dedicated results card with working rematch actions', async ({ page }) => {
   const game = new GamePage(page);
   await game.open({ width: 844, height: 390 });

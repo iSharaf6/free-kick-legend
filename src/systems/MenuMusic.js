@@ -1,12 +1,24 @@
 const BASE_URL = typeof import.meta.env?.BASE_URL === 'string' ? import.meta.env.BASE_URL : '/';
 
 export const MENU_MUSIC = Object.freeze({
-  src: `${BASE_URL}assets/audio/free-kick-legend-menu.mp3`,
+  id: 'menu-theme',
+  src: `${BASE_URL}assets/audio/kick-district-menu.mp3`,
   defaultVolume: 0.3,
   loopMode: 'full-track',
   sceneFadeMs: 500,
   resumeFadeMs: 320
 });
+
+export const GAMEPLAY_AMBIENCE_TRACK = Object.freeze({
+  id: 'stadium-crowd',
+  src: `${BASE_URL}assets/audio/stadium-crowd-loop.mp3`,
+  defaultVolume: 0.135,
+  loopMode: 'full-track',
+  sceneFadeMs: 260,
+  resumeFadeMs: 220
+});
+
+export const GAMEPLAY_CROWD_MIX = 0.45;
 
 function clampVolume(value, fallback = MENU_MUSIC.defaultVolume) {
   const number = Number(value);
@@ -15,9 +27,10 @@ function clampVolume(value, fallback = MENU_MUSIC.defaultVolume) {
 
 export class MenuMusicController {
   constructor(options = {}) {
+    this.track = options.track ?? MENU_MUSIC;
     this.active = false;
     this.muted = false;
-    this.volume = MENU_MUSIC.defaultVolume;
+    this.volume = this.track.defaultVolume;
     this.hidden = false;
     this.autoplayBlocked = false;
     this.audio = null;
@@ -52,7 +65,7 @@ export class MenuMusicController {
       // A first gesture can arrive while the browser is still rejecting the
       // optimistic autoplay promise. Retry synchronously while activation is
       // live instead of waiting for that stale promise to settle.
-      this.attemptPlay(MENU_MUSIC.resumeFadeMs, { gesture: true });
+      this.attemptPlay(this.track.resumeFadeMs, { gesture: true });
     };
   }
 
@@ -67,7 +80,7 @@ export class MenuMusicController {
     const audio = this.createAudio();
     if (!audio) return null;
 
-    audio.src = MENU_MUSIC.src;
+    audio.src = this.track.src;
     audio.preload = 'auto';
     // The replacement theme was authored for a direct end-to-start loop.
     // Native looping preserves the full recording and lets browsers honor its
@@ -117,13 +130,21 @@ export class MenuMusicController {
   }
 
   enterMenu() {
+    return this.start();
+  }
+
+  leaveMenu(fadeMs = this.track.sceneFadeMs) {
+    return this.stop(fadeMs);
+  }
+
+  start() {
     this.active = true;
     this.ensureAudio();
-    if (!this.muted && !this.hidden) this.attemptPlay(MENU_MUSIC.resumeFadeMs);
+    if (!this.muted && !this.hidden) this.attemptPlay(this.track.resumeFadeMs);
     return this.getState();
   }
 
-  leaveMenu(fadeMs = MENU_MUSIC.sceneFadeMs) {
+  stop(fadeMs = this.track.sceneFadeMs) {
     this.active = false;
     if (!this.audio || this.audio.paused) return this.getState();
     this.fadeTo(0, fadeMs, () => {
@@ -132,7 +153,7 @@ export class MenuMusicController {
     return this.getState();
   }
 
-  attemptPlay(fadeMs = MENU_MUSIC.resumeFadeMs, { gesture = false } = {}) {
+  attemptPlay(fadeMs = this.track.resumeFadeMs, { gesture = false } = {}) {
     const audio = this.ensureAudio();
     if (!audio || !this.active || this.muted || this.hidden) return Promise.resolve(false);
     if (!audio.paused) {
@@ -187,13 +208,13 @@ export class MenuMusicController {
         });
       }
     } else if (this.active && !this.hidden) {
-      this.attemptPlay(MENU_MUSIC.resumeFadeMs);
+      this.attemptPlay(this.track.resumeFadeMs);
     }
     return this.muted;
   }
 
   setVolume(value) {
-    this.volume = clampVolume(value);
+    this.volume = clampVolume(value, this.track.defaultVolume);
     if (this.audio && !this.audio.paused && this.active && !this.muted && !this.hidden) {
       this.fadeTo(this.volume, 60);
     }
@@ -207,7 +228,7 @@ export class MenuMusicController {
       this.setOutputVolume(0);
       this.audio?.pause?.();
     } else if (this.active && !this.muted) {
-      this.attemptPlay(MENU_MUSIC.resumeFadeMs);
+      this.attemptPlay(this.track.resumeFadeMs);
     }
     return this.getState();
   }
@@ -263,9 +284,10 @@ export class MenuMusicController {
       autoplayBlocked: this.autoplayBlocked,
       instanceCount: this.audio ? 1 : 0,
       instanceId: this.instanceId,
-      loopMode: MENU_MUSIC.loopMode,
+      trackId: this.track.id,
+      loopMode: this.track.loopMode,
       nativeLoop: this.audio?.loop ?? true,
-      src: this.audio?.currentSrc || this.audio?.src || MENU_MUSIC.src
+      src: this.audio?.currentSrc || this.audio?.src || this.track.src
     };
   }
 
@@ -289,3 +311,4 @@ export class MenuMusicController {
 }
 
 export const MenuMusic = new MenuMusicController();
+export const GameplayAmbience = new MenuMusicController({ track: GAMEPLAY_AMBIENCE_TRACK });

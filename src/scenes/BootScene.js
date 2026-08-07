@@ -5,7 +5,7 @@ import { getCosmeticsByCategory, STARTER_COSMETICS } from '../data/cosmetics.js'
 import { queueKickerSet } from '../data/kickerAssets.js';
 import { PlatformService } from '../systems/PlatformService.js';
 import { SaveManager } from '../systems/SaveManager.js';
-import { Audio } from '../systems/AudioSynth.js';
+import { AUDIO_SAMPLES, Audio } from '../systems/AudioSynth.js';
 import { MenuMusic } from '../systems/MenuMusic.js';
 import { applyDocumentSettings } from '../systems/SettingsPanel.js';
 import { makePuppetTextures } from '../art/PuppetTextures.js';
@@ -74,9 +74,13 @@ export class BootScene extends Phaser.Scene {
     // would let the fallback win the key and permanently mask the real art.
     this.load.image('ball-classic', `${base}assets/hd/ball-classic-hd.png`);
     BALL_ASSET_IDS.forEach((id) => this.load.image(id, `${base}assets/balls/${id}.png`));
+    Object.values(AUDIO_SAMPLES).forEach((sample) => {
+      this.load.audio(sample.key, `${base}${sample.path}`);
+    });
   }
 
   create() {
+    Audio.bindSoundManager(this.sound);
     this.makeCoreSprites();
     makePuppetTextures(this);
     this.makeCosmeticSprites();

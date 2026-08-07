@@ -16,7 +16,7 @@ import { applyLoadoutToShot, resolveLoadoutGameplay } from '../systems/LoadoutGa
 import { AIM_ASSIST_MODES, SaveManager } from '../systems/SaveManager.js';
 import { PlatformService } from '../systems/PlatformService.js';
 import { Audio } from '../systems/AudioSynth.js';
-import { MenuMusic } from '../systems/MenuMusic.js';
+import { GAMEPLAY_CROWD_MIX, GameplayAmbience, MenuMusic } from '../systems/MenuMusic.js';
 import { SettingsPanel } from '../systems/SettingsPanel.js';
 import { careerStars, isTopCorner, scoreShot, targetGeometry } from '../systems/ShotScoring.js';
 import {
@@ -26,6 +26,8 @@ import {
   sweepGoalFrame
 } from '../systems/GoalFramePhysics.js';
 import { GoalNetPhysics } from '../systems/GoalNetPhysics.js';
+import { GoalCelebration } from '../systems/GoalCelebration.js';
+import { outcomeBannerStyle } from '../systems/OutcomePresentation.js';
 import { sweepMovingZPlane } from '../systems/SweptCollision.js';
 import {
   createRingProgress,
@@ -51,6 +53,7 @@ import { queueKeeperSheets } from '../data/keeperAssets.js';
 
 const ATTEMPTS = 3;
 const ARCADE_TIME = 60;
+const RESULT_FONT = '"Pixelify Sans", "Courier New", monospace';
 const FIXED_STEP = PHYS.fixedStep;
 const MAX_STEPS = PHYS.maxSubsteps + 2;
 const AD_TIMEOUT_MS = 15000;
@@ -381,6 +384,11 @@ export class GameScene extends Phaser.Scene {
       musicVolume: this.settings.musicVolume
     });
     MenuMusic.leaveMenu();
+    GameplayAmbience.configure({
+      muted: Boolean(this.settings.muted || PlatformService.shouldMuteAudio()),
+      musicVolume: (this.settings.musicVolume ?? 0.3) * GAMEPLAY_CROWD_MIX
+    });
+    GameplayAmbience.start();
     if (this.mode === 'daily') SaveManager.ensureDaily(this.dailyDate);
     PlatformService.gameplayStart();
     CAM.x = this.level.offsetX * 0.85;
@@ -574,6 +582,7 @@ export class GameScene extends Phaser.Scene {
       emitting: false
     }).setDepth(1800);
 
+    this.goalCelebration = new GoalCelebration(this);
     this.buildHud();
 
     this.swipe = new SwipeInput(
@@ -722,6 +731,7 @@ export class GameScene extends Phaser.Scene {
     this.time.clearPendingEvents();
     this.tweens.killAll();
     PlatformService.gameplayStop();
+    GameplayAmbience.stop();
 
     if (operation === 'restart') this.scene.restart(data);
     else this.scene.start(key, data);
@@ -862,6 +872,9 @@ export class GameScene extends Phaser.Scene {
     this.onDocumentVisibility = null;
     if (import.meta.env.DEV && globalThis.window?.__fkl === this) globalThis.window.__fkl = null;
     PlatformService.gameplayStop();
+    GameplayAmbience.stop();
+    this.goalCelebration?.destroy?.();
+    this.goalCelebration = null;
 
     // Destroy game objects and rigs safely
     this.keepers?.forEach((keeper) => keeper?.destroy?.());
@@ -2093,10 +2106,25 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.bannerPlate = this.add.graphics().setDepth(2095).setAlpha(0);
-    drawPanel(this.bannerPlate, GAME_W / 2 - 105, 38, 210, 28, {
-      fill: PAL.panel, border: PAL.goldDark, corner: PAL.gold
-    });
-    this.banner = titleText(this, GAME_W / 2, 52, '', '14px').setDepth(2100).setAlpha(0);
+    this.bannerExtrusion = crispText(this.add.text(GAME_W / 2, 61, '', {
+      fontFamily: RESULT_FONT,
+      fontStyle: 'bold',
+      fontSize: '32px',
+      color: '#934000',
+      stroke: '#020508',
+      strokeThickness: 5,
+      align: 'center'
+    }).setOrigin(0.5).setDepth(2099).setAlpha(0));
+    this.banner = crispText(this.add.text(GAME_W / 2, 55, '', {
+      fontFamily: RESULT_FONT,
+      fontStyle: 'bold',
+      fontSize: '32px',
+      color: '#ffd12f',
+      stroke: '#020508',
+      strokeThickness: 4,
+      align: 'center'
+    }).setOrigin(0.5).setDepth(2100).setAlpha(0));
+    this.banner.setShadow(3, 4, '#020508', 0, true, true);
     // Diagnostic line under the banner: the banner is the feeling, this is the
     // reason. Both clear together when the next attempt starts.
     this.shotReadoutPlate = this.add.graphics().setDepth(2095).setAlpha(0);
@@ -2515,35 +2543,62 @@ export class GameScene extends Phaser.Scene {
   }
 
   showBanner(text, color = '#f0e8d0') {
-    this.tweens.killTweensOf([this.banner, this.bannerPlate]);
+    const style = outcomeBannerStyle(text, color);
+    const layers = [this.banner, this.bannerExtrusion, this.bannerPlate];
+    this.tweens.killTweensOf(layers);
     const reduced = Boolean(this.settings.reducedMotion);
-    this.bannerPlate?.setAlpha(0).setY(reduced ? 0 : -7);
-    this.banner.setText(text).setColor(color).setAlpha(0).setScale(reduced ? 1 : 0.94).setY(reduced ? 52 : 45);
-    // One writer per property. The old version tweened `y` across both objects
-    // AND wrote this.banner.setY() from an onUpdate on the same tween, so two
-    // sources fought over the banner's position and it visibly juddered as it
-    // came in. The plate slides; the banner's y is derived from it, once.
+    this.bannerPlate.clear();
+    this.bannerPlate.fillGradientStyle(style.glow, style.glow, 0x071018, 0x071018, 0.26, 0.26, 0, 0);
+    this.bannerPlate.fillRect(GAME_W / 2 - 132, 29, 264, 58);
+    this.bannerPlate.fillStyle(style.glow, 0.7).fillRect(GAME_W / 2 - 86, 82, 172, 1);
+    this.bannerPlate.setAlpha(reduced ? 0.48 : 0).setScale(1);
+
+    this.bannerExtrusion
+      .setText(style.text)
+      .setFontSize(`${style.fontSize}px`)
+      .setFill(style.extrusion)
+      .setStroke('#020508', 5)
+      .setAlpha(reduced ? 1 : 0)
+      .setScale(reduced ? 1 : 1.28)
+      .setY(reduced ? 61 : 38);
+    this.banner
+      .setText(style.text)
+      .setFontSize(`${style.fontSize}px`)
+      .setFill(style.fill[1])
+      .setStroke('#020508', 4)
+      .setAlpha(reduced ? 1 : 0)
+      .setScale(reduced ? 1 : 1.28)
+      .setY(reduced ? 55 : 32);
+
     this.tweens.add({
-      targets: [this.banner, this.bannerPlate],
+      targets: this.bannerPlate,
       alpha: 1,
-      duration: reduced ? 120 : 200,
+      duration: reduced ? 80 : 130,
       ease: 'Cubic.easeOut'
     });
     if (!reduced) {
       this.tweens.add({
-        targets: this.bannerPlate,
-        y: 0,
-        duration: 200,
-        ease: 'Cubic.easeOut',
-        onUpdate: () => this.banner.setY(52 + this.bannerPlate.y)
+        targets: this.banner,
+        alpha: 1,
+        y: 55,
+        scale: 1,
+        duration: 190,
+        ease: 'Back.easeOut'
       });
-      this.tweens.add({ targets: this.banner, scale: 1, duration: 200, ease: 'Cubic.easeOut' });
+      this.tweens.add({
+        targets: this.bannerExtrusion,
+        alpha: 1,
+        y: 61,
+        scale: 1,
+        duration: 190,
+        ease: 'Back.easeOut'
+      });
     }
     this.tweens.add({
-      targets: [this.banner, this.bannerPlate],
+      targets: layers,
       alpha: 0,
-      delay: 850,
-      duration: 180,
+      delay: style.holdMs,
+      duration: 220,
       ease: 'Cubic.easeOut'
     });
   }
@@ -3199,15 +3254,21 @@ export class GameScene extends Phaser.Scene {
           height: this.goalHeight
         });
         this.netFront?.setVisible(true);
-        this.schedule(180, () => this.kicker?.celebrate(720));
         this.schedule(150, () => this.keepers.forEach((keeper) => keeper.reactToGoal()));
         const spos = project(pt.x, pt.y, this.zGoal);
         this.confetti.explode(this.trailStyle.mode === 'confetti' ? 92 : 48, spos.x, spos.y);
-        this.showBanner(isTopCorner ? 'TOP BINS' : shotRating.grade === 'S' ? 'WORLD CLASS' : 'GOAL', '#f2c832');
+        const scorer = getCosmetic(this.loadout.character);
+        const goalNumber = this.mode === 'career' ? this.goalsThisLevel + 1 : this.goals + 1;
+        this.showBanner(isTopCorner ? 'TOP BINS!' : shotRating.grade === 'S' ? 'WORLD CLASS!' : 'GOAL!', '#f2c832');
+        this.goalCelebration.play({
+          scorerName: scorer?.name,
+          shirtNumber: scorer?.number,
+          goalNumber,
+          ballTexture: this.ballTexture,
+          kicker: this.kicker
+        });
         Audio.goal();
         this.playCrowdGoal();
-        // The goal is the payoff, so it lands on the camera as well as the net.
-        this.playImpactShake(180, isTopCorner ? 1.5 : 1.15);
         this.popScoreReadout();
         if (!this.settings.reducedMotion) {
           this.tweens.add({
@@ -3234,7 +3295,7 @@ export class GameScene extends Phaser.Scene {
         Audio.groan();
         break;
       case 'POST':
-        this.showBanner('OFF THE POST!', '#ffab40');
+        this.showBanner(this.frameContacts.has('crossbar') ? 'OFF THE BAR!' : 'OFF THE POST!', '#ffab40');
         Audio.groan();
         break;
       default:
@@ -3464,6 +3525,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   resultResetDelay(outcome, minimum = 750) {
+    if (outcome === 'GOAL') return Math.max(minimum, 2450);
     if (outcome !== 'SAVE' && outcome !== 'CAUGHT') return minimum;
     const keeperHold = Math.max(
       minimum,

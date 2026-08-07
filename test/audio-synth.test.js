@@ -47,3 +47,52 @@ test('audio stays lazy through Boot and consumes an autoplay resume rejection', 
     globalThis.window = previousWindow;
   }
 });
+
+test('authored UI and frame clips use short SFX-bus markers', () => {
+  const previousWindow = globalThis.window;
+  const sounds = [];
+  globalThis.window = {};
+  try {
+    const synth = new Synth();
+    synth.setVolume(0.8);
+    synth.bindSoundManager({
+      add(key) {
+        const sound = {
+          key,
+          isPlaying: false,
+          marker: null,
+          playConfig: null,
+          listeners: new Map(),
+          addMarker(marker) { this.marker = marker; },
+          once(event, callback) { this.listeners.set(event, callback); },
+          play(marker, config) {
+            this.isPlaying = true;
+            this.playConfig = { marker, ...config };
+            return true;
+          },
+          setVolume(value) { this.volume = value; },
+          destroy() { this.destroyed = true; }
+        };
+        sounds.push(sound);
+        return sound;
+      }
+    });
+
+    synth.ui();
+    synth.post('crossbar');
+
+    assert.equal(sounds[0].key, 'audio-ui-button-press');
+    assert.equal(sounds[0].marker.duration, 0.18);
+    assert.equal(sounds[0].playConfig.volume, 0.4);
+    assert.equal(sounds[1].key, 'audio-post-impact');
+    assert.equal(sounds[1].marker.duration, 0.82);
+    assert.equal(sounds[1].playConfig.rate, 1.08);
+    assert.equal(synth.lastSample.name, 'post');
+
+    synth.setMuted(true);
+    assert.equal(sounds[0].volume, 0);
+    assert.equal(sounds[1].volume, 0);
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});

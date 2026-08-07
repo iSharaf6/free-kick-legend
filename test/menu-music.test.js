@@ -104,10 +104,10 @@ async function settle() {
 }
 
 test('the shipped menu soundtrack is the supplied MP3 byte-for-byte', async () => {
-  const bytes = await readFile(new URL('../public/assets/audio/free-kick-legend-menu.mp3', import.meta.url));
+  const bytes = await readFile(new URL('../public/assets/audio/kick-district-menu.mp3', import.meta.url));
   assert.equal(
     createHash('sha256').update(bytes).digest('hex'),
-    '5f02aa96a80e19a79cefcec6815a889a06c9f92e355328987b1c4dc5eee52afc'
+    '884058f1892728de58b25fe67193a1a15bd3c14babf6a9c8d65734d8c0ccefe2'
   );
 });
 

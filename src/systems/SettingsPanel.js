@@ -1,5 +1,5 @@
 import { Audio } from './AudioSynth.js';
-import { MenuMusic } from './MenuMusic.js';
+import { GAMEPLAY_CROWD_MIX, GameplayAmbience, MenuMusic } from './MenuMusic.js';
 import { PlatformService } from './PlatformService.js';
 import { AIM_ASSIST_MODES, DEFAULT_SETTINGS, SaveManager } from './SaveManager.js';
 
@@ -24,6 +24,8 @@ export function applyRuntimeSettings(settings = {}) {
   Audio.setVolume(settings.sfxVolume ?? DEFAULT_SETTINGS.sfxVolume);
   MenuMusic.setMuted(muted);
   MenuMusic.setVolume(settings.musicVolume ?? DEFAULT_SETTINGS.musicVolume);
+  GameplayAmbience.setMuted(muted);
+  GameplayAmbience.setVolume((settings.musicVolume ?? DEFAULT_SETTINGS.musicVolume) * GAMEPLAY_CROWD_MIX);
   applyDocumentSettings(settings);
   return { ...settings, muted };
 }
@@ -53,8 +55,12 @@ export class SettingsPanelController {
       }
       control.addEventListener('change', () => this.commitControl(control));
     });
-    panel.querySelector('[data-action="close"]')?.addEventListener('click', () => this.close());
+    panel.querySelector('[data-action="close"]')?.addEventListener('click', () => {
+      Audio.ui();
+      this.close();
+    });
     panel.querySelector('[data-action="reset"]')?.addEventListener('click', () => {
+      Audio.ui();
       this.commit(DEFAULT_SETTINGS);
     });
     panel.addEventListener('pointerdown', (event) => {
