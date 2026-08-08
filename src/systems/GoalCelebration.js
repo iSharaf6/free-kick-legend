@@ -6,6 +6,21 @@ import { scorerCardCopy } from './OutcomePresentation.js';
 
 const RESULT_FONT = '"Pixelify Sans", "Courier New", monospace';
 const STAND_TEXTURE = 'goal-celebration-stand-v1';
+// Rows 0..101 of the celebration plate are night sky, five firework bursts and
+// the two floodlight banks, on near-black. The photographic crowd starts
+// creeping into the bottom corners around row 102 and takes the frame over by
+// row 144. Measured on the checked-in art, whose bytes are hash-pinned by
+// test/goal-celebration-assets.test.js and are not modified here.
+const STAND_SKY_FRAME = 'goal-celebration-sky';
+const STAND_SKY_ROWS = 102;
+// Where that band lands on the stand.
+//
+// Drawn from y=0 - as the full-plate version was - the shells sit at logical
+// y 9..24, which is the strip the match HUD and the cup chip occupy, so the
+// pyrotechnics were almost entirely behind the interface. Dropping the band
+// puts the bursts over the upper tiers, where there is nothing in front of
+// them and the supporters they are lighting are visible in the same frame.
+const STAND_SKY_TOP = 14;
 const PYRO_TEXTURE = 'goal-pyro-fountain-v1';
 const PYRO_ANIM = 'goal-pyro-fountain-burst-v1';
 
@@ -65,18 +80,50 @@ export class GoalCelebration {
     this.after(1050, () => this.stop());
   }
 
+  /**
+   * Pyrotechnics over the stand.
+   *
+   * This used to draw the whole 960x218 celebration plate opaquely at 480x109,
+   * so every goal replaced the stadium's own crowd with a second,
+   * semi-photographic one for a second: a hard cut between two drawing styles,
+   * and the moment the supporters were doing their most interesting work was
+   * the moment they were hidden behind a photograph of a different crowd.
+   *
+   * Only the sky band is used now, composited additively. The source is close
+   * to black above row 144, so the shells and floodlight bursts add themselves
+   * over the real stand while the photographed supporters below are never
+   * sampled at all. The pixel crowd keeps celebrating underneath, lit by the
+   * fireworks going off above it.
+   */
   showCelebrationStand(reduced) {
     const scene = this.scene;
     if (!scene.textures?.exists?.(STAND_TEXTURE)) return;
 
-    // 960x218 -> 480x109: exact source aspect, never stretched.
-    const stand = this.track(scene.add.image(GAME_W / 2, 0, STAND_TEXTURE)
+    const texture = scene.textures.get(STAND_TEXTURE);
+    if (!texture.has(STAND_SKY_FRAME)) {
+      const width = texture.source?.[0]?.width ?? 960;
+      texture.add(STAND_SKY_FRAME, 0, 0, 0, width, STAND_SKY_ROWS);
+    }
+
+    // Uniform half scale: 960 source pixels become the 480 stand, and a single
+    // scalar cannot stretch one axis the way a width/height pair can.
+    const stand = this.track(scene.add.image(GAME_W / 2, STAND_SKY_TOP, STAND_TEXTURE, STAND_SKY_FRAME)
       .setOrigin(0.5, 0)
-      .setDisplaySize(GAME_W, 109)
+      .setScale(0.5)
       .setDepth(1.34)
-      .setAlpha(reduced ? 0.9 : 0));
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setAlpha(reduced ? 0.7 : 0));
     if (!reduced) {
-      scene.tweens.add({ targets: stand, alpha: 1, duration: 95, ease: 'Quad.easeOut' });
+      scene.tweens.add({ targets: stand, alpha: 0.88, duration: 110, ease: 'Quad.easeOut' });
+      // Light fades, it does not vanish. Without this the shells cut out on the
+      // frame the celebration is torn down.
+      scene.tweens.add({
+        targets: stand,
+        alpha: 0,
+        delay: 620,
+        duration: 380,
+        ease: 'Quad.easeIn'
+      });
     }
   }
 

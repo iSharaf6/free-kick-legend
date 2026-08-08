@@ -18,7 +18,8 @@ A polished, portal-ready pixel football game built with Phaser 3 and Vite. Draw 
 - Versioned saves with v1 migration, validation, settings, lifetime stats, daily streaks/claims, achievements, and CrazyGames Data fallback.
 - CrazyGames SDK v3 lifecycle, cloud-data, completion, happy-time, and natural-break ad hooks; the bridge remains safe when the SDK is disabled or unavailable.
 - True 1920×1080 Full-HD rendering over stable logical coordinates, 4× text rasterization, high-density original striker/keeper/defender sprites, a purpose-built pixel pitch whose mowing converges on the camera's own vanishing line, responsive safe areas, and layered synthesized stadium audio.
-- A layered stadium: two aspect-locked crowd tiers that read as depth rather than one flat band, a CALYNX hoarding run in six colourways and uneven widths, stewards, a photographers' pit, broadcast camera positions, stand entrances and wind-lean corner flags. The hoardings are a physical backstop - shots that miss thump into the advertising and rebound onto the pitch.
+- A layered stadium: a three-tier supporters' end with no repeat in it, a CALYNX hoarding run in six colourways and uneven widths, stewards, a photographers' pit, broadcast camera positions and wind-lean corner flags. The hoardings are a physical backstop - shots that miss thump into the advertising and rebound onto the pitch.
+- The stand is built, not tiled. The authored 1819×308 supporter strip is cut into 29 vertical slices along columns that fall in the shadow between two people, and every tier lays those slices down in its own seeded bag shuffle, sampling a different horizontal band of the artwork at its own uniform scale. No slice repeats within twelve seats of itself, mirroring is a per-slice coin flip rather than index parity, and each tier overlaps the one behind it — so there is no tile period to spot, no mirror line, and no seam that can open. Concrete barriers carrying tifo, vomitories, floodlight pools, roof shadow and corner falloff sit between the tiers; flags, flares and camera flashes sit above them. A goal sends a wave travelling across the stand, and the authored pyrotechnics composite additively over the crowd instead of replacing it.
 - Hoop challenges drawn as one continuous golden thread running from the ball through every gate to the finish, with the gates as pixel-rim eyes on it that light one at a time - so the route reads without the objective text. Gate centres are sampled from real scoring trajectories rather than placed by eye, which is what makes them threadable at all.
 - Aim before you commit: a predicted opening arc from the real solver (wind, drag and curl included), a goal-plane reticle, a wind-drift tell, and live power/loft/curl meters.
 - Scene-scoped asset streaming. Boot fetches the menu chrome plus the one equipped striker; the menu and cup browser warm the goalkeeper/defender match pack into the HTTP cache while the player reads the screen, and the locker streams only the still frames its grid draws. Measured on the production build at 1280×720, that is 22 requests and 3.72 MB before first paint instead of 214 requests and 13.05 MB, and time-to-interactive on a 5 Mbps connection falls from 19.8 s to 4.6 s.
@@ -77,7 +78,8 @@ src/
 │   ├── PlatformService.js      no-op-safe CrazyGames/portal bridge
 │   └── AudioSynth.js           generated match and UI audio
 ├── art/
-│   ├── CrowdPanorama.js        aspect-locked, layered supporter tiers
+│   ├── CrowdStand.js           shuffled, non-repeating supporter tiers
+│   ├── StandDressing.js        barriers, tifo, vomitories, stand lighting
 │   └── PuppetTextures.js       generated rig textures
 ├── objects/
 │   ├── Ball.js                 fixed-step pseudo-3D solver
