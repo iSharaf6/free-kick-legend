@@ -47,7 +47,7 @@ import {
   drawPanel, addScanlines, configureHdCamera, crispText, FONT
 } from '../ui.js';
 import { PAL } from '../pixelart.js';
-import { addCrowdTiers } from '../art/CrowdPanorama.js';
+import { addCrowdStand } from '../art/CrowdStand.js';
 import { buildPitchMarkingLayout, PITCH_MARKING_DIMENSIONS } from '../art/PitchMarkings.js';
 import { queueKeeperSheets } from '../data/keeperAssets.js';
 
@@ -104,10 +104,6 @@ const TRACKSIDE_LAYOUT = Object.freeze([
   Object.freeze({ texture: 'trackside-photographer', x: 372, y: 96, w: 18, h: 27, flip: true, flash: 3300 }),
   Object.freeze({ texture: 'trackside-camera', x: 441, y: 100, w: 17, h: 40 })
 ]);
-
-// Vomitories cut into the stand. Dark gaps at a believable rhythm give the
-// crowd somewhere to have come from.
-const STAND_ENTRANCES = Object.freeze([64, 186, 302, 424]);
 
 // What each hazard actually does to the shot, in the player's language. Without
 // these the effects are indistinguishable from bugs: a heavier ball reads as
@@ -938,31 +934,15 @@ export class GameScene extends Phaser.Scene {
       this.crowdImage.setTint(atmosphereTint ? mixColor(atmosphereTint, 0x4a5a6b, 0.72) : 0x64748a);
     }
 
-    // Two aspect-locked tiers: far/small/dark behind, near/large in front.
+    // Three tiers of shuffled panorama slices, back to front, plus the
+    // structure, lighting and props that turn them into a stand. The controller
+    // owns all of it, including the vomitories this method used to draw itself.
     this.crowdTiers?.destroy?.();
-    this.crowdTiers = addCrowdTiers(this, {
+    this.crowdTiers = addCrowdStand(this, {
       viewWidth: GAME_W,
       reducedMotion: Boolean(this.settings.reducedMotion)
     });
     this.nearCrowd = this.crowdTiers.tiles;
-    this.buildStandEntrances();
-  }
-
-  // Dark vomitory gaps punched through the stand. Drawn over the far tier and
-  // under the near tier so they read as openings rather than stickers.
-  buildStandEntrances() {
-    const gfx = this.add.graphics().setDepth(1.27);
-
-    for (const x of STAND_ENTRANCES) {
-      gfx.fillStyle(PAL.ink, 0.92).fillRect(x, 26, 9, 26);
-      gfx.fillStyle(PAL.night, 0.9).fillRect(x + 1, 27, 7, 24);
-      // Stair treads catching the floodlights.
-      for (let step = 0; step < 5; step++) {
-        gfx.fillStyle(PAL.border, 0.16 + step * 0.05);
-        gfx.fillRect(x + 2, 30 + step * 4, 5, 1);
-      }
-      gfx.fillStyle(PAL.borderDark, 0.8).fillRect(x, 26, 9, 1);
-    }
   }
 
   buildSecurityGuards() {

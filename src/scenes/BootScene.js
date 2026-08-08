@@ -9,7 +9,7 @@ import { AUDIO_SAMPLES, Audio } from '../systems/AudioSynth.js';
 import { MenuMusic } from '../systems/MenuMusic.js';
 import { applyDocumentSettings } from '../systems/SettingsPanel.js';
 import { makePuppetTextures } from '../art/PuppetTextures.js';
-import { CROWD_PANORAMA } from '../data/crowdPanorama.js';
+import { CROWD_STAND } from '../data/crowdStand.js';
 
 const KICKER_POSES = {
   idle: MAPS.kickerIdle,
@@ -52,7 +52,7 @@ export class BootScene extends Phaser.Scene {
   preload() {
     const base = import.meta.env.BASE_URL;
     this.load.image('pitch-grass-pixel-v3', `${base}assets/hd/pitch-grass-pixel-v3.png`);
-    this.load.image(CROWD_PANORAMA.textureKey, `${base}${CROWD_PANORAMA.assetPath}`);
+    this.load.image(CROWD_STAND.textureKey, `${base}${CROWD_STAND.assetPath}`);
     this.load.image('calynx-logo-pixel', `${base}assets/hd/calynx-logo-pixel.png`);
 
     // The menu hero wears exactly one striker. Reading the save this early is
@@ -304,7 +304,7 @@ export class BootScene extends Phaser.Scene {
     g.destroy();
   }
 
-  drawStadium(g, h, includeProceduralCrowd = true) {
+  drawStadium(g, h) {
     // Cool dawn sky behind a hard-edged roof and two deep crowd tiers.
     g.fillStyle(PAL.sky, 1);
     g.fillRect(0, 0, GAME_W, h);
@@ -331,67 +331,25 @@ export class BootScene extends Phaser.Scene {
       for (let i = 0; i < 4; i++) g.fillRect(x + i * 3, 16, 2, 1);
     }
 
-    const crowdPalette = [
-      0xd7a26b, 0x9c6548, 0xf0d7ad, 0x346c91, 0x244866,
-      0xb44137, 0x6e3441, 0xd6b63d, 0x42794c, 0x727c91,
-      0xe07a5f, 0x3d405b, 0x81b29a, 0xf2cc8f, 0x9b5de5
-    ];
-    const drawTier = (y0, y1, cell, seed) => {
-      g.fillStyle(PAL.night, 1);
-      g.fillRect(0, y0, GAME_W, y1 - y0);
-      if (!includeProceduralCrowd) return;
-      for (let y = y0 + 1; y < y1 - 1; y += cell) {
-        // Vertical depth shading: back rows (near y0) are darker than front rows (near y1)
-        const rowProgress = (y - y0) / (y1 - y0);
-        const rowShade = 0.55 + rowProgress * 0.45;
+    // The empty stand the supporters sit on. One continuous mass now, rather
+    // than two slabs with a lit ledge baked between them at y=55: the fascias,
+    // railings and vomitories are drawn per scene by StandDressing at the tier
+    // boundaries the new crowd actually uses, and a baked ledge at the old
+    // position would run straight through the middle of a tier of faces.
+    //
+    // The per-pixel procedural supporters that used to live here went with it.
+    // Both call sites had passed `false` since the authored panorama landed, so
+    // that generator had been unreachable for its entire remaining life.
+    g.fillStyle(PAL.night, 1);
+    g.fillRect(0, 14, GAME_W, h - 22);
 
-        for (let x = 0; x < GAME_W; x += cell) {
-          const r = hash01(x, y, seed);
-          if (r < 0.12) continue;
-          const color = crowdPalette[Math.floor(hash01(x + 9, y + 4, seed) * crowdPalette.length)];
-          g.fillStyle(color, (0.68 + hash01(x + 3, y + 7, seed) * 0.3) * rowShade);
-          g.fillRect(x, y, Math.max(1, cell - 2), Math.max(1, cell - 2));
-
-          // Phone flash or bright highlight pixel (~3% chance)
-          if (hash01(x + 19, y + 11, seed) > 0.97) {
-            g.fillStyle(0xffffff, 0.85 * rowShade);
-            g.fillRect(x, y, 1, 1);
-          } else if (hash01(x + 13, y, seed) > 0.84) {
-            g.fillStyle(PAL.cream, 0.55 * rowShade);
-            g.fillRect(x, y - 1, Math.max(1, cell - 3), 1);
-          }
-        }
-      }
-    };
-
-    drawTier(28, 55, 2, 41);
-    
-    // Roof overhang shadow band (casting shadow over top rows of upper stand)
-    g.fillStyle(PAL.ink, 0.45);
-    g.fillRect(0, 28, GAME_W, 6);
-
-    // Tier break & structural ledge between upper and lower stands
-    g.fillStyle(PAL.ink, 1);
-    g.fillRect(0, 55, GAME_W, 4);
-    g.fillStyle(PAL.borderDark, 1);
-    g.fillRect(0, 55, GAME_W, 1);
-    g.fillStyle(PAL.cream, 0.35);
-    g.fillRect(0, 58, GAME_W, 1);
-
-    drawTier(59, h - 8, 3, 83);
-
-    // Balcony overhang shadow band (casting shadow over top rows of lower stand)
-    g.fillStyle(PAL.ink, 0.38);
-    g.fillRect(0, 59, GAME_W, 5);
-
-    // Railings separate the stand into believable sections.
-    g.lineStyle(1.2, PAL.borderDark, 0.7);
-    for (const x of [96, 192, 288, 384]) {
-      g.lineBetween(x - 5, 30, x + 1, 55);
-      g.lineBetween(x + 1, 60, x + 5, h - 8);
-    }
-    g.fillStyle(PAL.border, 0.72);
-    g.fillRect(0, 58, GAME_W, 1);
+    // Rear wall under the roof, and the shadow it throws down the back rows.
+    g.fillStyle(PAL.ink, 0.9);
+    g.fillRect(0, 14, GAME_W, 8);
+    g.fillStyle(PAL.ink, 0.5);
+    g.fillRect(0, 22, GAME_W, 5);
+    g.fillStyle(PAL.ink, 0.28);
+    g.fillRect(0, 27, GAME_W, 4);
 
     // Fictional sponsor rhythm; no real-world branding.
     g.fillStyle(PAL.ink, 1);
@@ -407,15 +365,15 @@ export class BootScene extends Phaser.Scene {
 
   makeCrowd() {
     const g = this.add.graphics();
-    // Gameplay receives the authored panorama on top of this empty stand.
-    this.drawStadium(g, STADIUM_Y, false);
+    // Gameplay receives the authored supporters on top of this empty stand.
+    this.drawStadium(g, STADIUM_Y);
     g.generateTexture('crowd', GAME_W, STADIUM_Y);
     g.destroy();
   }
 
   makeStadiumBackdrop() {
     const g = this.add.graphics();
-    this.drawStadium(g, STADIUM_Y, false);
+    this.drawStadium(g, STADIUM_Y);
 
     // Matchday pitch, with perspective mowing bands and converging touchlines.
     g.fillStyle(PAL.grass, 1);

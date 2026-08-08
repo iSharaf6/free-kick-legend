@@ -12,7 +12,7 @@ import { LEVELS } from '../data/levels.js';
 import { PAL } from '../pixelart.js';
 import { Kicker } from '../objects/Kicker.js';
 import { utcDateKey } from '../data/progression.js';
-import { addAnimatedCrowdPanorama } from '../art/CrowdPanorama.js';
+import { addMenuCrowd } from '../art/CrowdStand.js';
 import { getCosmetic } from '../data/cosmetics.js';
 import { prefetchMatchPack } from '../data/matchAssets.js';
 
@@ -370,9 +370,15 @@ export class MenuScene extends Phaser.Scene {
     addCoverRegion(this, 'pitch-grass-pixel-v3', GAME_W / 2, (STADIUM_Y + GAME_H) / 2,
       GAME_W, GAME_H - STADIUM_Y, 1);
     const settings = SaveManager.getSettings?.() || {};
-    addAnimatedCrowdPanorama(this, {
+    // Kept on the scene so its ambient timer is torn down explicitly rather
+    // than being left for Phaser's shutdown to collect.
+    this.crowdStand = addMenuCrowd(this, {
       depth: 2,
       reducedMotion: Boolean(settings.reducedMotion)
+    });
+    this.events.once('shutdown', () => {
+      this.crowdStand?.destroy?.();
+      this.crowdStand = null;
     });
     this.makeSponsorBoards();
     this.drawComposition();
