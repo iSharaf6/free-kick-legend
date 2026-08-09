@@ -364,7 +364,8 @@ test('goal celebration layers animated generated pixel art, useful scorer data, 
   expect(await page.evaluate(() => window.__audio.lastSample)).toMatchObject({
     name: 'post',
     key: 'audio-post-impact',
-    duration: 0.82
+    start: 0.9,
+    duration: 0.5
   });
 });
 

@@ -40,7 +40,7 @@ export const WALL_DIST = 9.15;
 export const PHYS = {
   gravity: 9.81,
   drag: 0.10,          // linear air drag per second, applied to full air-relative velocity
-  magnus: 0.25,        // sidespin coefficient; lateral accel scales with forward speed
+  magnus: 0.32,        // sidespin coefficient; lateral accel scales with forward speed
   spinDecay: 0.32,     // exponential decay per second
   bounce: 0.42,
   impactFriction: 0.92,
@@ -63,14 +63,18 @@ export const SHOT = {
   vyPerPx: 0.052,   // vertical m/s per vertical swipe pixel
   minVy: 1.8,
   maxVy: 11.5,
-  maxSpin: 1.0,
+  // Curl is the hardest thing in the game to execute, so it gets the biggest
+  // payoff: a fully bowed swipe now bends visibly around a wall instead of
+  // drifting. Ball.kick still clamps the stored spin at +-1.5.
+  maxSpin: 1.35,
   spinPx: 22,
   minSpeedPxMs: 0.10,
-  // A normal decisive flick used to hit the ceiling almost immediately: even
-  // a minimum-length 26px logical gesture could read 95% power. Preserve the
-  // speed-based control, but give touch and mouse players a useful middle
-  // third before only genuinely fast releases reach maximum power.
-  maxSpeedPxMs: 1.35,
+  // Speed-based power, but the ceiling has to be reachable. At 1.35 px/ms the
+  // top of the curve sat beyond what a decisive flick actually produces, so a
+  // hard shot and a merely firm one landed on the same stretch of the ramp and
+  // the game lost its aggression. 1.05 keeps the useful middle third the
+  // previous retune bought while putting maximum power back within reach.
+  maxSpeedPxMs: 1.05,
   maxSamples: 32,
   resampleCount: 12,
   minSwipePx: 22    // shorter swipes are ignored

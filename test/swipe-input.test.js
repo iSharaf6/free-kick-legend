@@ -81,11 +81,18 @@ test('power calibration leaves room for weak, medium and maximum-speed shots', (
   const powerful = shot(120, 72);
   const minimumFastFlick = shot(26, 40);
 
+  // Recalibrated with SHOT.maxSpeedPxMs at 1.05. The old 1.35 ceiling sat past
+  // what a decisive flick actually produces, so a hard shot and a merely firm
+  // one shared the same stretch of the ramp and the game read as toothless. An
+  // ordinary flick now sits in the upper half of the curve by design; the
+  // properties still worth protecting are that a slow drag stays weak, that
+  // maximum power remains reachable, and that neither an ordinary nor a
+  // minimum-length flick can arrive there by accident.
   assert.ok(weak.power < 0.1, `slow drag should stay weak, got ${weak.power}`);
-  assert.ok(medium.power > 0.4 && medium.power < 0.6,
-    `ordinary flick should land in the useful middle band, got ${medium.power}`);
+  assert.ok(medium.power > 0.55 && medium.power < 0.75,
+    `ordinary flick should land in the upper-middle band, got ${medium.power}`);
   assert.equal(powerful.power, 1, 'a genuinely fast, long release can still reach maximum power');
-  assert.ok(minimumFastFlick.power < 0.5,
+  assert.ok(minimumFastFlick.power < 0.7,
     `minimum-length flick must not jump to maximum power, got ${minimumFastFlick.power}`);
 });
 

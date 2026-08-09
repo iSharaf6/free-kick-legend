@@ -1,15 +1,30 @@
+// The supplied clips ship byte-for-byte, and each was recorded with a long
+// silent lead-in: the button click does not start until 432ms, the post impact
+// not until 900ms. Playing them from 0 meant the marker window expired inside
+// that silence, so both samples were audibly dead while still reporting success
+// and suppressing the synth fallback. `start` is the measured onset of each
+// clip; `duration` runs from there to the end of its decay.
 export const AUDIO_SAMPLES = Object.freeze({
   ui: Object.freeze({
     key: 'audio-ui-button-press',
     path: 'assets/audio/ui-button-press.mp3',
-    duration: 0.18,
+    start: 0.545,
+    duration: 0.22,
     volume: 0.5
   }),
   post: Object.freeze({
     key: 'audio-post-impact',
     path: 'assets/audio/post-impact.mp3',
-    duration: 0.82,
+    start: 0.9,
+    duration: 0.5,
     volume: 0.72
+  }),
+  strike: Object.freeze({
+    key: 'audio-ball-strike',
+    path: 'assets/audio/ball-strike.mp3',
+    start: 0.592,
+    duration: 0.3,
+    volume: 0.62
   })
 });
 
@@ -77,7 +92,7 @@ export class Synth {
     }
   }
 
-  _playSample(name, { rate = 1 } = {}) {
+  _playSample(name, { rate = 1, gain = 1 } = {}) {
     const sample = AUDIO_SAMPLES[name];
     const manager = this.soundManager;
     if (!sample || this.muted || !manager?.add) return false;
@@ -87,8 +102,9 @@ export class Synth {
       sound = manager.add(sample.key);
       if (!sound?.addMarker) return false;
       const marker = `fkl-${name}`;
-      sound.addMarker({ name: marker, start: 0, duration: sample.duration });
-      const voice = { sound, mix: sample.volume };
+      sound.addMarker({ name: marker, start: sample.start ?? 0, duration: sample.duration });
+      const mix = sample.volume * Math.max(0, gain);
+      const voice = { sound, mix };
       let cleaned = false;
       const cleanup = () => {
         if (cleaned) return;
@@ -100,7 +116,7 @@ export class Synth {
       sound.once?.('stop', cleanup);
       this.activeSamples.add(voice);
       const played = sound.play(marker, {
-        volume: this.volume * sample.volume,
+        volume: this.volume * mix,
         rate
       });
       if (!played) {
@@ -110,9 +126,10 @@ export class Synth {
       this.lastSample = {
         name,
         key: sample.key,
+        start: sample.start ?? 0,
         duration: sample.duration,
         rate,
-        volume: this.volume * sample.volume
+        volume: this.volume * mix
       };
       return true;
     } catch {
@@ -200,8 +217,26 @@ export class Synth {
 
   kick(power = 0.75) {
     const p = Math.max(0.25, Math.min(1, power));
-    this._tone({ freq: 145 + p * 35, end: 42, time: 0.09 + p * 0.04, type: 'sine', vol: 0.3 + p * 0.24 });
-    this._noise({ time: 0.045 + p * 0.025, vol: 0.08 + p * 0.08, freq: 2100 + p * 900 });
+    // Recorded boot-on-ball contact carries the crack; a harder strike plays
+    // fractionally slower so it reads fuller rather than merely louder.
+    const sampled = this._playSample('strike', {
+      rate: 1.07 - p * 0.14,
+      gain: 0.72 + p * 0.38
+    });
+    // Sub-thump under the sample. When the clip is unavailable the synth still
+    // has to carry the whole strike, so it comes back up to its original level.
+    this._tone({
+      freq: 145 + p * 35,
+      end: 42,
+      time: 0.09 + p * 0.05,
+      type: 'sine',
+      vol: sampled ? 0.16 + p * 0.16 : 0.3 + p * 0.24
+    });
+    this._noise({
+      time: 0.045 + p * 0.025,
+      vol: sampled ? 0.03 + p * 0.03 : 0.08 + p * 0.08,
+      freq: 2100 + p * 900
+    });
   }
 
   whoosh(amount = 0.5) {
@@ -220,10 +255,15 @@ export class Synth {
   }
 
   goal() {
+    // A goal opens on impact, not on melody. The low hit lands first and the
+    // fanfare arrives on top of it, so scoring reads as a thump the stadium
+    // answers rather than as four polite chimes.
+    this._tone({ freq: 132, end: 48, time: 0.34, type: 'sine', vol: 0.4 });
+    this._noise({ time: 0.16, vol: 0.1, freq: 320, rampUp: 0.008 });
     [523, 659, 784, 1047].forEach((f, i) =>
-      this._tone({ freq: f, time: 0.22, type: 'triangle', vol: 0.18, when: i * 0.09 }));
+      this._tone({ freq: f, time: 0.22, type: 'triangle', vol: 0.18, when: 0.05 + i * 0.09 }));
     this.cheer();
-    this._tone({ freq: 1760, end: 2240, time: 0.28, type: 'sine', vol: 0.06, when: 0.22 });
+    this._tone({ freq: 1760, end: 2240, time: 0.28, type: 'sine', vol: 0.06, when: 0.27 });
   }
 
   save() {
@@ -280,8 +320,17 @@ export class Synth {
       this._tone({ freq: f, end: f * 1.04, time: 0.2, type: 'triangle', vol: 0.12, when: i * 0.075 }));
   }
 
-  net() {
-    this._noise({ time: 0.28, vol: 0.09, freq: 1750, rampUp: 0.015 });
+  /**
+   * Ball into the netting. `force` (0..1) is the share of full match pace the
+   * ball carried in. The rope rustle alone read as a UI blip, so the weight now
+   * comes from a short low thunk under it - the cord going taut, not a swish.
+   */
+  net(force = 0.5) {
+    const f = Math.max(0, Math.min(1, force));
+    this._noise({ time: 0.2 + f * 0.16, vol: 0.07 + f * 0.07, freq: 1500 + f * 700, rampUp: 0.012 });
+    this._tone({ freq: 96 + f * 34, end: 44, time: 0.11 + f * 0.07, type: 'sine', vol: 0.1 + f * 0.2 });
+    // Second, quieter rustle a beat later: the net rebounding off the stretch.
+    this._noise({ time: 0.24, vol: 0.02 + f * 0.035, freq: 900, when: 0.075, rampUp: 0.05 });
   }
 
   tick() {

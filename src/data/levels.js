@@ -162,7 +162,8 @@ function objective(type, label, options = {}) {
     attempts: options.attempts ?? Math.max(3, (options.goals ?? 1) + 2),
     curveDirection: options.curveDirection ?? null,
     // Honor authored curve requirements; the guard only rejects impossible
-    // values (spin is capped at 1.0 by SHOT.maxSpin).
+    // values. The 0.6 ceiling stays well inside SHOT.maxSpin so an objective
+    // never demands more bend than a swipe can produce.
     minimumCurve: Math.min(options.minimumCurve ?? 0, 0.6),
     maximumHeight: options.maximumHeight ?? null,
     minimumHeight: options.minimumHeight ?? null,

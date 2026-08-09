@@ -52,7 +52,8 @@ test('menu music unlocks once, survives every menu panel, and persists mute', as
     expect(await page.evaluate(() => window.__audio?.lastSample)).toMatchObject({
       name: 'ui',
       key: 'audio-ui-button-press',
-      duration: 0.18
+      start: 0.545,
+      duration: 0.22
     });
     expect(await page.evaluate(() => ({
       active: window.__menuMusic.getState().active,
