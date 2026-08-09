@@ -349,16 +349,6 @@ function makeHeaderControl(scene, x, y, w, h, opts, onClick) {
   return container;
 }
 
-function playerRatings(player) {
-  const gameplay = player?.gameplay ?? {};
-  return {
-    POWER: Phaser.Math.Clamp(Math.round(78 + (gameplay.powerMultiplier ?? 1) * 12), 70, 99),
-    CURVE: Phaser.Math.Clamp(Math.round(74 + (gameplay.spinMultiplier ?? 1) * 15), 70, 99),
-    ACCURACY: Phaser.Math.Clamp(Math.round(68 + (gameplay.previewFraction ?? 0.55) * 37), 70, 99),
-    SPEED: Phaser.Math.Clamp(Math.round(75 + (gameplay.lateralMultiplier ?? 1) * 13), 70, 99)
-  };
-}
-
 export class MenuScene extends Phaser.Scene {
   constructor() {
     super('Menu');
@@ -380,9 +370,6 @@ export class MenuScene extends Phaser.Scene {
     this.events.once('shutdown', () => {
       this.crowdStand?.destroy?.();
       this.crowdStand = null;
-      this.heroBallTween?.remove?.();
-      this.heroBallTween = null;
-      this.heroBall = null;
     });
     this.makeSponsorBoards();
     this.drawComposition();
@@ -604,7 +591,6 @@ export class MenuScene extends Phaser.Scene {
 
   makeHero(equippedKit, equippedCharacter, totalStars) {
     const player = getCosmetic(equippedCharacter) || getCosmetic('character-mica');
-    const ratings = playerRatings(player);
     const card = this.add.graphics().setDepth(150);
     drawPremiumPanel(card, 28, 202, 192, 65, {
       fill: 0x0b1d30,
@@ -658,31 +644,23 @@ export class MenuScene extends Phaser.Scene {
     card.fillRect(36, 236, 176, 1);
 
     const rows = [
-      ['POWER', ratings.POWER, 0xef633e],
-      ['CURVE', ratings.CURVE, 0xa95adb],
-      ['ACCURACY', ratings.ACCURACY, 0x3aa9d8],
-      ['SPEED', ratings.SPEED, 0x66bf51]
+      ['ROLE', player.archetype.toUpperCase(), 0xf3c449],
+      ['SIGNATURE', player.gameplay.ability.toUpperCase(), 0x6ee1df],
+      ['SHOT', player.gameplay.summary.toUpperCase(), 0xc5d2dc]
     ];
     rows.forEach(([label, value, color], index) => {
-      const y = 242 + index * 6;
+      const y = 243 + index * 8;
       menuText(this, 38, y, label, {
         fontFamily: PIXEL_FONT,
-        fontSize: '6px',
-        color: CREAM,
+        fontSize: '5px',
+        color: '#7895ad',
         letterSpacing: 0.2
       }).setDepth(154);
-      card.fillStyle(INK, 1);
-      card.fillRect(91, y - 2, 104, 4);
-      card.fillStyle(0x29445a, 1);
-      card.fillRect(92, y - 1, 102, 2);
-      card.fillStyle(color, 1);
-      card.fillRect(92, y - 1, Math.round(102 * value / 100), 2);
-      menuText(this, 211, y, String(value), {
-        originX: 1,
-        fontFamily: DISPLAY_FONT,
-        fontSize: '9px',
-        color: CREAM,
-        letterSpacing: 0
+      menuText(this, 76, y, String(value), {
+        fontFamily: PIXEL_FONT,
+        fontSize: index === 2 ? '4.5px' : '5.5px',
+        color: `#${color.toString(16).padStart(6, '0')}`,
+        letterSpacing: index === 2 ? 0 : 0.12
       }).setDepth(154);
     });
 
@@ -698,33 +676,6 @@ export class MenuScene extends Phaser.Scene {
       ambient: false,
       reducedMotion: this.reducedMotion
     });
-    const ballKey = SaveManager.getEquippedCosmetic?.('ball') || 'ball-classic';
-    const texture = this.textures.exists(ballKey) ? ballKey : 'ball-classic';
-    this.add.image(176, 198, 'shadow')
-      .setDisplaySize(17, 4)
-      .setAlpha(0.52)
-      .setDepth(144);
-    this.heroBall = this.add.image(176, 189, texture).setDepth(145);
-    this.heroBall.setScale(18 / (this.heroBall.texture.source[0]?.width || 12));
-    this.syncHeroBallMotion();
-  }
-
-  syncHeroBallMotion(reduced = this.reducedMotion) {
-    this.heroBallTween?.remove?.();
-    this.heroBallTween = null;
-    this.tweens.killTweensOf?.(this.heroBall);
-    if (!this.heroBall?.active) return;
-    if (reduced) {
-      this.heroBall.setRotation(0);
-      return;
-    }
-    this.heroBallTween = this.tweens.add({
-      targets: this.heroBall,
-      rotation: Math.PI * 2,
-      duration: 3200,
-      ease: 'Linear',
-      repeat: -1
-    });
   }
 
   syncAmbientMotion(reduced) {
@@ -736,7 +687,6 @@ export class MenuScene extends Phaser.Scene {
       else this.kicker.resumeAmbient?.();
       this.kicker.applyTransform?.();
     }
-    this.syncHeroBallMotion(this.reducedMotion);
   }
 
   makeActions(continueIndex, daily, today) {

@@ -18,15 +18,16 @@ import { CROWD_STAND, crowdRandom } from '../data/crowdStand.js';
 const FLAG_TEXTURE = 'crowd-flag-v1';
 const GLOW_TEXTURE = 'crowd-glow-v1';
 
-// Colours supporters actually bring to a ground: club colours, not a rainbow.
+// One coherent fictional club identity: midnight navy, matchday gold and warm
+// scarf cream. Keeping every flag in this family makes the end read as a home
+// support rather than a row of unrelated racing markers.
 const FLAG_COLOURS = Object.freeze([
-  0xd75a3a, 0xf3c449, 0x2d74b9, 0xf3e7c3, 0x49a760, 0xb4423a
+  0x17365d, 0xf3c449, 0x17365d, 0xf3e7c3, 0xf3c449, 0x254f7a
 ]);
 const BANNER_COLOURS = Object.freeze([
-  Object.freeze({ cloth: 0x8d2f2a, stripe: 0xf3c449 }),
-  Object.freeze({ cloth: 0x1c3f77, stripe: 0xf3e7c3 }),
-  Object.freeze({ cloth: 0x1d5c3c, stripe: 0xf3e7c3 }),
-  Object.freeze({ cloth: 0x6a4a17, stripe: 0xffe9a8 })
+  Object.freeze({ cloth: 0x17365d, stripe: 0xf3c449, trim: 0xf3e7c3 }),
+  Object.freeze({ cloth: 0xf3c449, stripe: 0x17365d, trim: 0xf3e7c3 }),
+  Object.freeze({ cloth: 0xf3e7c3, stripe: 0x17365d, trim: 0xf3c449 })
 ]);
 
 // The floodlight bank positions baked into the stadium backdrop. Pools of light
@@ -105,19 +106,49 @@ function drawFascia(gfx, y, height, { stanchionStep = 26, lit = 0.16 } = {}) {
   gfx.fillStyle(PAL.ink, 0.24).fillRect(0, y + height + 1, 480, 1);
 }
 
-/** Draped tifo. No lettering: a misspelt banner is worse than a blank one. */
+/** Proper club tifos: scarf hoops, shirt stripes, checks and a tiny crest. */
 function drawBanners(gfx, y, random, count) {
   for (let i = 0; i < count; i++) {
-    const width = 24 + Math.floor(random() * 40);
+    const width = 34 + Math.floor(random() * 28);
     const x = Math.floor(random() * (480 - width));
-    const { cloth, stripe } = BANNER_COLOURS[Math.floor(random() * BANNER_COLOURS.length)];
-    gfx.fillStyle(cloth, 0.92).fillRect(x, y, width, 4);
-    // One dim band across the cloth, and folds where it hangs off its fixings.
-    gfx.fillStyle(stripe, 0.34).fillRect(x + 2, y + 1, width - 4, 1);
-    gfx.fillStyle(PAL.ink, 0.42).fillRect(x, y + 3, width, 1);
-    for (let fold = x + 6; fold < x + width - 4; fold += 9 + Math.floor(random() * 7)) {
-      gfx.fillStyle(PAL.ink, 0.26).fillRect(fold, y, 1, 3);
+    const { cloth, stripe, trim } = BANNER_COLOURS[i % BANNER_COLOURS.length];
+    const pattern = i % 3;
+
+    // Dark stitched outline, two hanging corners and visible rail ties.
+    gfx.fillStyle(PAL.ink, 0.96).fillRect(x - 1, y - 1, width + 2, 9);
+    gfx.fillStyle(cloth, 0.98).fillRect(x, y, width, 7);
+    gfx.fillStyle(trim, 0.9).fillRect(x, y, width, 1);
+    gfx.fillStyle(PAL.goldDark, 1).fillRect(x + 2, y - 1, 2, 1);
+    gfx.fillStyle(PAL.goldDark, 1).fillRect(x + width - 4, y - 1, 2, 1);
+
+    if (pattern === 0) {
+      // Football-shirt vertical stripes.
+      for (let sx = x + 3; sx < x + width - 2; sx += 7) {
+        gfx.fillStyle(stripe, 0.94).fillRect(sx, y + 1, 3, 6);
+      }
+    } else if (pattern === 1) {
+      // Supporters' scarf hoops.
+      gfx.fillStyle(stripe, 0.96).fillRect(x, y + 2, width, 2);
+      gfx.fillStyle(trim, 0.88).fillRect(x, y + 5, width, 1);
+    } else {
+      // Large checks that remain readable at the authored 480x270 canvas.
+      for (let cx = 0; cx < width; cx += 6) {
+        gfx.fillStyle(stripe, 0.96).fillRect(x + cx, y + 1, Math.min(3, width - cx), 3);
+        gfx.fillStyle(stripe, 0.96).fillRect(x + cx + 3, y + 4, Math.min(3, width - cx - 3), 3);
+      }
     }
+
+    // A small shield motif in the middle gives every cloth a club identity.
+    const crestX = x + Math.floor(width / 2) - 2;
+    gfx.fillStyle(PAL.ink, 1).fillRect(crestX - 1, y + 1, 6, 6);
+    gfx.fillStyle(trim, 1).fillRect(crestX, y + 1, 4, 4);
+    gfx.fillStyle(trim, 1).fillRect(crestX + 1, y + 5, 2, 1);
+    gfx.fillStyle(cloth, 1).fillRect(crestX + 1, y + 2, 2, 2);
+
+    // Stitched hem and a couple of heavy folds stop the cloth reading as UI.
+    gfx.fillStyle(PAL.ink, 0.5).fillRect(x, y + 6, width, 1);
+    gfx.fillStyle(PAL.ink, 0.34).fillRect(x + 8, y + 1, 1, 5);
+    gfx.fillStyle(PAL.ink, 0.34).fillRect(x + width - 9, y + 1, 1, 5);
   }
 }
 
@@ -200,6 +231,25 @@ export function addStandDressing(scene, {
   const lowerBarrier = track(scene.add.graphics().setDepth(at(1.25)));
   drawFascia(lowerBarrier, front.top - 4, 4, { stanchionStep: 34, lit: 0.4 });
   drawBanners(lowerBarrier, front.top - 4, random, 2);
+
+  // Exact Calynx marks turn the tier cloth into authored club banners. Text is
+  // never generated here: the checked-in pixel logo stays legible and on-model.
+  if (scene.textures.exists('calynx-logo-pixel')) {
+    const brandBack = track(scene.add.graphics().setDepth(at(1.286)));
+    const placements = [
+      [118, mid.top - 2, 0xf3c449], [360, mid.top - 2, 0x8fd9ff],
+      [176, front.top - 2, 0xf3e7c3], [306, front.top - 2, 0xf3c449]
+    ];
+    placements.forEach(([x, y, tint]) => {
+      brandBack.fillStyle(PAL.ink, 0.88).fillRect(x - 20, y - 4, 40, 8);
+      brandBack.fillStyle(PAL.borderDark, 0.76).fillRect(x - 19, y - 3, 38, 1);
+      track(scene.add.image(x, y, 'calynx-logo-pixel')
+        .setDisplaySize(31, 9.4)
+        .setTint(tint)
+        .setAlpha(0.88)
+        .setDepth(at(1.287)));
+    });
+  }
 
   // Vomitories cut up through the back tier and stop at its barrier. Carrying
   // them further down only ever showed fragments between the front rows' heads,

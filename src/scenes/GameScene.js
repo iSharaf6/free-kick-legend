@@ -44,7 +44,7 @@ import {
 } from '../systems/LevelMechanics.js';
 import {
   makeButton, makeIconButton, makeStatChip, titleText, bodyText,
-  drawPanel, addScanlines, configureHdCamera, crispText, canvasHasKeyboardFocus,
+  drawPanel, drawBroadcastFrame, addScanlines, configureHdCamera, crispText, canvasHasKeyboardFocus,
   setCanvasButtonNavigationBlocked, FONT
 } from '../ui.js';
 import { PAL } from '../pixelart.js';
@@ -99,11 +99,11 @@ const SPONSOR_BOARDS = Object.freeze([
 // as three flat stacked bands. Heights are chosen so heads and equipment clear
 // the top of the advertising boards at y=83; anything shorter is invisible.
 const TRACKSIDE_LAYOUT = Object.freeze([
-  Object.freeze({ texture: 'trackside-photographer', x: 52, y: 96, w: 18, h: 27, flip: false, flash: 2600 }),
-  Object.freeze({ texture: 'trackside-camera', x: 97, y: 100, w: 17, h: 40 }),
-  Object.freeze({ texture: 'trackside-photographer', x: 288, y: 96, w: 18, h: 27, flip: true, flash: 4100 }),
-  Object.freeze({ texture: 'trackside-photographer', x: 372, y: 96, w: 18, h: 27, flip: true, flash: 3300 }),
-  Object.freeze({ texture: 'trackside-camera', x: 441, y: 100, w: 17, h: 40 })
+  Object.freeze({ texture: 'trackside-photographer-kneel-v2', x: 44, y: 101, w: 28, h: 28, flip: false, flash: 2600 }),
+  Object.freeze({ texture: 'trackside-camera-operator-v2', x: 105, y: 103, w: 34, h: 34 }),
+  Object.freeze({ texture: 'trackside-camera-pedestal-v2', x: 294, y: 102, w: 28, h: 28, flip: true }),
+  Object.freeze({ texture: 'trackside-photographer-seat-v2', x: 370, y: 102, w: 29, h: 29, flip: true, flash: 3300 }),
+  Object.freeze({ texture: 'trackside-camera-operator-v2', x: 445, y: 103, w: 32, h: 32, flip: true })
 ]);
 
 // What each hazard actually does to the shot, in the player's language. Without
@@ -210,11 +210,12 @@ function mixColor(a, b, t) {
 }
 
 function drawTrophyResultsFrame(g, { x, y, w, h, fill = 0x0d2236 }) {
-  drawPanel(g, x, y, w, h, {
+  drawBroadcastFrame(g, x, y, w, h, {
     fill,
     border: PAL.goldDark,
     corner: PAL.gold,
-    highlight: 0x31506a
+    highlight: 0x31506a,
+    railY: 12
   });
 
   const insetX = x + 6;
@@ -886,18 +887,20 @@ export class GameScene extends Phaser.Scene {
         .setDepth(3499).setInteractive()
     );
     const panel = this.add.graphics().setDepth(3500);
-    drawPanel(panel, 90, 55, 300, 160, {
-      fill: PAL.panel, border: PAL.goldDark, corner: PAL.gold
+    drawBroadcastFrame(panel, 70, 42, 340, 186, {
+      fill: 0x0d2236, border: PAL.goldDark, corner: PAL.gold, railY: 15
     });
     objects.push(panel);
-    objects.push(titleText(this, GAME_W / 2, 80, 'MATCH PAUSED', '15px', '#f3c449').setDepth(3501));
-    objects.push(bodyText(this, GAME_W / 2, 111, 'Take a breath. Your shot is frozen exactly where you left it.', {
+    objects.push(this.add.image(101, 59, 'calynx-logo-pixel')
+      .setDisplaySize(40, 12).setTint(PAL.gold).setDepth(3501));
+    objects.push(titleText(this, GAME_W / 2, 78, 'MATCH PAUSED', '15px', '#f3c449').setDepth(3501));
+    objects.push(bodyText(this, GAME_W / 2, 108, 'SHOT FROZEN · RETURN WHEN READY', {
       originX: 0.5, originY: 0.5, align: 'center', fontSize: '7px', color: '#cfe8ff',
       wordWrap: { width: 250, useAdvancedWrap: true }
     }).setDepth(3501));
 
     const assistLabel = () => `AIM ASSIST · ${String(this.aimAssist).toUpperCase()}`;
-    const assistText = bodyText(this, GAME_W / 2, 131, assistLabel(), {
+    const assistText = bodyText(this, GAME_W / 2, 128, assistLabel(), {
       originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '7px', color: '#f3c449'
     }).setDepth(3501);
     objects.push(assistText);
@@ -923,12 +926,12 @@ export class GameScene extends Phaser.Scene {
     // Four buttons across the 300px panel: 68 wide on a 72px pitch, centred.
     const first = GAME_W / 2 - ((actions.length - 1) * 72) / 2;
     actions.forEach((action, index) => {
-      objects.push(makeButton(this, first + index * 72, 162, 68, 27, action.label, action.cb, {
+      objects.push(makeButton(this, first + index * 72, 166, 68, 27, action.label, action.cb, {
         color: action.color, hover: action.hover, border: index === 0 ? PAL.goldDark : PAL.borderDark,
         fontSize: action.label.length > 7 ? '6px' : '7px', hitHeight: 32
       }).setDepth(3501));
     });
-    objects.push(bodyText(this, GAME_W / 2, 198, 'TAB / ARROWS CHOOSE  ·  ENTER SELECTS  ·  ESC RESUMES', {
+    objects.push(bodyText(this, GAME_W / 2, 207, 'TAB / ARROWS CHOOSE  ·  ENTER SELECTS  ·  ESC RESUMES', {
       originX: 0.5, originY: 0.5, align: 'center', fontSize: '6px', color: '#8fa2ab'
     }).setDepth(3501));
     this.announceStatus('Match paused. Settings, resume, restart, and exit controls are available.');
@@ -1248,9 +1251,7 @@ export class GameScene extends Phaser.Scene {
         .setOrigin(0.5, 1)
         .setDisplaySize(spec.w, spec.h)
         .setDepth(1.42)
-        .setFlipX(Boolean(spec.flip))
-        // Muted on purpose: the pit crew is depth, not a focal point.
-        .setTint(0xb4c1cb);
+        .setFlipX(Boolean(spec.flip));
       this.tracksideObjects.push(sprite);
 
       if (!spec.flash || this.settings.reducedMotion) continue;
@@ -4208,9 +4209,11 @@ export class GameScene extends Phaser.Scene {
     const ballTexture = this.ballTexture || 'ball-classic';
     const crestBall = this.add.image(240, 27.5, ballTexture)
       .setDisplaySize(21, 21).setDepth(3002);
+    const resultBrand = this.add.image(95, 40, 'calynx-logo-pixel')
+      .setDisplaySize(40, 12).setTint(PAL.gold).setDepth(3002);
     const headline = titleText(this, GAME_W / 2, 68, 'LEVEL CLEAR', '25px', '#f3c449')
       .setDepth(3002);
-    overlayObjects.push(crestBall, headline);
+    overlayObjects.push(crestBall, resultBrand, headline);
 
     const earnedStars = Phaser.Math.Clamp(Number(stars) || 0, 0, 3);
     for (let i = 0; i < 3; i++) {

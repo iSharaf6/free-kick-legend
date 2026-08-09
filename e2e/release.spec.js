@@ -238,7 +238,7 @@ test('live swipe copy clears the gesture and feedback lanes', async ({ page }) =
   expect(lanes.readoutY - lanes.hintY).toBeGreaterThan(30);
 });
 
-test('goal celebration layers authored stand art, fountain sprites, useful scorer data, and fitted typography', async ({ page }) => {
+test('goal celebration layers static generated pixel art, useful scorer data, and fitted typography', async ({ page }) => {
   const game = new GamePage(page);
   await game.open({ width: 1280, height: 720 });
   await page.evaluate(() => {
@@ -293,8 +293,9 @@ test('goal celebration layers authored stand art, fountain sprites, useful score
   expect(goal.bounds.right).toBeLessThan(472);
   expect(goal.layers).toEqual(expect.arrayContaining([1.34, 2220]));
   expect(goal.textures).toEqual(expect.arrayContaining([
-    'goal-celebration-stand-v1',
-    'goal-pyro-fountain-v1'
+    'goal-pyro-fountain-v1',
+    'goal-flare-static-v2',
+    'goal-flags-static-v2'
   ]));
   expect(goal.fountains).toHaveLength(2);
   expect(goal.fountains[0].x).toBeGreaterThan(100);

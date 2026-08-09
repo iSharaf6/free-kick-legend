@@ -102,12 +102,14 @@ export class LockerScene extends Phaser.Scene {
     }).setDepth(104);
     titleText(this, 59, 18, 'MATCHDAY LOCKER', '14px', '#f3e7c3')
       .setOrigin(0, 0.5).setDepth(104);
-    bodyText(this, 292, 18, 'PLAY STYLES  ·  KITS STAY COSMETIC', {
+    bodyText(this, 286, 18, 'VISUAL IDENTITY', {
       originX: 0.5,
       fontSize: '5px',
       color: '#8fa2ab',
       letterSpacing: 0.26
     }).setDepth(104);
+    this.add.image(359, 18, 'calynx-logo-pixel')
+      .setDisplaySize(38, 11.5).setTint(PAL.gold).setDepth(104);
     this.coinChip = makeStatChip(this, 425, 18, 80, 'icon-coin', formatCompact(SaveManager.getCoins()), {
       height: 21,
       fill: PAL.night,
@@ -178,8 +180,6 @@ export class LockerScene extends Phaser.Scene {
   }
 
   clearContent() {
-    this.previewTween?.stop();
-    this.previewTween = null;
     this.kicker?.destroy();
     this.kicker = null;
     if (this.contentLayer) {
@@ -235,26 +235,6 @@ export class LockerScene extends Phaser.Scene {
       reducedMotion: this.reducedMotion
     });
 
-    const ballId = this.category === 'ball'
-      ? selected.id
-      : SaveManager.getEquippedCosmetic('ball');
-    const ballKey = this.textures.exists(ballId) ? ballId : 'ball-classic';
-    const ball = this.add.image(160, 211, ballKey).setDepth(143);
-    const ballGameplay = getCosmetic(ballId)?.gameplay;
-    ball.setScale((19 / (ball.texture.source[0]?.width || 12)) * (ballGameplay?.visualScale ?? 1));
-    this.contentLayer.add(ball);
-    if (!this.reducedMotion) {
-      this.previewTween = this.tweens.add({
-        targets: ball,
-        y: 204,
-        rotation: Math.PI * 2,
-        duration: 1500,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.easeInOut'
-      });
-    }
-
     const trailId = this.category === 'trail'
       ? selected.id
       : SaveManager.getEquippedCosmetic('trail');
@@ -271,7 +251,7 @@ export class LockerScene extends Phaser.Scene {
       this.contentLayer.add(line);
     }
 
-    const selectedLabel = bodyText(this, 104, 244, 'LIVE PLAYER PREVIEW', {
+    const selectedLabel = bodyText(this, 104, 244, 'MATCHDAY PLAYER PREVIEW', {
       originX: 0.5,
       fontSize: '6px',
       color: '#9fb3ba',

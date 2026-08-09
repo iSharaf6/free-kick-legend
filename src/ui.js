@@ -332,6 +332,26 @@ export function drawPanel(g, x, y, w, h, opts = {}) {
   return g;
 }
 
+/** Shared full-screen/menu chrome: one inset frame and one gold broadcast rail. */
+export function drawBroadcastFrame(g, x, y, w, h, opts = {}) {
+  drawPanel(g, x, y, w, h, {
+    fill: opts.fill ?? 0x0d2236,
+    border: opts.border ?? PAL.goldDark,
+    corner: opts.corner ?? PAL.gold,
+    highlight: opts.highlight ?? 0x31506a,
+    alpha: opts.alpha
+  });
+  const inset = opts.inset ?? 6;
+  g.fillStyle(PAL.borderDark, 0.88).fillRect(x + inset, y + inset, w - inset * 2, 1);
+  g.fillStyle(PAL.borderDark, 0.88).fillRect(x + inset, y + inset, 1, h - inset * 2);
+  g.fillStyle(PAL.ink, 0.9).fillRect(x + inset, y + h - inset - 1, w - inset * 2, 1);
+  g.fillStyle(PAL.ink, 0.9).fillRect(x + w - inset - 1, y + inset, 1, h - inset * 2);
+  const railY = y + (opts.railY ?? 13);
+  g.fillStyle(PAL.goldDark, 0.9).fillRect(x + 10, railY, w - 20, 2);
+  g.fillStyle(PAL.gold, 0.95).fillRect(x + 18, railY, Math.max(18, w * 0.22), 1);
+  return g;
+}
+
 function drawButton(g, w, h, fill, state, opts, focused = false) {
   const pressed = state === 'pressed';
   const disabled = state === 'disabled';

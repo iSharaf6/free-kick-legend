@@ -78,6 +78,8 @@ export class ProgressScene extends Phaser.Scene {
       color: '#8fa2ab',
       letterSpacing: 0.35
     }).setDepth(104);
+    this.add.image(361, 19, 'calynx-logo-pixel')
+      .setDisplaySize(38, 11.5).setTint(PAL.gold).setDepth(104);
     this.coinChip = makeStatChip(this, 426, 19, 78, 'icon-coin', formatCompact(SaveManager.getCoins()), {
       height: 21,
       fill: PAL.night,

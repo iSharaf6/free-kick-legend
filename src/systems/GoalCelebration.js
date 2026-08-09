@@ -4,28 +4,12 @@ import { crispText, drawPanel } from '../ui.js';
 import { scorerCardCopy } from './OutcomePresentation.js';
 
 const RESULT_FONT = '"Pixelify Sans", "Courier New", monospace';
-const STAND_TEXTURE = 'goal-celebration-stand-v1';
-// Rows 0..101 of the celebration plate are night sky, five firework bursts and
-// the two floodlight banks, on near-black. The photographic crowd starts
-// creeping into the bottom corners around row 102 and takes the frame over by
-// row 144. Measured on the checked-in art, whose bytes are hash-pinned by
-// test/goal-celebration-assets.test.js and are not modified here.
-const STAND_SKY_FRAME = 'goal-celebration-sky';
-const STAND_SKY_ROWS = 102;
-// Where that band lands on the stand.
-//
-// Drawn from y=0 - as the full-plate version was - the shells sit at logical
-// y 9..24, which is the strip the match HUD and the cup chip occupy, so the
-// pyrotechnics were almost entirely behind the interface. Dropping the band
-// puts the bursts over the upper tiers, where there is nothing in front of
-// them and the supporters they are lighting are visible in the same frame.
-const STAND_SKY_TOP = 14;
+const STAND_FLAGS_TEXTURE = 'goal-flags-static-v2';
+const STAND_FLARE_TEXTURE = 'goal-flare-static-v2';
 const PYRO_TEXTURE = 'goal-pyro-fountain-v1';
-const PYRO_ANIM = 'goal-pyro-fountain-burst-v1';
-const PYRO_FRAME_HEIGHT = 256;
+const PYRO_FRAME_HEIGHT = 160;
 const PYRO_BACK_OFFSET = 0.25;
 const PYRO_POST_GAP = 0.36;
-const PYRO_STAGGER_MS = 96;
 const PYRO_WORLD_HEIGHTS = Object.freeze([3.25, 2.95]);
 
 function finitePositive(value, fallback) {
@@ -56,8 +40,7 @@ export function goalPyroLayout({ goalWidth = GOAL_W, goalZ = CAM.ballDist + 18 }
       // behind the posts, ball and keeper while remaining in front of the stand.
       depth: Math.min(frameDepth - 0.5, 1000 - effectZ * 10),
       flipX: index === 1,
-      delay: index * PYRO_STAGGER_MS,
-      reducedFrame: index === 0 ? 1 : 2
+      delay: 0
     });
   }));
 }
@@ -113,8 +96,9 @@ export class GoalCelebration {
     };
     this.active = { options, reduced };
 
-    // Keep the camera completely stable. A goal should feel bigger because the
-    // stadium comes alive, not because the whole pitch vibrates or washes out.
+    // Keep the camera stable and the effects static. The generated pixel plate
+    // reads as part of the stadium instead of briefly replacing it with a
+    // photographic crowd or a looping particle animation.
     this.showCelebrationStand(reduced);
     this.showPitchPyro(reduced);
     this.after(reduced ? 0 : 55, () => kicker?.celebrate?.(650));
@@ -142,86 +126,44 @@ export class GoalCelebration {
     return true;
   }
 
-  /**
-   * Pyrotechnics over the stand.
-   *
-   * This used to draw the whole 960x218 celebration plate opaquely at 480x109,
-   * so every goal replaced the stadium's own crowd with a second,
-   * semi-photographic one for a second: a hard cut between two drawing styles,
-   * and the moment the supporters were doing their most interesting work was
-   * the moment they were hidden behind a photograph of a different crowd.
-   *
-   * Only the sky band is used now, composited additively. The source is close
-   * to black above row 144, so the shells and floodlight bursts add themselves
-   * over the real stand while the photographed supporters below are never
-   * sampled at all. The pixel crowd keeps celebrating underneath, lit by the
-   * fireworks going off above it.
-   */
-  showCelebrationStand(reduced) {
+  showCelebrationStand() {
     const scene = this.scene;
-    if (!scene.textures?.exists?.(STAND_TEXTURE)) return;
-
-    const texture = scene.textures.get(STAND_TEXTURE);
-    if (!texture.has(STAND_SKY_FRAME)) {
-      const width = texture.source?.[0]?.width ?? 960;
-      texture.add(STAND_SKY_FRAME, 0, 0, 0, width, STAND_SKY_ROWS);
+    if (scene.textures?.exists?.(STAND_FLAGS_TEXTURE)) {
+      for (const [x, flip] of [[150, false], [330, true]]) {
+        this.track(scene.add.image(x, 75, STAND_FLAGS_TEXTURE)
+          .setDisplaySize(58, 46)
+          .setFlipX(flip)
+          .setDepth(1.34)
+          .setAlpha(0.92));
+      }
     }
-
-    // Uniform half scale: 960 source pixels become the 480 stand, and a single
-    // scalar cannot stretch one axis the way a width/height pair can.
-    const stand = this.track(scene.add.image(GAME_W / 2, STAND_SKY_TOP, STAND_TEXTURE, STAND_SKY_FRAME)
-      .setOrigin(0.5, 0)
-      .setScale(0.5)
-      .setDepth(1.34)
-      .setBlendMode('ADD')
-      .setAlpha(reduced ? 0.7 : 0));
-    if (!reduced) {
-      scene.tweens.add({ targets: stand, alpha: 0.88, duration: 110, ease: 'Quad.easeOut' });
-      // Light fades, it does not vanish. Without this the shells cut out on the
-      // frame the celebration is torn down.
-      scene.tweens.add({
-        targets: stand,
-        alpha: 0,
-        delay: 620,
-        duration: 380,
-        ease: 'Quad.easeIn'
-      });
+    if (scene.textures?.exists?.(STAND_FLARE_TEXTURE)) {
+      for (const [x, flip] of [[58, false], [422, true]]) {
+        this.track(scene.add.image(x, 101, STAND_FLARE_TEXTURE)
+          .setOrigin(0.5, 1)
+          .setDisplaySize(25, 36)
+          .setFlipX(flip)
+          .setDepth(1.35)
+          .setAlpha(0.9));
+      }
     }
   }
 
-  showPitchPyro(reduced) {
+  showPitchPyro() {
     const scene = this.scene;
     if (!scene.textures?.exists?.(PYRO_TEXTURE)) return;
-    if (!scene.anims.exists(PYRO_ANIM)) {
-      scene.anims.create({
-        key: PYRO_ANIM,
-        frames: scene.anims.generateFrameNumbers(PYRO_TEXTURE, { start: 0, end: 3 }),
-        frameRate: 12,
-        yoyo: true,
-        repeat: 0
-      });
-    }
 
     goalPyroLayout({ goalWidth: scene.goalWidth, goalZ: scene.zGoal }).forEach((layout) => {
-      const fountain = this.track(scene.add.sprite(
+      this.track(scene.add.image(
         layout.x,
         layout.y,
-        PYRO_TEXTURE,
-        reduced ? layout.reducedFrame : 0
+        PYRO_TEXTURE
       )
         .setOrigin(0.5, 1)
         .setScale(layout.scale)
         .setDepth(layout.depth)
         .setFlipX(layout.flipX)
-        .setBlendMode('ADD')
-        .setAlpha(reduced ? 0.72 : 1));
-      if (!reduced) {
-        const ignite = () => {
-          if (fountain.active) fountain.play(PYRO_ANIM);
-        };
-        if (layout.delay > 0) this.after(layout.delay, ignite);
-        else ignite();
-      }
+        .setAlpha(0.96));
     });
   }
 

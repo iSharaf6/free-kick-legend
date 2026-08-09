@@ -228,8 +228,8 @@ export class BootScene extends Phaser.Scene {
     textureFromMap(this, 'icon-cup-locked', MAPS.iconCup, { Y: PAL.borderDark });
   }
 
-  // Trackside dressing. A handful of small silhouettes is enough to turn the
-  // crowd/boards/pitch sandwich into a place with people working in it.
+  // The generated trackside media crew streams with the match pack. Boot only
+  // retains the tiny procedural corner flag needed by projected pitch props.
   makeTracksideSprites() {
     const bake = (key, w, h, paint) => {
       const g = this.add.graphics();
@@ -240,49 +240,6 @@ export class BootScene extends Phaser.Scene {
       g.generateTexture(key, w, h);
       g.destroy();
     };
-
-    const NAVY = 0x1c2b3d;
-    const BODY = 0x0d1218;
-    const METAL = 0x6d7c88;
-    const GLASS = 0xe6eef3;
-
-    // These are read at roughly sixteen logical pixels of visible height, above
-    // the advertising boards, right next to a crowd whose faces are four pixels
-    // wide. Painting skin tones at that size produces a flat blank face that
-    // fights the panorama, so the pit crew are deliberately backlit
-    // silhouettes: one strong shape each, with only the glass catching light.
-    //
-    // Both are authored at the exact aspect the scene displays them at, so the
-    // runtime never stretches them.
-
-    // Photographer at the boards, long lens trained on the goalmouth.
-    bake('trackside-photographer', 12, 18, (px) => {
-      px(BODY, 3, 0, 5, 3);            // cap
-      px(BODY, 4, 3, 4, 3);            // head
-      px(BODY, 3, 6, 6, 9);            // torso
-      px(NAVY, 3, 6, 6, 1);            // rim light along the shoulders
-      px(NAVY, 3, 3, 1, 3);
-      px(BODY, 7, 7, 5, 4);            // camera body
-      px(METAL, 9, 8, 3, 2);           // long lens barrel
-      px(GLASS, 11, 8, 1, 2);          // front element catching the lights
-      px(BODY, 3, 15, 6, 3);           // legs below the hoarding
-    });
-
-    // Broadcast camera position: box, hood and tripod.
-    bake('trackside-camera', 12, 28, (px) => {
-      px(BODY, 2, 2, 7, 7);            // camera body
-      px(NAVY, 2, 2, 7, 1);
-      px(BODY, 9, 3, 3, 4);            // lens hood
-      px(GLASS, 11, 4, 1, 2);          // glass
-      px(BODY, 3, 0, 4, 2);            // viewfinder block
-      px(METAL, 5, 9, 2, 19);          // centre column
-      px(METAL, 1, 16, 2, 12);         // left leg
-      px(METAL, 9, 16, 2, 12);         // right leg
-      px(METAL, 1, 26, 10, 1);         // spreader
-      px(BODY, 0, 4, 2, 3);            // operator head
-      px(BODY, 0, 7, 3, 10);           // operator body
-      px(NAVY, 0, 7, 3, 1);
-    });
 
     // Corner flag: pole plus pennant, drawn at the display aspect so the
     // runtime never has to stretch it.

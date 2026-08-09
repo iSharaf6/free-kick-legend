@@ -69,9 +69,9 @@ test('goal fountains are grounded beside the posts and layered behind play at ev
     assert.ok(normal[1].x > rightPost.x);
     assert.ok(normal.every((fountain) => fountain.depth < frameDepth && fountain.depth > 2));
     assert.ok(normal.every((fountain) => Math.abs(fountain.y - project(0, 0, zGoal + 0.25).y) < 1e-9));
-    assert.ok(normal.every((fountain) => fountain.scale * 256 <= (goalBase.y - goalTop.y) * 1.08));
+    assert.ok(normal.every((fountain) => fountain.scale * 160 <= (goalBase.y - goalTop.y) * 1.08));
     assert.notEqual(normal[0].scale, normal[1].scale, 'left/right fountains need different silhouettes');
-    assert.deepEqual(normal.map((fountain) => fountain.delay), [0, 96]);
+    assert.deepEqual(normal.map((fountain) => fountain.delay), [0, 0]);
     assert.ok(smaller[1].x - smaller[0].x < normal[1].x - normal[0].x);
     closeTo(smaller[0].y, normal[0].y);
   } finally {
@@ -79,30 +79,22 @@ test('goal fountains are grounded beside the posts and layered behind play at ev
   }
 });
 
-test('staggered fountain timers and sprites are fully removed by stop', () => {
+test('static fountain sprites never animate and are fully removed by stop', () => {
   const sprites = [];
   const timers = [];
   const scene = {
     goalWidth: GOAL_W,
     zGoal: CAM.ballDist + 18,
     textures: { exists: () => true },
-    anims: {
-      exists: () => false,
-      create() {},
-      generateFrameNumbers: () => [0, 1, 2, 3]
-    },
     add: {
-      sprite(x, y, texture, frame) {
+      image(x, y, texture) {
         const sprite = {
-          x, y, texture: { key: texture }, frame, active: true, played: 0, stopped: 0,
-          anims: { stop() { sprite.stopped++; } },
+          x, y, texture: { key: texture }, active: true,
           setOrigin() { return this; },
           setScale(value) { this.scale = value; return this; },
           setDepth(value) { this.depth = value; return this; },
           setFlipX(value) { this.flipX = value; return this; },
-          setBlendMode() { return this; },
           setAlpha(value) { this.alpha = value; return this; },
-          play() { this.played++; return this; },
           destroy() { this.active = false; }
         };
         sprites.push(sprite);
@@ -122,21 +114,18 @@ test('staggered fountain timers and sprites are fully removed by stop', () => {
   const celebration = new GoalCelebration(scene);
   celebration.showPitchPyro(false);
   assert.equal(sprites.length, 2);
-  assert.equal(sprites[0].played, 1);
-  assert.equal(sprites[1].played, 0, 'right fountain waits for the authored stagger');
-  assert.equal(celebration.timers.size, 1);
+  assert.equal(celebration.timers.size, 0);
 
   celebration.stop();
   assert.equal(celebration.objects.size, 0);
   assert.equal(celebration.timers.size, 0);
-  assert.ok(sprites.every((sprite) => !sprite.active && sprite.stopped === 1));
-  assert.ok(timers.every((timer) => timer.removed));
+  assert.ok(sprites.every((sprite) => !sprite.active));
+  assert.deepEqual(timers, []);
 
   celebration.showPitchPyro(true);
   const reduced = sprites.slice(2);
-  assert.deepEqual(reduced.map((sprite) => sprite.frame), [1, 2]);
-  assert.ok(reduced.every((sprite) => sprite.played === 0 && sprite.alpha === 0.72));
-  assert.equal(celebration.timers.size, 0, 'reduced motion uses stable frames without stagger timers');
+  assert.ok(reduced.every((sprite) => sprite.alpha === 0.96));
+  assert.equal(celebration.timers.size, 0, 'the static presentation has no motion policy timers');
   celebration.stop();
 });
 

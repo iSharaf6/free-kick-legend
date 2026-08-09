@@ -20,16 +20,13 @@ const MATCH_SPRITES = Object.freeze([
     frameWidth: 88,
     frameHeight: 204
   }),
-  Object.freeze({
-    key: 'goal-celebration-stand-v1',
-    path: 'fx/goal-celebration-stand-v1.png'
-  }),
-  Object.freeze({
-    key: 'goal-pyro-fountain-v1',
-    path: 'fx/goal-pyro-fountain-strip-v1.png',
-    frameWidth: 96,
-    frameHeight: 256
-  })
+  Object.freeze({ key: 'trackside-photographer-kneel-v2', path: 'sprites/trackside-photographer-kneel-v2.png' }),
+  Object.freeze({ key: 'trackside-camera-operator-v2', path: 'sprites/trackside-camera-operator-v2.png' }),
+  Object.freeze({ key: 'trackside-camera-pedestal-v2', path: 'sprites/trackside-camera-pedestal-v2.png' }),
+  Object.freeze({ key: 'trackside-photographer-seat-v2', path: 'sprites/trackside-photographer-seat-v2.png' }),
+  Object.freeze({ key: 'goal-pyro-fountain-v1', path: 'fx/goal-spark-fountain-static-v2.png' }),
+  Object.freeze({ key: 'goal-flare-static-v2', path: 'fx/goal-flare-static-v2.png' }),
+  Object.freeze({ key: 'goal-flags-static-v2', path: 'fx/goal-flags-static-v2.png' })
 ]);
 
 /**
