@@ -11,9 +11,6 @@ major findings from the final audit are resolved on
 
 **Final verified score:** 97 / 100
 
-**Evidence and full issue log:**
-[`playtest-evidence/final-release-polish-2026-08-09/`](playtest-evidence/final-release-polish-2026-08-09/)
-
 The game already had a strong pixel-art identity and a complete progression
 loop, but its most visible motion and interaction defects made it feel much
 less finished than the underlying systems deserved. This pass focused on the
@@ -71,6 +68,10 @@ behavior. No gameplay mechanic was replaced merely for novelty.
 
 - `npm run test:release`: **225 / 225 unit tests**, production build, and
   **31 / 31 Chromium journeys** passed.
+- The Pages workflow runs the same 29 deterministic browser journeys through
+  `npm run test:e2e:deploy`. The two `@stress` soak journeys remain in the full
+  local release gate but do not block deployment on GitHub's substantially
+  slower software-rendered browser runner.
 - Production-build real-pointer playthroughs at 1280×720 and 844×390 reached
   `AIMING → WINDUP → FLIGHT → RESULT` and scored goals with no page, console,
   or request errors.

@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { GamePage } from './game-page.js';
 
-test('fifty varied shots leave no result, timer, or display-list residue', async ({ page }) => {
+test('@stress fifty varied shots leave no result, timer, or display-list residue', async ({ page }) => {
   test.setTimeout(120_000);
   const game = new GamePage(page);
   const runtimeErrors = [];
@@ -125,7 +125,7 @@ test('fifty varied shots leave no result, timer, or display-list residue', async
   expect(runtimeErrors).toEqual([]);
 });
 
-test('ten menu-to-locker transitions keep exactly one live scene and no runtime errors', async ({ page }) => {
+test('@stress ten menu-to-locker transitions keep exactly one live scene and no runtime errors', async ({ page }) => {
   test.setTimeout(60_000);
   const game = new GamePage(page);
   const runtimeErrors = [];

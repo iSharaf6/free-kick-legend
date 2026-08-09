@@ -1,30 +1,5 @@
 # Playtest evidence index
 
-## Final gameplay and release-polish audit — 9 August 2026
-
-The [`final-release-polish-2026-08-09/`](final-release-polish-2026-08-09/)
-directory contains the baseline and verified post-fix captures for the final
-release pass. It covers desktop and compact landscape gameplay, portrait
-gating, real shot phases, result staging, keeper recovery, wall collapse,
-deflector extension, ball grounding, keyboard pause focus, settings, Locker,
-Progress, and Career selection.
-
-| Baseline | Final | Finding |
-|---|---|---|
-| `final-release-polish-2026-08-09/before/04-goal-1280x720.png` | `final-release-polish-2026-08-09/after/postfix-1280-goal-result.png` | Stale coaching was removed and the result composition rebuilt. |
-| `final-release-polish-2026-08-09/before/goal-frame-40.png` | `final-release-polish-2026-08-09/after/gameplay-audit-goal-pyro.png` | Oversized cloned fountains became post-anchored perspective effects. |
-| `final-release-polish-2026-08-09/before/08-menu-844x390.png` | `final-release-polish-2026-08-09/after/postfix-844x390-aiming.png` | Compact landscape remains fully playable with a live-reflowed HUD. |
-| `final-release-polish-2026-08-09/before/10-large-portrait-1024x1366.png` | `final-release-polish-2026-08-09/after/postfix-1024x1366-portrait-gate.png` | The baseline exposed a live menu at large portrait widths; final applies the rotate gate at every portrait width. Match-freezing ownership is covered by E2E. |
-| — | `final-release-polish-2026-08-09/after/postfix-1280-pause-keyboard-focus.png` | Pause owns input and exposes a visible keyboard focus ring. |
-| — | `final-release-polish-2026-08-09/after/postfix-1280-reduced-motion-goal.png` | A live toggle replaces the active celebration with a static equivalent. |
-| — | `final-release-polish-2026-08-09/after/postfix-1280-deflector-extension.png` | Deflector art and collision share progressive extension timing. |
-| — | `final-release-polish-2026-08-09/after/postfix-1280-ball-grounding-03-rolling.png` | Ball contact transitions through a credible rolling state before rest. |
-
-The directory-level README contains the complete issue ledger, capture index,
-performance comparison, test commands, changed-file map, and release summary.
-
----
-
 ## Live-to-local manual pass — 5 August 2026
 
 The `live-fix-2026-08-05` directory contains a curated 23-image before/after
