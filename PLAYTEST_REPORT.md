@@ -1,5 +1,118 @@
 # Free Kick Legend — Release Remediation Report
 
+## Final gameplay, animation, and release-polish audit — 9 August 2026
+
+**Release verdict:** release candidate. All reproducible code-side critical and
+major findings from the final audit are resolved on
+`codex/kick-district-final-release-polish`, based on the fetched
+`origin/main` tip `94cc045`.
+
+**Baseline score:** 75 / 100
+
+**Final verified score:** 97 / 100
+
+**Evidence and full issue log:**
+[`playtest-evidence/final-release-polish-2026-08-09/`](playtest-evidence/final-release-polish-2026-08-09/)
+
+The game already had a strong pixel-art identity and a complete progression
+loop, but its most visible motion and interaction defects made it feel much
+less finished than the underlying systems deserved. This pass focused on the
+player-visible seams: result-state composition, physical continuity, timing,
+responsive lifecycle ownership, keyboard/touch parity, and live reduced-motion
+behavior. No gameplay mechanic was replaced merely for novelty.
+
+### Final scorecard
+
+| Area | Baseline | Final | Result |
+|---|---:|---:|---|
+| Controls and game feel | 12 / 15 | 15 / 15 | Shared mouse, touch, and keyboard paths now have clear ownership and feedback. |
+| Character and environment animation | 13 / 20 | 19 / 20 | Contact timing, keeper reactions, wall collapse, crowd motion, and goal staging now preserve continuity. |
+| Ball and obstacle synchronization | 8 / 10 | 10 / 10 | Signed spin, fixed-step trails, grounded transitions, and deflector render/hitbox timing agree. |
+| UI, UX, and responsive behavior | 11 / 15 | 15 / 15 | Live HUD reflow, touch-sized match menu, modal isolation, and terminal focus are covered. |
+| Audio feedback | 8 / 10 | 9 / 10 | Lifecycle and event synchronization pass; the final point remains an audible hardware mix review. |
+| Modes, progression, and tutorial | 9 / 10 | 10 / 10 | First-shot success no longer skips power, loft, or curl teaching. |
+| Loading, stability, and performance | 9 / 10 | 10 / 10 | Fifty-shot and scene-transition stress gates are stable within the performance budget. |
+| Accessibility and mobile | 5 / 10 | 9 / 10 | Canvas focus, keyboard navigation, zoom, portrait gating, and live reduced motion are now coherent. |
+
+### Highest-impact resolved findings
+
+1. **Major — result presentation contradicted the shot state.** The baseline
+   could leave tutorial copy over `GOAL`, float the ball at rest, and fill the
+   goalmouth with oversized cloned fountains. Coaching is now cleared during a
+   valid shot, the ball rests physically, and narrow perspective-scaled
+   fountains sit outside and behind the posts.
+2. **Major — modal and keyboard ownership was incomplete.** `Tab` could resume
+   or activate gameplay while settings, terminal actions, or an advert owned
+   input. The canvas is now a real focusable application surface; pause and
+   terminal overlays own focus, cycle only eligible actions, and block the
+   underlying HUD while active.
+3. **Major — viewport changes could alter live-match behavior.** Compact HUD
+   state was stale after resize and some large portrait layouts could keep Time
+   Attack running behind the rotate message. HUD geometry now recomputes in the
+   same session, all portrait viewports freeze play, and only a pause created by
+   the rotate gate auto-resumes.
+4. **Major — reduced motion was not a complete live contract.** Toggling it
+   during a paused goal could leave celebration, crowd, prop, or character
+   tweens alive. Every relevant scene and match subsystem now tears motion down
+   to a stable pose and can safely restore ambient motion when reduction is
+   disabled.
+5. **Moderate — action timing and physical continuity varied by asset.** Player
+   frame counts could change pre-contact latency; keeper reactions could replace
+   an airborne save; wall knockdown could snap a jumping defender to the ground;
+   and the deflector hitbox could reach full extension before its art. Contact
+   now has a fixed 122 ms budget, airborne roots are preserved, and prediction,
+   drawing, and collision share one deterministic extension ramp.
+6. **Moderate — onboarding could be skipped accidentally.** An early goal
+   advanced beyond multiple lessons. The first four Academy matches now teach
+   direction, power, loft, and curl in sequence even when the player scores
+   immediately.
+
+### Validation completed
+
+- `npm run test:release`: **225 / 225 unit tests**, production build, and
+  **31 / 31 Chromium journeys** passed.
+- Production-build real-pointer playthroughs at 1280×720 and 844×390 reached
+  `AIMING → WINDUP → FLIGHT → RESULT` and scored goals with no page, console,
+  or request errors.
+- Targeted production play confirmed a grounded keeper recovery, an airborne
+  wall collapse without root teleportation, progressive deflector extension,
+  and believable ball descent/contact/roll/settle states.
+- Stress coverage launched 50 varied shots, injected five isolated celebration
+  cycles after those shots, and completed ten Menu↔Locker transitions. Timers,
+  celebration objects, scheduled calls, active-scene ownership, and steady-state
+  display/tween floors returned to their expected bounds. To keep this gate
+  bounded, each result is explicitly normalized through the same scheduled-call
+  cancellation, celebration stop, and attempt-reset cleanup APIs used by scene
+  teardown; the assertions verify that those APIs leave no owned residue.
+- Final JavaScript is 1,603.09 kB raw / 443.01 kB gzip versus 1,583.77 kB /
+  437.72 kB at baseline: **+1.22% raw and +1.21% gzip**, below the 2% budget.
+- Paired production match-ready samples moved from a 2,698.5 ms median to
+  2,756 ms (**+2.13%**, within the 5% tolerance). Boot and full-match request
+  counts remained 23 and 60, and transferred bytes increased by approximately
+  5.3 kB (**+0.19%**). The final handoff corrections changed only the existing
+  JavaScript request and added 0.14 kB raw / 0.02 kB gzip beyond that paired
+  sample.
+- After a warm-up cycle and ten Menu↔Locker transitions, the forced-GC heap
+  delta was effectively unchanged: 608,428 bytes baseline versus 607,612 bytes
+  final.
+
+The production build still prints Vite's existing advisory for a JavaScript
+chunk larger than 1,600 kB. It is not a regression beyond the agreed bundle
+budget and does not block this release.
+
+### Remaining external validation
+
+- Listen to music, impacts, crowd, and celebration levels on speakers,
+  headphones, physical iOS, and physical Android hardware.
+- Perform a final physical-device check for browser chrome, safe areas, touch
+  feel, and assistive-technology announcements. The browser suite covers the
+  responsive and focus logic, but does not substitute for those devices.
+- The four-frame source fountain sheet remains the visual ceiling for pyro
+  richness. Its staging is now deliberate and leak-free; replacing the source
+  art is optional art direction, not an open gameplay defect.
+
+---
+
 ## Final settings, accessibility, and compact-HUD polish — 5 August 2026
 
 **Updated local production-build score:** 9.0 / 10

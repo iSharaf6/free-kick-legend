@@ -148,6 +148,23 @@ class CrowdStand {
     return this;
   }
 
+  setReducedMotion(reduced) {
+    const next = Boolean(reduced);
+    if (next === this.reducedMotion) return this;
+    this.reducedMotion = next;
+    this.scheduled.forEach((timer) => timer?.remove?.(false));
+    this.scheduled.length = 0;
+    this.goalUntil = 0;
+    this.dressing?.setReducedMotion?.(next);
+
+    if (next) {
+      this.timer?.remove?.();
+      this.timer = null;
+      return this.reset();
+    }
+    return this.reset().startAmbient();
+  }
+
   destroy() {
     this.timer?.remove?.();
     this.timer = null;

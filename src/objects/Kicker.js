@@ -70,9 +70,20 @@ function characterScaleFor(characterId) {
 
 function actionTimingFor(characterId) {
   const tempo = MOTION_TEMPO[characterId] ?? 1;
-  const holds = Object.fromEntries(
-    Object.entries(ACTION_HOLDS).map(([pose, duration]) => [pose, Math.round(duration * tempo)])
-  );
+  // Time Attack starts when a valid swipe is accepted, so the moment of boot
+  // contact must not secretly grant one character more clock than another.
+  // Preserve each silhouette's rhythm by redistributing ready/windup within a
+  // fixed pre-contact budget; tempo still owns follow-through and recovery.
+  const contactBudget = ACTION_HOLDS.ready + ACTION_HOLDS.windup;
+  const windup = Math.round(ACTION_HOLDS.windup * tempo);
+  const holds = {
+    ready: contactBudget - windup,
+    windup,
+    strike: Math.round(ACTION_HOLDS.strike * tempo),
+    follow: Math.round(ACTION_HOLDS.follow * tempo),
+    recover: Math.round(ACTION_HOLDS.recover * tempo),
+    watch: Math.round(ACTION_HOLDS.watch * tempo)
+  };
   let elapsed = 0;
   const at = {};
   for (const pose of ['ready', 'windup', 'strike', 'follow', 'recover', 'watch']) {
@@ -328,6 +339,26 @@ export class Kicker {
     if (this.ambient?.isPlaying?.()) this.ambient.pause();
     this.idleState.bob = 0;
     this.idleState.swell = 0;
+    this.applyTransform();
+    return this;
+  }
+
+  stopAmbient() {
+    // Reduced motion is not a temporary scene pause. Remove the tween from the
+    // manager entirely so a later resumeAll() cannot wake it behind the user's
+    // back when the pause/settings overlay closes.
+    this.scene.tweens.killTweensOf(this.idleState);
+    this.ambient = null;
+    this.idleState.bob = 0;
+    this.idleState.swell = 0;
+    this.applyTransform();
+    return this;
+  }
+
+  setReducedMotion(reduced) {
+    this.reducedMotion = Boolean(reduced);
+    if (this.reducedMotion) this.stopAmbient();
+    else this.resumeAmbient();
     return this;
   }
 

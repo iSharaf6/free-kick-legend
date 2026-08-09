@@ -792,13 +792,18 @@ export function getWallPoseOffsets(config, elapsedSeconds = 0, runtime = {}) {
       : 0;
     for (const [index, x] of rowOffsets(normalized.count, spacing, movingX).entries()) {
       const deflector = normalized.type === 'deflector' && index === normalized.defenderIndex;
+      const deflectorProgress = runtime.deflectorProgress == null
+        ? (runtime.deflectorActive ? 1 : 0)
+        : clamp01(runtime.deflectorProgress);
       poses.push({
         index,
         row: 0,
         x,
         z: 0,
         role: deflector ? 'deflector' : 'wall',
-        legExtension: deflector && runtime.deflectorActive ? normalized.extensionReach : 0
+        legExtension: deflector && runtime.deflectorActive
+          ? normalized.extensionReach * deflectorProgress
+          : 0
       });
     }
   }

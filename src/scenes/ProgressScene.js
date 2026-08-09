@@ -52,7 +52,7 @@ export class ProgressScene extends Phaser.Scene {
     this.drawTabs();
     this.renderContent();
     addScanlines(this, 2600, 0.03);
-    sceneIntro(this);
+    if (!this.reducedMotion) sceneIntro(this);
   }
 
   drawHeader() {
@@ -198,8 +198,7 @@ export class ProgressScene extends Phaser.Scene {
 
   animateRow(row, y, index, claimed = false) {
     if (this.reducedMotion) {
-      row.setY(y).setScale(1).setAlpha(0);
-      this.tweens.add({ targets: row, alpha: 1, duration: 160, ease: 'Cubic.easeOut' });
+      row.setY(y).setScale(1).setAlpha(1);
       return;
     }
     row.setY(y + 6).setScale(claimed ? 0.94 : 1).setAlpha(0);

@@ -61,7 +61,7 @@ test('pausing during windup freezes contact and resumes into flight', async ({ p
     animationPaused: window.__fkl.kicker.actionAnimationPaused
   }))).toEqual({ ballActive: false, animationPaused: true });
 
-  await page.keyboard.press('Tab');
+  await page.keyboard.press('Escape');
   await page.waitForFunction(() => window.__fkl?.state === 'FLIGHT');
   expect(await page.evaluate(() => window.__fkl.ball.flying)).toBe(true);
 });
@@ -259,6 +259,9 @@ test('goal celebration layers authored stand art, fountain sprites, useful score
 
   const goal = await page.evaluate(() => {
     const scene = window.__fkl;
+    const fountains = [...scene.goalCelebration.objects]
+      .filter((object) => object.texture?.key === 'goal-pyro-fountain-v1')
+      .sort((left, right) => left.x - right.x);
     const text = scene.children.list
       .flatMap((child) => child?.list ?? [child])
       .map((child) => child?.text)
@@ -271,6 +274,14 @@ test('goal celebration layers authored stand art, fountain sprites, useful score
       textures: [...scene.goalCelebration.objects]
         .map((object) => object.texture?.key)
         .filter(Boolean),
+      fountains: fountains.map((fountain) => ({
+        x: fountain.x,
+        y: fountain.y,
+        depth: fountain.depth,
+        scale: fountain.scaleX
+      })),
+      goalFrameDepth: 1000 - scene.zGoal * 10 + 2,
+      expectedPyroBaseY: 76 + (2.3 * 316) / (scene.zGoal + 0.25),
       scorer: text.filter((line) => line.startsWith('+') || line.includes('MICA VALE') || line.includes('COMBO')),
       shaking: scene.cameras.main.shakeEffect.isRunning,
       resetDelay: scene.resultResetDelay('GOAL', 1150)
@@ -280,11 +291,17 @@ test('goal celebration layers authored stand art, fountain sprites, useful score
   expect(goal.banner).toBe('GOAL!');
   expect(goal.bounds.left).toBeGreaterThan(8);
   expect(goal.bounds.right).toBeLessThan(472);
-  expect(goal.layers).toEqual(expect.arrayContaining([1.34, 1880, 2220]));
+  expect(goal.layers).toEqual(expect.arrayContaining([1.34, 2220]));
   expect(goal.textures).toEqual(expect.arrayContaining([
     'goal-celebration-stand-v1',
     'goal-pyro-fountain-v1'
   ]));
+  expect(goal.fountains).toHaveLength(2);
+  expect(goal.fountains[0].x).toBeGreaterThan(100);
+  expect(goal.fountains[1].x).toBeLessThan(380);
+  expect(goal.fountains.every((fountain) => fountain.depth < goal.goalFrameDepth)).toBe(true);
+  expect(goal.fountains.every((fountain) => Math.abs(fountain.y - goal.expectedPyroBaseY) < 0.01)).toBe(true);
+  expect(goal.fountains[0].scale).not.toBeCloseTo(goal.fountains[1].scale, 5);
   expect(goal.scorer).toEqual([
     expect.stringMatching(/^\+\d+ · /),
     '#17  MICA VALE',
@@ -292,6 +309,11 @@ test('goal celebration layers authored stand art, fountain sprites, useful score
   ]);
   expect(goal.shaking).toBe(false);
   expect(goal.resetDelay).toBe(1150);
+
+  await page.waitForFunction(() => (
+    window.__fkl?.goalCelebration?.objects?.size === 0 &&
+    window.__fkl?.goalCelebration?.timers?.size === 0
+  ));
 
   const labels = ['SAVED!', 'OFF TARGET', 'OFF THE POST!', 'BLOCKED!', 'WALL FLATTENED!'];
   const fits = await page.evaluate((outcomes) => outcomes.map((label) => {

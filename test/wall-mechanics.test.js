@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { Wall } from '../src/objects/Wall.js';
+import { Wall, deflectorExtensionProgress } from '../src/objects/Wall.js';
 
 function spriteStub() {
   const calls = {
@@ -176,11 +176,22 @@ test('deflector leg activation and collision are deterministic per shot', () => 
   };
   const first = new Wall(sceneStub(), config, 12, 0);
   const second = new Wall(sceneStub(), config, 12, 0);
-  const shot = { seed: 42, attempt: 3, targetX: 2 };
+  const shot = { seed: 42, attempt: 3, targetX: 2, wallEta: 0.5 };
   first.onStrike(shot);
   second.onStrike(shot);
-  first.updateMechanic(0.2);
-  second.updateMechanic(0.2);
+  first.updateMechanic(0.1, 1 / 30);
+  second.updateMechanic(0.1, 1 / 144);
+
+  assert.equal(first.players[1].legExtension, 0, 'the leg stays planted immediately after the strike');
+  assert.deepEqual(first.getPoseSnapshot(), second.getPoseSnapshot());
+
+  first.updateMechanic(0.39, 1 / 30);
+  second.updateMechanic(0.39, 1 / 144);
+  assert.deepEqual(first.getPoseSnapshot(), second.getPoseSnapshot());
+  assert.ok(first.players[1].legExtension > 0 && first.players[1].legExtension < 0.65);
+
+  first.updateMechanic(0.47, 1 / 30);
+  second.updateMechanic(0.47, 1 / 144);
 
   assert.deepEqual(first.getPoseSnapshot(), second.getPoseSnapshot());
   const defender = first.players[1];
@@ -197,6 +208,17 @@ test('deflector leg activation and collision are deterministic per shot', () => 
   first.resetMechanic();
   assert.equal(first.players[1].legExtension, 0);
   assert.equal(first.deflectorActive, false);
+  assert.equal(first.deflectorProgress, 0);
+});
+
+test('deflector reach is fully visible before its predicted collision plane crossing', () => {
+  assert.equal(deflectorExtensionProgress(0.1, 0.5), 0);
+  assert.ok(deflectorExtensionProgress(0.39, 0.5) > 0);
+  assert.ok(deflectorExtensionProgress(0.39, 0.5) < 1);
+  assert.equal(deflectorExtensionProgress(0.46, 0.5), 1);
+  assert.equal(deflectorExtensionProgress(0, null), 0);
+  assert.equal(deflectorExtensionProgress(0.19, null), 1);
+  assert.equal(deflectorExtensionProgress(1, 0.5, false), 0);
 });
 
 test('impact flash is cleared by fixed-step update without a delayed callback', () => {
@@ -216,14 +238,22 @@ test('a Thunderstrike impact advances through the authored collapse sheet', () =
   const scene = sceneStub();
   scene.textures.exists = (key) => key === 'defender-collapse-hd';
   const wall = new Wall(scene, 1, 12, 0);
-  const contact = wall.contact({ x: wall.players[0].x, y: 0.5 });
+  const player = wall.players[0];
+  player.jumpY = 0.8;
+  player.vy = 2;
+  const contact = wall.contact({ x: player.x, y: 1.3 });
 
   wall.impact(contact, { x: 0, y: 0.5 }, { vx: 8 }, { collapse: true });
-  assert.equal(wall.players[0].collapsing, true);
+  assert.equal(player.collapsing, true);
+  assert.equal(player.jumpY, 0.8, 'impact must preserve the airborne root');
+  assert.equal(player.vy, 0.4, 'impact may chop upward speed without teleporting to turf');
   for (let index = 0; index < 3; index++) wall.update(0.1);
-  assert.ok(wall.players[0].collapseTime >= 0.29);
+  assert.ok(player.collapseTime >= 0.29);
+  assert.ok(player.jumpY > 0, 'collapse should remain airborne until gravity reaches the turf');
   for (let index = 0; index < 4; index++) wall.update(0.1);
-  assert.equal(wall.players[0].collapseTime, 0.62);
+  assert.equal(player.collapseTime, 0.62);
+  assert.equal(player.jumpY, 0);
+  assert.equal(player.vy, 0);
   wall.reset();
-  assert.equal(wall.players[0].collapsing, false);
+  assert.equal(player.collapsing, false);
 });

@@ -55,6 +55,7 @@ Module._load = function loadWithoutInspector(request, ...args) {
   return originalLoad.call(this, request, ...args);
 };
 const { GameScene } = await import('../src/scenes/GameScene.js');
+const { SaveManager } = await import('../src/systems/SaveManager.js');
 Module._load = originalLoad;
 
 test('init drops destroyed optional HUD and world references before level 9', () => {
@@ -171,6 +172,119 @@ test('reduced motion leaves security guards completely still', () => {
   assert.equal(tweenCount, 0);
 });
 
+test('live settings reconcile motion only on a reduced-motion transition and preserve a paused actor', () => {
+  const scene = Object.create(GameScene.prototype);
+  const motionChanges = [];
+  const kickerMotionChanges = [];
+  const celebrationMotionChanges = [];
+  Object.assign(scene, {
+    settings: { reducedMotion: false, aimAssist: 'full' },
+    aimAssist: 'full',
+    state: 'PAUSED',
+    sessionToken: 12,
+    attempt: 2,
+    score: 450,
+    kicker: {
+      reducedMotion: false,
+      setReducedMotion(value) {
+        this.reducedMotion = value;
+        kickerMotionChanges.push(value);
+      },
+      resumeAmbient: () => assert.fail('unrelated paused settings resumed the actor')
+    },
+    keepers: [{ reducedMotion: false }, { reducedMotion: false }],
+    goalCelebration: { setReducedMotion: (value) => celebrationMotionChanges.push(value) },
+    syncAmbientMotion: (reduced) => { motionChanges.push(reduced); }
+  });
+
+  scene.applyLiveSettings({ reducedMotion: true });
+  assert.equal(scene.kicker.reducedMotion, true);
+  assert.ok(scene.keepers.every((keeper) => keeper.reducedMotion));
+  assert.deepEqual(kickerMotionChanges, [true]);
+  assert.deepEqual(celebrationMotionChanges, [true]);
+  assert.deepEqual(motionChanges, [true]);
+  assert.deepEqual({ state: scene.state, sessionToken: scene.sessionToken, attempt: scene.attempt, score: scene.score }, {
+    state: 'PAUSED', sessionToken: 12, attempt: 2, score: 450
+  });
+
+  scene.applyLiveSettings({ aimAssist: 'reduced' });
+  assert.deepEqual(motionChanges, [true], 'unrelated settings do not rebuild ambient systems');
+  assert.equal(scene.aimAssist, 'reduced');
+  assert.deepEqual(kickerMotionChanges, [true], 'unrelated settings preserve the paused actor');
+  assert.deepEqual(celebrationMotionChanges, [true]);
+
+  scene.applyLiveSettings({ reducedMotion: false });
+  assert.deepEqual(kickerMotionChanges, [true, false]);
+  assert.deepEqual(celebrationMotionChanges, [true, false]);
+  assert.deepEqual(motionChanges, [true, false]);
+});
+
+test('closing pause reasserts hard reduced motion after the broad tween resume', () => {
+  const calls = [];
+  const scene = Object.create(GameScene.prototype);
+  Object.assign(scene, {
+    state: 'PAUSED',
+    pauseReturnState: 'RESULT',
+    transitioning: false,
+    viewportPortrait: false,
+    rotateGatePauseActive: false,
+    settings: { reducedMotion: true },
+    swipe: { enabled: false },
+    time: { paused: true },
+    tweens: { resumeAll: () => calls.push('resume-all') },
+    kicker: {
+      setReducedMotion: (value) => calls.push(['kicker-motion', value]),
+      resumeAction: () => calls.push('resume-action')
+    },
+    goalCelebration: { setReducedMotion: (value) => calls.push(['celebration-motion', value]) },
+    destroyPauseOverlay: () => calls.push('destroy-overlay'),
+    setPauseUnderlayAvailable: (value) => calls.push(['underlay', value]),
+    announceStatus: () => {}
+  });
+
+  assert.equal(scene.closePauseMenu(), true);
+  assert.equal(scene.state, 'RESULT');
+  assert.equal(scene.time.paused, false);
+  assert.deepEqual(calls, [
+    'destroy-overlay',
+    ['underlay', true],
+    'resume-all',
+    ['kicker-motion', true],
+    ['celebration-motion', true],
+    'resume-action'
+  ]);
+});
+
+test('ambient motion synchronizer updates every decorative controller and inherits pause', () => {
+  const calls = [];
+  const scene = Object.create(GameScene.prototype);
+  Object.assign(scene, {
+    sessionAlive: true,
+    transitioning: false,
+    state: 'PAUSED',
+    crowdTiers: { setReducedMotion: (value) => calls.push(['crowd', value]) },
+    crowdImage: { setAlpha: (value) => calls.push(['crowd-alpha', value]) },
+    syncSecurityGuardMotion: (value) => calls.push(['security', value]),
+    syncTracksideMotion: () => calls.push(['trackside']),
+    syncHazardMotion: () => calls.push(['hazard']),
+    syncThreadMotion: (value) => calls.push(['thread', value]),
+    syncHoopAndTargetMotion: () => calls.push(['hoops-target']),
+    tweens: { pauseAll: () => calls.push(['pause']) }
+  });
+
+  assert.equal(scene.syncAmbientMotion(true), true);
+  assert.deepEqual(calls, [
+    ['crowd', true],
+    ['crowd-alpha', 1],
+    ['security', true],
+    ['trackside'],
+    ['hazard'],
+    ['thread', true],
+    ['hoops-target'],
+    ['pause']
+  ]);
+});
+
 test('scene transition gate cancels callbacks and accepts only one restart', () => {
   const scene = Object.create(GameScene.prototype);
   let cancelledSwipe = 0;
@@ -212,7 +326,7 @@ test('scene transition gate cancels callbacks and accepts only one restart', () 
   assert.equal(scene.scheduledCalls.size, 0);
 });
 
-test('Tab is captured, prevents browser focus, and toggles the pause menu once', () => {
+test('Tab enters through the canvas before it toggles the pause menu once', () => {
   const listeners = new Map();
   const captures = [];
   const keyboard = {
@@ -222,22 +336,151 @@ test('Tab is captured, prevents browser focus, and toggles the pause menu once',
   const scene = Object.create(GameScene.prototype);
   let toggles = 0;
   scene.input = { keyboard };
+  scene.game = { canvas };
+  scene.state = 'AIMING';
   scene.adRequestActive = false;
   scene.togglePauseMenu = () => { toggles++; };
   scene.restartCurrentLevel = noop;
   scene.startScene = noop;
   scene.installKeyboardControls();
 
-  let prevented = 0;
-  const event = { repeat: false, preventDefault: () => { prevented++; } };
-  listeners.get('keydown-TAB')(event);
-  listeners.get('keydown-TAB')({ repeat: true, preventDefault: () => { prevented++; } });
+  const previousActiveElement = globalThis.document.activeElement;
+  try {
+    globalThis.document.activeElement = {};
+    const entryTab = { repeat: false, preventDefault: () => assert.fail('entry Tab was captured') };
+    listeners.get('keydown-TAB')(entryTab);
+    assert.equal(toggles, 0);
+    assert.equal(entryTab.cancelled, undefined);
 
-  assert.deepEqual(captures, ['TAB']);
-  assert.deepEqual([...listeners.keys()], ['keydown-TAB']);
-  assert.equal(prevented, 2);
-  assert.equal(event.cancelled, 1);
-  assert.equal(toggles, 1);
+    globalThis.document.activeElement = canvas;
+    let prevented = 0;
+    const event = { repeat: false, preventDefault: () => { prevented++; } };
+    listeners.get('keydown-TAB')(event);
+    listeners.get('keydown-TAB')({ repeat: true, preventDefault: () => { prevented++; } });
+
+    assert.deepEqual(captures, [], 'the browser owns Tab until the canvas receives focus');
+    assert.deepEqual([...listeners.keys()], ['keydown-TAB', 'keydown-ESC']);
+    assert.equal(prevented, 2);
+    assert.equal(event.cancelled, 1);
+    assert.equal(toggles, 1);
+  } finally {
+    globalThis.document.activeElement = previousActiveElement;
+  }
+});
+
+test('Tab stays inside the open settings dialog, then restores canvas pause control', () => {
+  const listeners = new Map();
+  const captures = [];
+  const removals = [];
+  const keyboard = {
+    addCapture: (key) => captures.push(key),
+    removeCapture: (key) => removals.push(key),
+    on: (event, callback) => listeners.set(event, callback)
+  };
+  const scene = Object.create(GameScene.prototype);
+  let toggles = 0;
+  Object.assign(scene, {
+    input: { keyboard },
+    game: { canvas },
+    state: 'AIMING',
+    adRequestActive: false,
+    transitioning: false,
+    togglePauseMenu: () => { toggles++; }
+  });
+
+  const panel = { hidden: false };
+  const originalGetElementById = globalThis.document.getElementById;
+  const originalActiveElement = globalThis.document.activeElement;
+  globalThis.document.getElementById = (id) => id === 'settings-panel' ? panel : null;
+
+  try {
+    scene.installKeyboardControls();
+    const shifted = { shiftKey: true, preventDefault: () => assert.fail('dialog Tab was captured') };
+    const plain = { shiftKey: false, preventDefault: () => assert.fail('dialog Tab was captured') };
+    listeners.get('keydown-TAB')(shifted);
+    listeners.get('keydown-TAB')(plain);
+
+    assert.deepEqual(captures, []);
+    assert.deepEqual(removals, []);
+    assert.equal(toggles, 0);
+    assert.equal(shifted.cancelled, undefined);
+    assert.equal(plain.cancelled, undefined);
+
+    panel.hidden = true;
+    globalThis.document.activeElement = canvas;
+    let prevented = 0;
+    const canvasTab = { repeat: false, preventDefault: () => { prevented++; } };
+    listeners.get('keydown-TAB')(canvasTab);
+    assert.deepEqual(captures, []);
+    assert.equal(prevented, 1);
+    assert.equal(canvasTab.cancelled, 1);
+    assert.equal(toggles, 1);
+  } finally {
+    globalThis.document.activeElement = originalActiveElement;
+    if (originalGetElementById) globalThis.document.getElementById = originalGetElementById;
+    else delete globalThis.document.getElementById;
+  }
+});
+
+test('terminal and ad ownership disable underlay and only the active result actions', () => {
+  const changes = [];
+  const button = (name, active = true) => ({
+    active,
+    setButtonEnabled(value) { changes.push([name, 'enabled', value]); },
+    setVisible(value) { changes.push([name, 'visible', value]); }
+  });
+  const scene = Object.create(GameScene.prototype);
+  scene.muteButton = button('mute');
+  scene.menuButton = button('menu');
+  scene.menuHint = button('hint');
+  scene.terminalOverlayObjects = [
+    { active: true },
+    button('retry'),
+    button('destroyed', false)
+  ];
+
+  scene.setPauseUnderlayAvailable(false);
+  scene.setTerminalActionsAvailable(false);
+  scene.setTerminalActionsAvailable(true);
+
+  assert.deepEqual(changes, [
+    ['mute', 'enabled', false],
+    ['mute', 'visible', false],
+    ['menu', 'enabled', false],
+    ['menu', 'visible', false],
+    ['hint', 'visible', false],
+    ['retry', 'enabled', false],
+    ['retry', 'enabled', true]
+  ]);
+});
+
+test('paused Tab is left to button navigation and Escape resumes the match', () => {
+  const listeners = new Map();
+  const keyboard = {
+    addCapture: noop,
+    on: (event, callback) => listeners.set(event, callback)
+  };
+  const scene = Object.create(GameScene.prototype);
+  let closes = 0;
+  Object.assign(scene, {
+    input: { keyboard },
+    state: 'PAUSED',
+    viewportPortrait: false,
+    closePauseMenu: () => { closes++; return true; }
+  });
+  scene.installKeyboardControls();
+
+  const tab = { repeat: false, preventDefault: () => assert.fail('paused Tab was captured') };
+  listeners.get('keydown-TAB')(tab);
+  assert.equal(tab.cancelled, undefined);
+  assert.equal(closes, 0);
+
+  let prevented = 0;
+  const escape = { repeat: false, preventDefault: () => { prevented++; } };
+  listeners.get('keydown-ESC')(escape);
+  assert.equal(prevented, 1);
+  assert.equal(escape.cancelled, 1);
+  assert.equal(closes, 1);
 });
 
 test('Time Attack clock waits for the first valid shot, then continues through result feedback', () => {
@@ -283,9 +526,49 @@ test('goals return to the original fast result cadence and expose useful mode co
   );
 });
 
+test('cold deferred keeper art retries the wall command only before a shot starts', () => {
+  const loadScene = (state) => {
+    let complete = null;
+    let refreshes = 0;
+    let commands = 0;
+    const requested = [];
+    const scene = Object.create(GameScene.prototype);
+    Object.assign(scene, {
+      sessionAlive: true,
+      state,
+      wall: {},
+      textures: { exists: () => false },
+      keepers: [{
+        refreshTextureAvailability() { refreshes++; },
+        organiseWall() { commands++; return true; }
+      }],
+      load: {
+        spritesheet(key) { requested.push(key); },
+        once(event, callback) {
+          assert.equal(event, 'complete');
+          complete = callback;
+        },
+        start() { complete?.(); }
+      }
+    });
+    scene.loadDeferredKeeperArt();
+    return { requested, refreshes, commands };
+  };
+
+  const aiming = loadScene('AIMING');
+  assert.ok(aiming.requested.includes('keeper-reactions-hd'));
+  assert.equal(aiming.refreshes, 1);
+  assert.equal(aiming.commands, 1);
+
+  const flight = loadScene('FLIGHT');
+  assert.equal(flight.refreshes, 1);
+  assert.equal(flight.commands, 0, 'stream completion must not interrupt a live shot');
+});
+
 test('starting a Time Attack aim clears the ready prompt before drawing the live meter', () => {
   const scene = Object.create(GameScene.prototype);
   let hintAlpha = 1;
+  let tutorialAlpha = 1;
   let killed = 0;
   Object.assign(scene, {
     mode: 'arcade',
@@ -294,7 +577,7 @@ test('starting a Time Attack aim clears the ready prompt before drawing the live
     kicker: { setPose: noop },
     inputHint: { active: true, setAlpha: (value) => { hintAlpha = value; } },
     tweens: { killTweensOf: () => { killed++; } },
-    setTutorialCopyAlpha: noop,
+    setTutorialCopyAlpha: (value) => { tutorialAlpha = value; },
     objectiveUi: null
   });
 
@@ -302,6 +585,86 @@ test('starting a Time Attack aim clears the ready prompt before drawing the live
 
   assert.equal(killed, 1);
   assert.equal(hintAlpha, 0);
+  assert.equal(tutorialAlpha, 0);
+});
+
+test('tutorial copy stays hidden through result presentation and returns for the next aim', () => {
+  const makeText = () => ({
+    text: '',
+    alpha: -1,
+    setText(value) { this.text = value; return this; },
+    setAlpha(value) { this.alpha = value; return this; }
+  });
+  const scene = Object.create(GameScene.prototype);
+  Object.assign(scene, {
+    state: 'RESULT',
+    tutorialStep: 0,
+    tutorialCaption: makeText(),
+    tutorialDetail: makeText()
+  });
+
+  scene.refreshTutorialCopy();
+  assert.equal(scene.tutorialCaption.alpha, 0);
+  assert.equal(scene.tutorialDetail.alpha, 0);
+
+  scene.state = 'AIMING';
+  scene.refreshTutorialCopy();
+  assert.equal(scene.tutorialCaption.alpha, 1);
+  assert.equal(scene.tutorialDetail.alpha, 1);
+});
+
+test('a first-shot goal advances onboarding without skipping power, loft, and curl', () => {
+  const originalSetTutorial = SaveManager.setTutorial;
+  const writes = [];
+  SaveManager.setTutorial = (value) => { writes.push(value); return value; };
+  try {
+    const scene = Object.create(GameScene.prototype);
+    Object.assign(scene, {
+      mode: 'career',
+      levelIndex: 0,
+      state: 'RESULT',
+      tutorialDone: false,
+      tutorialStep: 0,
+      tutorialGfx: null,
+      tutorialCaption: null,
+      tutorialDetail: null
+    });
+
+    scene.advanceTutorial('GOAL');
+    assert.equal(scene.tutorialDone, false);
+    assert.equal(scene.tutorialStep, 1);
+    assert.deepEqual(writes.at(-1), { step: 1 });
+
+    scene.levelIndex = 1;
+    assert.equal(scene.tutorialActive(), true, 'saved coaching continues into the opening Academy');
+    scene.tutorialStep = 3;
+    scene.advanceTutorial('MISS');
+    assert.equal(scene.tutorialDone, true);
+    assert.deepEqual(writes.at(-1), { completed: true, step: 4 });
+  } finally {
+    SaveManager.setTutorial = originalSetTutorial;
+  }
+});
+
+test('ball trail samples are fixed-step data, reject duplicates, and retain a bounded history', () => {
+  const scene = Object.create(GameScene.prototype);
+  Object.assign(scene, {
+    state: 'FLIGHT',
+    ball: { flying: true, x: 0, y: 0.11, z: 8 },
+    trailPts: [],
+    trailStyle: { enabled: true, samples: 3 },
+    hazardMap: new Map()
+  });
+
+  assert.equal(scene.recordBallTrailSample(), true);
+  assert.equal(scene.recordBallTrailSample(), false, 'hit-stop/render repeats do not duplicate a sample');
+  for (const x of [0.2, 0.4, 0.6, 0.8]) {
+    scene.ball.x = x;
+    assert.equal(scene.recordBallTrailSample(), true);
+  }
+
+  assert.equal(scene.trailPts.length, 3);
+  assert.ok(scene.trailPts[0].x < scene.trailPts[2].x);
 });
 
 test('buildKeepers wires separate homes and scaled goal bounds into each keeper', () => {

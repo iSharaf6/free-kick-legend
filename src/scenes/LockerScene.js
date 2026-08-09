@@ -59,6 +59,7 @@ export class LockerScene extends Phaser.Scene {
 
   create() {
     configureHdCamera(this);
+    this.reducedMotion = Boolean(SaveManager.getSettings().reducedMotion);
     MenuMusic.enterMenu();
     this.add.image(0, 0, 'stadium-menu').setOrigin(0).setDepth(0);
     const wash = this.add.graphics().setDepth(1);
@@ -74,7 +75,7 @@ export class LockerScene extends Phaser.Scene {
     this.renderContent();
 
     addScanlines(this, 2600, 0.03);
-    sceneIntro(this);
+    if (!this.reducedMotion) sceneIntro(this);
   }
 
   resolveSelection(requested) {
@@ -229,7 +230,9 @@ export class LockerScene extends Phaser.Scene {
       kitId: equippedKit,
       characterId: equippedCharacter,
       scale: 4.05,
-      depth: 133
+      depth: 133,
+      ambient: !this.reducedMotion,
+      reducedMotion: this.reducedMotion
     });
 
     const ballId = this.category === 'ball'
@@ -240,15 +243,17 @@ export class LockerScene extends Phaser.Scene {
     const ballGameplay = getCosmetic(ballId)?.gameplay;
     ball.setScale((19 / (ball.texture.source[0]?.width || 12)) * (ballGameplay?.visualScale ?? 1));
     this.contentLayer.add(ball);
-    this.previewTween = this.tweens.add({
-      targets: ball,
-      y: 204,
-      rotation: Math.PI * 2,
-      duration: 1500,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut'
-    });
+    if (!this.reducedMotion) {
+      this.previewTween = this.tweens.add({
+        targets: ball,
+        y: 204,
+        rotation: Math.PI * 2,
+        duration: 1500,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut'
+      });
+    }
 
     const trailId = this.category === 'trail'
       ? selected.id

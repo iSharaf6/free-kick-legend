@@ -48,13 +48,186 @@ test('menu and pause expose persistent, keyboard-accessible settings', async ({ 
   await page.keyboard.press('Escape');
   await expect(panel).toBeHidden();
   await game.startCareer();
+
+  const focusedPauseButton = () => page.evaluate(() => {
+    const button = window.__fkl.pauseOverlayObjects.find((object) => object?.buttonFocused);
+    return button?.buttonLabel?.text || null;
+  });
+
   await page.keyboard.press('Tab');
   await page.waitForFunction(() => window.__fkl?.state === 'PAUSED');
-  await game.clickLogical(204, 162);
+  expect(await page.evaluate(() => ({
+    menuVisible: window.__fkl.menuButton.visible,
+    menuEnabled: window.__fkl.menuButton.buttonEnabled,
+    muteVisible: window.__fkl.muteButton.visible,
+    muteEnabled: window.__fkl.muteButton.buttonEnabled
+  }))).toEqual({
+    menuVisible: false,
+    menuEnabled: false,
+    muteVisible: false,
+    muteEnabled: false
+  });
+  expect(await focusedPauseButton()).toBeNull();
+
+  await page.keyboard.press('Tab');
+  expect(await focusedPauseButton()).toBe('RESUME');
+  await expect(page.locator('#game-status')).toHaveText('RESUME button');
+  await page.keyboard.press('Tab');
+  expect(await focusedPauseButton()).toBe('SETTINGS');
+  await expect(page.locator('#game-status')).toHaveText('SETTINGS button');
+  await page.keyboard.press('Enter');
   await expect(panel).toBeVisible();
   await expect(page.getByLabel('AIM ASSIST')).toHaveValue('reduced');
-  await page.getByRole('button', { name: 'DONE' }).click();
+
+  await page.keyboard.press('Tab');
+  await expect(page.getByLabel('MUSIC VOLUME')).toBeFocused();
+  expect(await page.evaluate(() => window.__fkl?.state)).toBe('PAUSED');
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.getByRole('button', { name: 'DONE' })).toBeFocused();
+  expect(await page.evaluate(() => window.__fkl?.state)).toBe('PAUSED');
+
+  await page.keyboard.press('Escape');
   await expect(panel).toBeHidden();
+  await page.keyboard.press('Tab');
+  expect(await focusedPauseButton()).toBe('RESTART');
+  await page.keyboard.press('Shift+Tab');
+  expect(await focusedPauseButton()).toBe('SETTINGS');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => window.__fkl?.state === 'AIMING');
+  expect(await page.evaluate(() => ({
+    menuVisible: window.__fkl.menuButton.visible,
+    menuEnabled: window.__fkl.menuButton.buttonEnabled,
+    muteVisible: window.__fkl.muteButton.visible,
+    muteEnabled: window.__fkl.muteButton.buttonEnabled
+  }))).toEqual({
+    menuVisible: true,
+    menuEnabled: true,
+    muteVisible: true,
+    muteEnabled: true
+  });
+});
+
+test('shared canvas buttons support sequential and spatial keyboard navigation', async ({ page }) => {
+  const game = new GamePage(page);
+  await game.open({ width: 1280, height: 720 });
+
+  const canvas = page.locator('#app canvas');
+  await expect(canvas).toHaveAttribute('tabindex', '0');
+  await expect(canvas).toHaveAttribute('role', 'application');
+  await expect(canvas).toHaveAttribute('aria-label', /Press Tab to enter game controls/);
+  await expect(canvas).not.toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(canvas).toBeFocused();
+
+  await game.clickLogical(350, 227);
+  await page.waitForFunction(() => window.__game?.scene?.isActive('Locker'));
+
+  const focusedButton = () => page.evaluate(() => {
+    const objects = [];
+    const visit = (object) => {
+      objects.push(object);
+      for (const child of object?.list || []) visit(child);
+    };
+    for (const child of window.__game.scene.getScene('Locker').children.list) visit(child);
+    const focused = objects.find((object) => object?.buttonFocused);
+    return focused ? {
+      label: focused.buttonLabel?.text || '',
+      icon: focused.buttonIcon?.texture?.key || null
+    } : null;
+  });
+
+  expect(await focusedButton()).toBeNull();
+
+  await page.keyboard.press('Tab');
+  expect(await focusedButton()).toEqual({ label: '', icon: 'icon-back' });
+  await expect(page.locator('#game-status')).toHaveText('Back button');
+  await page.keyboard.press('Tab');
+  expect(await focusedButton()).toEqual({ label: 'PLAYERS', icon: 'kicker-hd-kit-home-idle' });
+  await expect(page.locator('#game-status')).toHaveText('PLAYERS button');
+  await page.keyboard.press('Shift+Tab');
+  expect(await focusedButton()).toEqual({ label: '', icon: 'icon-back' });
+
+  await page.keyboard.press('ArrowDown');
+  expect(await focusedButton()).toEqual({ label: 'PLAYERS', icon: 'kicker-hd-kit-home-idle' });
+  await page.keyboard.press('ArrowRight');
+  expect(await focusedButton()).toEqual({ label: 'KITS', icon: 'icon-kit' });
+  await page.keyboard.press('ArrowLeft');
+  expect(await focusedButton()).toEqual({ label: 'PLAYERS', icon: 'kicker-hd-kit-home-idle' });
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.__game.scene.getScene('Locker').category === 'character');
+
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  expect(await focusedButton()).toEqual({ label: 'BALLS', icon: 'ball-classic' });
+  await page.keyboard.press('Space');
+  await page.waitForFunction(() => window.__game.scene.getScene('Locker').category === 'ball');
+});
+
+test('terminal overlays contain canvas focus and block actions during ads', async ({ page }) => {
+  const game = new GamePage(page);
+  await game.open({ width: 1280, height: 720 });
+  await game.startCareer();
+
+  await page.evaluate(() => {
+    window.__overlayActivations = 0;
+    window.__fkl.showOverlay('TRY AGAIN', ['OUT OF ATTEMPTS'], [
+      {
+        label: 'RETRY', color: 0x1976d2, hover: 0x2196f3,
+        cb: () => { window.__overlayActivations++; }
+      },
+      { label: 'LEVELS', color: 0x37474f, hover: 0x546e7a, cb: () => {} }
+    ]);
+  });
+
+  expect(await page.evaluate(() => ({
+    menuVisible: window.__fkl.menuButton.visible,
+    menuEnabled: window.__fkl.menuButton.buttonEnabled,
+    muteVisible: window.__fkl.muteButton.visible,
+    muteEnabled: window.__fkl.muteButton.buttonEnabled
+  }))).toEqual({
+    menuVisible: false,
+    menuEnabled: false,
+    muteVisible: false,
+    muteEnabled: false
+  });
+
+  await game.canvas.focus();
+  await page.keyboard.press('Tab');
+  expect(await page.evaluate(() => (
+    window.__fkl.terminalOverlayObjects.find((object) => object?.buttonFocused)?.buttonLabel?.text
+  ))).toBe('RETRY');
+
+  await page.evaluate(() => {
+    window.CrazyGames.SDK.ad = {
+      requestAd: (_type, callbacks) => { window.__adCallbacks = callbacks; }
+    };
+    window.__pendingAd = window.__fkl.requestNaturalBreakAd();
+  });
+  await page.waitForFunction(() => window.__fkl.adRequestActive && window.__adCallbacks);
+  await expect(game.canvas).toBeFocused();
+  expect(await page.evaluate(() => window.__fkl.terminalOverlayObjects
+    .filter((object) => typeof object?.setButtonEnabled === 'function')
+    .every((button) => !button.buttonEnabled && !button.buttonFocused))).toBe(true);
+
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Enter');
+  await expect(game.canvas).toBeFocused();
+  expect(await page.evaluate(() => window.__overlayActivations)).toBe(0);
+
+  await page.evaluate(async () => {
+    window.__adCallbacks.adStarted();
+    window.__adCallbacks.adFinished();
+    await window.__pendingAd;
+  });
+  await page.waitForFunction(() => !window.__fkl.adRequestActive);
+  await page.keyboard.press('Tab');
+  expect(await page.evaluate(() => (
+    window.__fkl.terminalOverlayObjects.find((object) => object?.buttonFocused)?.buttonLabel?.text
+  ))).toBe('RETRY');
+  await page.keyboard.press('Enter');
+  expect(await page.evaluate(() => window.__overlayActivations)).toBe(1);
 });
 
 test('compact landscape promotes critical HUD text and results reach the live region', async ({ page }) => {
@@ -70,4 +243,13 @@ test('compact landscape promotes critical HUD text and results reach the live re
 
   await page.evaluate(() => window.__fkl.showShotReadout('WALL', { x: 0, y: 1 }, { points: 0 }));
   await expect(page.locator('#game-status')).toContainText('wall', { ignoreCase: true });
+
+  await page.evaluate(() => window.__fkl.showOverlay('TRY AGAIN', [
+    'OUT OF ATTEMPTS',
+    'CHANGE HEIGHT, POWER, OR CURVE'
+  ], [
+    { label: 'RETRY', color: 0x1976d2, hover: 0x2196f3, cb: () => {} },
+    { label: 'LEVELS', color: 0x37474f, hover: 0x546e7a, cb: () => {} }
+  ]));
+  await expect(page.locator('#game-status')).toContainText('Actions: RETRY, LEVELS');
 });

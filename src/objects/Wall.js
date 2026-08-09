@@ -7,6 +7,9 @@ const IMPACT_FLASH_SECONDS = 0.095;
 const COLLAPSE_SECONDS = 0.62;
 const COLLAPSE_FRAMES = 6;
 const PLANE_TOLERANCE = 0.08;
+const DEFLECTOR_RAMP_SECONDS = 0.14;
+const DEFLECTOR_READY_LEAD_SECONDS = 0.04;
+const DEFLECTOR_FALLBACK_ETA = 0.22;
 
 // Do not raise this to buy a wider gap underneath.
 //
@@ -64,6 +67,25 @@ function deterministicBuild(index, count) {
 function finite(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+/**
+ * Ease a committed deflector from planted stance to full reach shortly before
+ * the predicted wall crossing. The value drives both drawing and contact, so a
+ * visible leg never disagrees with the collision envelope.
+ */
+export function deflectorExtensionProgress(elapsedSeconds, wallEta, active = true) {
+  if (!active) return 0;
+  const elapsed = Math.max(0, finite(elapsedSeconds));
+  const suppliedEta = wallEta == null ? Number.NaN : Number(wallEta);
+  const arrival = Number.isFinite(suppliedEta) && suppliedEta >= 0
+    ? suppliedEta
+    : DEFLECTOR_FALLBACK_ETA;
+  const readyAt = Math.max(0, arrival - DEFLECTOR_READY_LEAD_SECONDS);
+  const startsAt = Math.max(0, readyAt - DEFLECTOR_RAMP_SECONDS);
+  if (readyAt <= startsAt + 1e-9) return elapsed >= readyAt ? 1 : 0;
+  const linear = Math.max(0, Math.min(1, (elapsed - startsAt) / (readyAt - startsAt)));
+  return linear * linear * (3 - 2 * linear);
 }
 
 function stableUnitInterval(parts) {
@@ -124,6 +146,8 @@ export class Wall {
     this.struck = false;
     this.strikeElapsed = 0;
     this.deflectorActive = false;
+    this.deflectorEta = null;
+    this.deflectorProgress = 0;
     this._strikeStartedAt = 0;
     this._shotContext = null;
     this.rng = optionBag.rng;
@@ -207,6 +231,11 @@ export class Wall {
       this.deflectorActive = forced == null
         ? sample < this.config.extensionChance
         : Boolean(forced);
+      const prediction = shotContext.wallPrediction ?? shotContext.ball?.predictAt?.(this.baseZ);
+      const predictedEta = Number(shotContext.wallEta ?? prediction?.T);
+      this.deflectorEta = Number.isFinite(predictedEta) && predictedEta >= 0
+        ? predictedEta
+        : null;
       const player = this.players[this.config.defenderIndex];
       if (player) {
         const targetX = finite(
@@ -234,9 +263,15 @@ export class Wall {
     this.strikeElapsed = this.struck
       ? Math.max(0, elapsed - this._strikeStartedAt)
       : 0;
+    this.deflectorProgress = deflectorExtensionProgress(
+      this.strikeElapsed,
+      this.deflectorEta,
+      this.deflectorActive
+    );
     const poses = getWallPoseOffsets(this.config, elapsed, {
       spacing: SPACING,
-      deflectorActive: this.deflectorActive
+      deflectorActive: this.deflectorActive,
+      deflectorProgress: this.deflectorProgress
     });
 
     for (let index = 0; index < this.players.length; index++) {
@@ -425,15 +460,15 @@ export class Wall {
     if (!p) return false;
     p.flinch = 1;
     p.flinchDir = Math.sign(ball?.vx || pt.x - p.x || 1) || 1;
-    // A mid-air hit chops the jump so the defender drops with the deflection.
+    // A mid-air hit chops the jump so the defender drops with the deflection,
+    // but retains the current root. The collapse atlas then travels to the turf
+    // under the same fixed-step gravity instead of teleporting there on contact.
     if (p.jumpY > 0) p.vy = Math.min(p.vy, 0.4);
     p.spr.setTint?.(0xfff3c4);
     p.flashTime = IMPACT_FLASH_SECONDS;
     if (options.collapse && this.scene.textures?.exists?.('defender-collapse-hd')) {
       p.collapsing = true;
       p.collapseTime = 0;
-      p.jumpY = 0;
-      p.vy = 0;
     }
     return true;
   }
@@ -444,6 +479,8 @@ export class Wall {
     this.struck = false;
     this.strikeElapsed = 0;
     this.deflectorActive = false;
+    this.deflectorEta = null;
+    this.deflectorProgress = 0;
     this._strikeStartedAt = 0;
     this._shotContext = null;
     this.jumped = false;

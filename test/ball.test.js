@@ -102,6 +102,39 @@ test('wind and sidespin affect the complete velocity vector deterministically', 
   close(rightSpin.x, -leftSpin.x, 1e-10);
 });
 
+test('legal mirrored curl produces signed airborne rotation while grounded roll stays forward', () => {
+  const right = new Ball();
+  const left = new Ball();
+  const straight = new Ball();
+  right.kick(0, 5, 27, 1);
+  left.kick(0, 5, 27, -1);
+  straight.kick(0, 5, 27, 0);
+
+  for (let index = 0; index < 24; index++) {
+    right.step(PHYS.fixedStep);
+    left.step(PHYS.fixedStep);
+    straight.step(PHYS.fixedStep);
+  }
+
+  assert.equal(right.grounded, false);
+  assert.equal(left.grounded, false);
+  assert.ok(right.rot > straight.rot, 'right curl should accelerate clockwise marking rotation');
+  assert.ok(left.rot < 0, 'left curl should visibly reverse marking rotation during a legal shot');
+  assert.ok(straight.rot > 0, 'a no-curl strike should retain a subtle neutral tumble');
+
+  const rolling = new Ball();
+  rolling.kick(0, 0, 4, -1);
+  assert.equal(rolling.grounded, true);
+  for (let index = 0; index < 48; index++) {
+    const previousRotation = rolling.rot;
+    assert.equal(rolling.step(PHYS.fixedStep), true);
+    assert.ok(
+      rolling.rot > previousRotation,
+      'each grounded step should keep rolling forward despite residual negative sidespin'
+    );
+  }
+});
+
 test('equipped ball profiles change curve, hang time and rebound deterministically', () => {
   const basketball = new Ball({ physics: {
     gravity: 0.94, drag: 1.08, magnus: 0.84, bounce: 1.45, rollingDrag: 0.82

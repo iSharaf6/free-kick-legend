@@ -202,3 +202,53 @@ test('keeper presents one wall command without interrupting catches or practical
   keeper.draw();
   assert.equal(keeper.spr.calls.setTexture[0], 'keeper-anim-hd', 'falls back safely if the practical atlas is unavailable');
 });
+
+test('concede reactions preserve airborne saves and settle grounded reads without hidden dive progress', () => {
+  const textures = [
+    'keeper-anim-hd',
+    'keeper-dive-motion-hd',
+    'keeper-low-save-hd',
+    'keeper-reactions-hd'
+  ];
+  const keeper = new Goalkeeper(sceneStub(textures), 0.72, CAM.ballDist + 18, { seed: 19 });
+  keeper.onShot({
+    z: CAM.ballDist,
+    vx: 2,
+    vy: 5,
+    vz: 24,
+    spin: 0,
+    predictAt: () => ({ x: 1.4, y: 1.7, T: 0.62 })
+  }, CAM.ballDist + 18);
+  keeper.state = 'dive';
+  keeper.pose = 'dive';
+  keeper.stateT = 0.16;
+  keeper.diveP = 0.46;
+  keeper.visualLift = 0.64;
+  const airborneStateT = keeper.stateT;
+
+  assert.equal(keeper.reactToGoal(), false);
+  assert.equal(keeper.presentationAction, null);
+  keeper.update(PHYS.fixedStep);
+  assert.equal(keeper.state, 'dive');
+  assert.ok(keeper.stateT > airborneStateT, 'the visible failed dive should continue naturally');
+
+  keeper.reset();
+  keeper.state = 'set';
+  keeper.pose = 'ready';
+  keeper.x = 1.15;
+  keeper.moveVx = 1.8;
+  const plantedX = keeper.x;
+  assert.equal(keeper.reactToGoal(0.82), true);
+  assert.equal(keeper.state, 'idle');
+  assert.equal(keeper.moveVx, 0);
+
+  let steps = 0;
+  while (keeper.presentationAction && steps < 120) {
+    keeper.update(PHYS.fixedStep);
+    assert.equal(keeper.x, plantedX, 'presentation must not advance a hidden return or dive');
+    steps++;
+  }
+  assert.equal(keeper.presentationAction, null);
+  assert.equal(keeper.state, 'idle');
+  assert.equal(keeper.x, plantedX);
+});
