@@ -21,11 +21,259 @@ export const UI_DEPTH = {
   overlay: 3000
 };
 
+const BUTTON_NAVIGATION = Symbol('fkl-button-navigation');
+const CANVAS_FOCUS_BRIDGE = Symbol('fkl-canvas-focus-bridge');
+
+function gameCanvas(scene, documentRef = globalThis.document) {
+  return scene?.game?.canvas ?? documentRef?.querySelector?.('#app canvas') ?? null;
+}
+
+export function canvasHasKeyboardFocus(scene, documentRef = globalThis.document) {
+  const canvas = gameCanvas(scene, documentRef);
+  if (!canvas) return true;
+  // Lightweight embeds and renderer tests do not always expose activeElement.
+  // In a browser, however, canvas controls must not hijack keys while focus is
+  // still on the page, browser chrome, or the native settings dialog.
+  const activeElement = documentRef?.activeElement;
+  return !activeElement || activeElement === canvas;
+}
+
+function configureCanvasAccessibility(scene) {
+  const canvas = gameCanvas(scene);
+  if (!canvas?.setAttribute) return false;
+  canvas.setAttribute('tabindex', '0');
+  canvas.setAttribute('role', 'application');
+  canvas.setAttribute(
+    'aria-label',
+    'Kick District game. Press Tab to enter game controls, then use Tab and arrow keys to choose, and Enter or Space to select.'
+  );
+  // Some browsers do not focus a canvas when it is pointer-operated. Give
+  // pointer and keyboard users the same explicit ownership boundary, without
+  // installing one listener per scene on Phaser's persistent canvas.
+  if (!canvas[CANVAS_FOCUS_BRIDGE] && canvas.addEventListener) {
+    const focusCanvas = () => canvas.focus?.({ preventScroll: true });
+    canvas.addEventListener('pointerdown', focusCanvas);
+    canvas[CANVAS_FOCUS_BRIDGE] = focusCanvas;
+  }
+  return true;
+}
+
+function accessibleButtonLabel(label, icon) {
+  const text = String(label || '').replace(/\s+/g, ' ').trim();
+  if (text) return text;
+  const iconLabel = String(icon || '')
+    .replace(/^icon-/, '')
+    .replace(/-/g, ' ')
+    .trim();
+  if (iconLabel === 'mute' || iconLabel === 'sound') return 'Sound';
+  return iconLabel
+    ? iconLabel.replace(/\b\w/g, (character) => character.toUpperCase())
+    : 'Game control';
+}
+
+function announceButtonFocus(button, documentRef = globalThis.document) {
+  const status = documentRef?.getElementById?.('game-status');
+  if (!status) return false;
+  status.textContent = `${button.buttonAccessibleLabel || 'Game control'} button`;
+  return true;
+}
+
+function hasActiveDomDialog(documentRef = globalThis.document) {
+  const dialog = documentRef?.querySelector?.('[role="dialog"][aria-modal="true"]');
+  if (!dialog) return false;
+  // The settings dialog remains mounted while closed, with `hidden` on its
+  // section. Only hand keyboard ownership to the DOM while that ancestor is
+  // actually visible.
+  return !dialog.closest?.('[hidden]');
+}
+
+function isVisibleInTree(object) {
+  for (let current = object; current; current = current.parentContainer) {
+    if (current.active === false || current.visible === false) return false;
+    if (typeof current.alpha === 'number' && current.alpha <= 0) return false;
+  }
+  return true;
+}
+
+function isButtonFocusable(button) {
+  return Boolean(
+    button?.buttonEnabled &&
+    isVisibleInTree(button) &&
+    button.input?.enabled !== false
+  );
+}
+
+function buttonPosition(button) {
+  const matrix = button?.getWorldTransformMatrix?.();
+  if (Number.isFinite(matrix?.tx) && Number.isFinite(matrix?.ty)) {
+    return { x: matrix.tx, y: matrix.ty };
+  }
+  return {
+    x: Number(button?.x) || 0,
+    y: Number(button?.y) || 0
+  };
+}
+
+function createButtonNavigation(scene) {
+  const keyboard = scene?.input?.keyboard;
+  if (!keyboard?.on) return null;
+  configureCanvasAccessibility(scene);
+
+  const buttons = [];
+  let focused = null;
+  let blocked = false;
+  let cleaned = false;
+
+  const availableButtons = () => {
+    const available = buttons.filter(isButtonFocusable);
+    if (focused && !available.includes(focused)) setFocused(null);
+    return available;
+  };
+
+  const setFocused = (button) => {
+    const next = isButtonFocusable(button) ? button : null;
+    if (focused === next) return next;
+    focused?.setButtonFocused?.(false);
+    focused = next;
+    focused?.setButtonFocused?.(true);
+    if (focused) announceButtonFocus(focused);
+    return focused;
+  };
+
+  const cycle = (direction) => {
+    const available = availableButtons();
+    if (!available.length) return false;
+    const currentIndex = available.indexOf(focused);
+    const nextIndex = currentIndex < 0
+      ? (direction > 0 ? 0 : available.length - 1)
+      : (currentIndex + direction + available.length) % available.length;
+    setFocused(available[nextIndex]);
+    return true;
+  };
+
+  const move = (dx, dy) => {
+    const available = availableButtons();
+    if (!available.length) return false;
+    if (!focused || !available.includes(focused)) {
+      setFocused(available[0]);
+      return true;
+    }
+
+    const origin = buttonPosition(focused);
+    let best = null;
+    let bestScore = Infinity;
+    available.forEach((candidate) => {
+      if (candidate === focused) return;
+      const point = buttonPosition(candidate);
+      const deltaX = point.x - origin.x;
+      const deltaY = point.y - origin.y;
+      const forward = deltaX * dx + deltaY * dy;
+      if (forward <= 0) return;
+      const cross = Math.abs(deltaX * dy - deltaY * dx);
+      // Prefer the intended axis, then the nearest option on that axis. This
+      // keeps rows and columns stable without making diagonal layouts inert.
+      const score = forward + cross * 2;
+      if (score < bestScore) {
+        best = candidate;
+        bestScore = score;
+      }
+    });
+    if (!best) return false;
+    setFocused(best);
+    return true;
+  };
+
+  const activate = (event) => {
+    if (event?.repeat || !isButtonFocusable(focused)) return false;
+    return focused.activateButton?.() === true;
+  };
+
+  const handle = (event, action) => {
+    if (hasActiveDomDialog()) return;
+    if (!canvasHasKeyboardFocus(scene)) return;
+    if (blocked) {
+      event?.preventDefault?.();
+      if (event) event.cancelled = 1;
+      return;
+    }
+    if (!action()) return;
+    event?.preventDefault?.();
+    if (event) event.cancelled = 1;
+  };
+
+  const handlers = new Map([
+    ['keydown-TAB', (event) => handle(event, () => (
+      event?.repeat || event?.cancelled ? false : cycle(event?.shiftKey ? -1 : 1)
+    ))],
+    ['keydown-UP', (event) => handle(event, () => move(0, -1))],
+    ['keydown-DOWN', (event) => handle(event, () => move(0, 1))],
+    ['keydown-LEFT', (event) => handle(event, () => move(-1, 0))],
+    ['keydown-RIGHT', (event) => handle(event, () => move(1, 0))],
+    ['keydown-ENTER', (event) => handle(event, () => activate(event))],
+    ['keydown-SPACE', (event) => handle(event, () => activate(event))]
+  ]);
+  handlers.forEach((handler, eventName) => keyboard.on(eventName, handler));
+
+  const remove = (button) => {
+    const index = buttons.indexOf(button);
+    if (index >= 0) buttons.splice(index, 1);
+    if (focused === button) {
+      if (button.active !== false) button.setButtonFocused?.(false);
+      focused = null;
+    }
+  };
+
+  const navigation = {
+    register(button) {
+      if (!button || buttons.includes(button)) return button;
+      buttons.push(button);
+      button.once?.('destroy', () => remove(button));
+      return button;
+    },
+    focus: setFocused,
+    blur(button) {
+      if (!button || focused === button) setFocused(null);
+    },
+    setBlocked(value) {
+      blocked = Boolean(value);
+      if (blocked) setFocused(null);
+      return blocked;
+    },
+    cleanup() {
+      if (cleaned) return;
+      cleaned = true;
+      handlers.forEach((handler, eventName) => keyboard.off?.(eventName, handler));
+      setFocused(null);
+      buttons.length = 0;
+      if (scene[BUTTON_NAVIGATION] === navigation) delete scene[BUTTON_NAVIGATION];
+    }
+  };
+  scene.events?.once?.('shutdown', navigation.cleanup);
+  return navigation;
+}
+
+function getButtonNavigation(scene) {
+  if (!scene) return null;
+  if (!scene[BUTTON_NAVIGATION]) {
+    const navigation = createButtonNavigation(scene);
+    if (navigation) scene[BUTTON_NAVIGATION] = navigation;
+  }
+  return scene[BUTTON_NAVIGATION] ?? null;
+}
+
+export function setCanvasButtonNavigationBlocked(scene, blocked) {
+  const navigation = scene?.[BUTTON_NAVIGATION];
+  if (!navigation?.setBlocked) return false;
+  navigation.setBlocked(blocked);
+  return true;
+}
+
 function toCss(value) {
   return `#${value.toString(16).padStart(6, '0')}`;
 }
 
 export function configureHdCamera(scene) {
+  configureCanvasAccessibility(scene);
   const camera = scene.cameras.main;
   camera.setViewport(0, 0, RENDER_W, RENDER_H);
   camera.setZoom(RENDER_SCALE);
@@ -84,7 +332,7 @@ export function drawPanel(g, x, y, w, h, opts = {}) {
   return g;
 }
 
-function drawButton(g, w, h, fill, state, opts) {
+function drawButton(g, w, h, fill, state, opts, focused = false) {
   const pressed = state === 'pressed';
   const disabled = state === 'disabled';
   // A two-pixel travel plus the disappearing drop shadow reads as a physical
@@ -118,6 +366,24 @@ function drawButton(g, w, h, fill, state, opts) {
     g.fillStyle(PAL.gold, 1);
     g.fillRect(-w / 2 + 1, -h / 2 + 1 + y, 3, 3);
     g.fillRect(w / 2 - 4, -h / 2 + 1 + y, 3, 3);
+  }
+
+  if (focused && !disabled) {
+    const left = -w / 2 - 2;
+    const top = -h / 2 - 2 + y;
+    const right = w / 2 + 1;
+    const bottom = h / 2 + 1 + y;
+    const focus = opts.focusColor ?? PAL.cream;
+    g.fillStyle(PAL.ink, 0.94);
+    g.fillRect(left - 1, top - 1, w + 6, 1);
+    g.fillRect(left - 1, bottom + 1, w + 6, 1);
+    g.fillRect(left - 1, top, 1, h + 4);
+    g.fillRect(right + 1, top, 1, h + 4);
+    g.fillStyle(focus, 1);
+    g.fillRect(left, top, w + 4, 1);
+    g.fillRect(left, bottom, w + 4, 1);
+    g.fillRect(left, top, 1, h + 4);
+    g.fillRect(right, top, 1, h + 4);
   }
 }
 
@@ -159,10 +425,12 @@ export function makeButton(scene, x, y, w, h, label, onClick, opts = {}) {
   let enabled = opts.disabled !== true;
   let isOver = false;
   let isDown = false;
+  let hasKeyboardFocus = false;
+  const navigation = getButtonNavigation(scene);
 
   const render = (state = enabled ? (isDown ? 'pressed' : (isOver ? 'hover' : 'idle')) : 'disabled') => {
     const fill = state === 'hover' ? hover : state === 'pressed' ? pressed : base;
-    drawButton(bg, w, h, fill, state, opts);
+    drawButton(bg, w, h, fill, state, opts, hasKeyboardFocus);
     const offset = state === 'pressed' ? 2 : 0;
     txt.setY((opts.labelY ?? 0) + offset).setAlpha(enabled ? 1 : 0.48);
     if (icon) icon.setY((opts.iconY ?? 0) + offset).setAlpha(enabled ? 1 : 0.42);
@@ -185,6 +453,7 @@ export function makeButton(scene, x, y, w, h, label, onClick, opts = {}) {
   });
   c.on('pointerdown', () => {
     if (!enabled) return;
+    navigation?.focus(c);
     isOver = true;
     isDown = true;
     render();
@@ -194,10 +463,7 @@ export function makeButton(scene, x, y, w, h, label, onClick, opts = {}) {
     const shouldFire = isOver;
     isDown = false;
     render();
-    if (shouldFire) {
-      Audio.ui();
-      onClick?.();
-    }
+    if (shouldFire) c.activateButton();
   });
   c.on('pointerupoutside', () => {
     isDown = false;
@@ -207,17 +473,37 @@ export function makeButton(scene, x, y, w, h, label, onClick, opts = {}) {
 
   c.setButtonEnabled = (value) => {
     enabled = Boolean(value);
+    c.buttonEnabled = enabled;
     isDown = false;
     isOver = false;
     if (enabled) c.setInteractive({ useHandCursor: true });
-    else c.disableInteractive();
+    else {
+      c.disableInteractive();
+      navigation?.blur(c);
+    }
     render();
     return c;
   };
+  c.setButtonFocused = (value) => {
+    hasKeyboardFocus = Boolean(value) && enabled;
+    c.buttonFocused = hasKeyboardFocus;
+    render();
+    return c;
+  };
+  c.activateButton = () => {
+    if (!isButtonFocusable(c)) return false;
+    Audio.ui();
+    onClick?.();
+    return true;
+  };
+  c.buttonEnabled = enabled;
+  c.buttonFocused = false;
+  c.buttonAccessibleLabel = opts.accessibleLabel ?? accessibleButtonLabel(label, opts.icon);
   c.buttonLabel = txt;
   c.buttonIcon = icon;
   c.buttonWidth = w;
   c.buttonHeight = h;
+  navigation?.register(c);
   return c;
 }
 

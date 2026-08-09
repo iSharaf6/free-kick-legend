@@ -202,6 +202,32 @@ test('cancelling a kick sweeps the action state but never the ambient loop', () 
   );
 });
 
+test('reduced-motion boot keeps ambient capability and hard-stops it until motion is enabled', () => {
+  const scene = withTweenManager(sceneStub());
+  const kicker = new Kicker(scene, 120, 200, {
+    kitId: 'kit-home',
+    scale: 4.8,
+    ambient: true,
+    reducedMotion: true
+  });
+
+  assert.equal(kicker.ambientEnabled, true);
+  assert.equal(kicker.ambient, undefined, 'reduced boot creates no breathing tween');
+
+  kicker.setReducedMotion(false);
+  assert.ok(kicker.ambient, 'enabling motion builds the deferred ambient loop');
+
+  scene.killedTargets.length = 0;
+  kicker.idleState.bob = -0.3;
+  kicker.setReducedMotion(true);
+  assert.equal(kicker.ambient, null, 'the tween handle is discarded, not merely paused');
+  assert.ok(scene.killedTargets.includes(kicker.idleState));
+  assert.deepEqual(kicker.idleState, { bob: 0, swell: 0 });
+
+  kicker.resumeAmbient();
+  assert.equal(kicker.ambient, null, 'a broad scene resume cannot override reduced motion');
+});
+
 test('a cancelled sequence resets the action offsets to neutral', () => {
   const kicker = new Kicker(withTweenManager(sceneStub()), 120, 200, {
     kitId: 'kit-home',
@@ -260,6 +286,28 @@ test('the Phaser sprite clip owns frame timing and never skips contact', () => {
   assert.equal(completes, 1);
   assert.equal(kicker.activeKick, null);
   assert.equal(kicker.ambient, undefined, 'ambient:false remains disabled after recovery');
+});
+
+test('every selectable character reaches ball contact on the same Time Attack clock tick', () => {
+  for (const characterId of [
+    'character-mica',
+    'character-power-striker',
+    'character-agile-winger',
+    'character-islam-sharaf'
+  ]) {
+    const kicker = new Kicker(withTweenManager(sceneStub({ animated: true })), 120, 200, {
+      characterId,
+      kitId: 'kit-home',
+      scale: 4.8,
+      ambient: false
+    });
+    const frames = kicker.sprite.animationClips.get('kicker-action').frames;
+    assert.equal(
+      frames[0].duration + frames[1].duration,
+      122,
+      `${characterId} must not gain or lose round time before contact`
+    );
+  }
 });
 
 test('cancelling an active Phaser clip invalidates late frame events', () => {

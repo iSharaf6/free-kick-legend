@@ -296,7 +296,31 @@ export function addStandDressing(scene, {
   }
 
   const tweens = [];
-  if (!reducedMotion) {
+  let motionReduced = Boolean(reducedMotion);
+
+  const resetAmbientPose = () => {
+    flags.forEach((flag) => flag?.setAngle?.(0));
+    flares.forEach((flare) => {
+      flare.bloom?.setAlpha?.(0.32);
+      flare.smoke?.setY?.(flare.baseY - 6).setAlpha?.(0.16);
+    });
+    flashes.forEach((flash) => flash?.setAlpha?.(0));
+  };
+
+  const stopAmbient = () => {
+    tweens.forEach((tween) => tween?.remove?.());
+    tweens.length = 0;
+    scene.tweens?.killTweensOf?.([
+      ...flags,
+      ...pools,
+      ...flares.flatMap((flare) => [flare.bloom, flare.smoke, flare.core]),
+      ...flashes
+    ]);
+    resetAmbientPose();
+  };
+
+  const startAmbient = () => {
+    if (motionReduced || tweens.length) return;
     flags.forEach((flag, index) => {
       tweens.push(scene.tweens.add({
         targets: flag,
@@ -341,7 +365,10 @@ export function addStandDressing(scene, {
         ease: 'Quad.easeOut'
       }));
     });
-  }
+  };
+
+  if (motionReduced) resetAmbientPose();
+  else startAmbient();
 
   return {
     objects,
@@ -353,7 +380,7 @@ export function addStandDressing(scene, {
 
     /** Surge the props for the length of a goal celebration. */
     celebrate() {
-      if (reducedMotion) return;
+      if (motionReduced) return;
       flares.forEach((flare) => {
         scene.tweens.add({
           targets: flare.bloom,
@@ -388,9 +415,16 @@ export function addStandDressing(scene, {
       });
     },
 
+    setReducedMotion(reduced) {
+      const next = Boolean(reduced);
+      if (next === motionReduced) return;
+      motionReduced = next;
+      if (motionReduced) stopAmbient();
+      else startAmbient();
+    },
+
     destroy() {
-      tweens.forEach((tween) => tween?.remove?.());
-      tweens.length = 0;
+      stopAmbient();
       objects.forEach((object) => object?.destroy?.());
       objects.length = 0;
       flags.length = 0;

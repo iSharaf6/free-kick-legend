@@ -133,6 +133,19 @@ function defaultSettings() {
   return { ...DEFAULT_SETTINGS };
 }
 
+function withSystemMotionPreference(settings) {
+  let systemReduced = false;
+  try {
+    systemReduced = Boolean(globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches);
+  } catch {
+    // Privacy-restricted embeds can deny media-query access. The explicit
+    // in-game preference remains authoritative in that environment.
+  }
+  return systemReduced && !settings.reducedMotion
+    ? { ...settings, reducedMotion: true }
+    : { ...settings };
+}
+
 function normalizedSettings(rawSettings) {
   const defaults = defaultSettings();
   if (!isRecord(rawSettings)) return defaults;
@@ -605,14 +618,14 @@ export const SaveManager = {
   },
 
   getSettings() {
-    return { ...this.load().settings };
+    return withSystemMotionPreference(this.load().settings);
   },
 
   updateSettings(settings) {
     const data = this.load();
     data.settings = normalizedSettings({ ...data.settings, ...(isRecord(settings) ? settings : {}) });
     this.save();
-    return { ...data.settings };
+    return withSystemMotionPreference(data.settings);
   },
 
   setSetting(key, value) {

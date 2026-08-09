@@ -1,6 +1,12 @@
 import { CAM, BALL_R, GOAL_W, GOAL_H, PHYS } from '../config.js';
 
 const EPSILON = 1e-8;
+const VISUAL_TRAVEL_ROLL = 0.35;
+const VISUAL_SPIN_ROLL = 3;
+// A straight airborne strike still tumbles, but much less than a ball whose
+// visible markings are being carried around by sidespin. Keeping a small
+// neutral share also makes the transition through zero curl continuous.
+const AIRBORNE_NEUTRAL_TRAVEL_SHARE = 0.2;
 
 function finite(value, fallback = 0) {
   return Number.isFinite(value) ? value : fallback;
@@ -294,7 +300,21 @@ export class Ball {
 
   _rollVisual(dt) {
     const travelSpeed = Math.hypot(this.vx, this.vz);
-    this.rot += (travelSpeed * 0.35 + Math.abs(this.spin) * 3) * dt;
+    const travelRoll = travelSpeed * VISUAL_TRAVEL_ROLL;
+
+    // Turf contact constrains the ball into travel-driven forward rolling;
+    // residual sidespin can quicken that marking motion, but must not reverse
+    // it as the ball slows. In flight, however, screen-plane rotation is
+    // primarily the authored sidespin: a left-curler must visibly turn opposite
+    // a right-curler. Blend a small neutral tumble with a signed, speed-scaled
+    // curl contribution so straight shots still move and tiny input noise
+    // cannot flip the markings.
+    const angularVelocity = this.grounded
+      ? travelRoll + Math.abs(this.spin) * VISUAL_SPIN_ROLL
+      : travelRoll * AIRBORNE_NEUTRAL_TRAVEL_SHARE + this.spin * (
+          travelRoll * (1 - AIRBORNE_NEUTRAL_TRAVEL_SHARE) + VISUAL_SPIN_ROLL
+        );
+    this.rot += angularVelocity * dt;
   }
 
   // Did the ball pass through the plane at zPlane during the last step/update?

@@ -420,6 +420,11 @@ export class Goalkeeper {
         this.presentationT = 0;
         this.presentationDuration = 0;
       }
+      // Presentation clips own this fixed step. Letting the hidden read/dive
+      // state continue underneath them makes the keeper reappear in a later
+      // phase when the clip ends. Wall commands and grounded concede reactions
+      // instead resume from the same planted root on the following step.
+      return;
     }
     switch (this.state) {
       case 'read': {
@@ -860,7 +865,35 @@ export class Goalkeeper {
   }
 
   reactToGoal(duration = 0.82) {
-    return this.playPresentation('concede-reaction', duration);
+    // A failed dive is already the correct concede animation. Replacing it with
+    // a bottom-anchored standing atlas would teleport an airborne keeper to the
+    // turf, then reveal a later hidden dive/landing phase when the clip ends.
+    if (
+      this.state === 'dive' ||
+      this.state === 'land' ||
+      this.state === 'catch' ||
+      Math.abs(this.visualLift) > 0.01
+    ) {
+      return false;
+    }
+
+    const started = this.playPresentation('concede-reaction', duration);
+    if (!started) return false;
+
+    // The outcome is authoritative now, so a standing read/set can settle into
+    // a stable post-result base without changing any save or collision decision.
+    // Keep the current x: the next-attempt reset owns the return to centre.
+    this.state = 'idle';
+    this.pose = 'idle';
+    this.stateT = 0;
+    this.moveVx = 0;
+    this.diveP = 0;
+    this.visualLift = 0;
+    this.contactHoldT = 0;
+    this.pendingLandImpulse = 0;
+    this.savePlan = null;
+    this.standingSave = false;
+    return true;
   }
 
   celebrateSave(duration = 0.52) {

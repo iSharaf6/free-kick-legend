@@ -308,6 +308,22 @@ test('the unused v2 music default migrates to the soundtrack mix level', () => {
   assert.equal(JSON.parse(storage.getItem(SAVE_KEY)).version, 3);
 });
 
+test('system reduced-motion preference is honored without rewriting the saved choice', () => {
+  const previous = globalThis.matchMedia;
+  globalThis.matchMedia = (query) => ({
+    matches: query === '(prefers-reduced-motion: reduce)'
+  });
+  try {
+    const settings = SaveManager.updateSettings({ reducedMotion: false });
+    assert.equal(settings.reducedMotion, true);
+    assert.equal(SaveManager.getSettings().reducedMotion, true);
+    assert.equal(JSON.parse(storage.getItem(SAVE_KEY)).settings.reducedMotion, false);
+  } finally {
+    if (previous) globalThis.matchMedia = previous;
+    else delete globalThis.matchMedia;
+  }
+});
+
 test('currency is clamped to a display-safe six-digit balance', () => {
   SaveManager.addCoins(Number.MAX_SAFE_INTEGER);
   assert.equal(SaveManager.getCoins(), 999_999);

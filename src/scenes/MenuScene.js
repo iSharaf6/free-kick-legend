@@ -370,15 +370,19 @@ export class MenuScene extends Phaser.Scene {
     addCoverRegion(this, 'pitch-grass-pixel-v3', GAME_W / 2, (STADIUM_Y + GAME_H) / 2,
       GAME_W, GAME_H - STADIUM_Y, 1);
     const settings = SaveManager.getSettings?.() || {};
+    this.reducedMotion = Boolean(settings.reducedMotion);
     // Kept on the scene so its ambient timer is torn down explicitly rather
     // than being left for Phaser's shutdown to collect.
     this.crowdStand = addMenuCrowd(this, {
       depth: 2,
-      reducedMotion: Boolean(settings.reducedMotion)
+      reducedMotion: this.reducedMotion
     });
     this.events.once('shutdown', () => {
       this.crowdStand?.destroy?.();
       this.crowdStand = null;
+      this.heroBallTween?.remove?.();
+      this.heroBallTween = null;
+      this.heroBall = null;
     });
     this.makeSponsorBoards();
     this.drawComposition();
@@ -409,7 +413,7 @@ export class MenuScene extends Phaser.Scene {
     this.makeActions(continueIndex, daily, today);
 
     addScanlines(this, 900, 0.024);
-    sceneIntro(this);
+    if (!this.reducedMotion) sceneIntro(this);
 
     // The menu is the player's thinking time, so spend it warming the match.
     // Deferred by a beat so the first painted frame is never sharing bandwidth
@@ -535,10 +539,7 @@ export class MenuScene extends Phaser.Scene {
     }, () => {
       SettingsPanel.open({
         onChange: (nextSettings) => {
-          if (!this.kicker) return;
-          this.kicker.reducedMotion = Boolean(nextSettings.reducedMotion);
-          if (this.kicker.reducedMotion) this.kicker.pauseAmbient?.();
-          else this.kicker.resumeAmbient?.();
+          this.syncAmbientMotion(Boolean(nextSettings.reducedMotion));
         }
       });
     }).setDepth(206);
@@ -691,7 +692,11 @@ export class MenuScene extends Phaser.Scene {
       scale: 5.0,
       depth: 130,
       shadowAlpha: 0.66,
-      ambient: false
+      // The front-menu hero is an identity card, so his planted root remains
+      // static in both motion modes; reducedMotion still propagates into the
+      // shared Kicker contract and any explicit pose work.
+      ambient: false,
+      reducedMotion: this.reducedMotion
     });
     const ballKey = SaveManager.getEquippedCosmetic?.('ball') || 'ball-classic';
     const texture = this.textures.exists(ballKey) ? ballKey : 'ball-classic';
@@ -699,15 +704,39 @@ export class MenuScene extends Phaser.Scene {
       .setDisplaySize(17, 4)
       .setAlpha(0.52)
       .setDepth(144);
-    const ball = this.add.image(176, 189, texture).setDepth(145);
-    ball.setScale(18 / (ball.texture.source[0]?.width || 12));
-    this.tweens.add({
-      targets: ball,
+    this.heroBall = this.add.image(176, 189, texture).setDepth(145);
+    this.heroBall.setScale(18 / (this.heroBall.texture.source[0]?.width || 12));
+    this.syncHeroBallMotion();
+  }
+
+  syncHeroBallMotion(reduced = this.reducedMotion) {
+    this.heroBallTween?.remove?.();
+    this.heroBallTween = null;
+    this.tweens.killTweensOf?.(this.heroBall);
+    if (!this.heroBall?.active) return;
+    if (reduced) {
+      this.heroBall.setRotation(0);
+      return;
+    }
+    this.heroBallTween = this.tweens.add({
+      targets: this.heroBall,
       rotation: Math.PI * 2,
       duration: 3200,
       ease: 'Linear',
       repeat: -1
     });
+  }
+
+  syncAmbientMotion(reduced) {
+    this.reducedMotion = Boolean(reduced);
+    this.crowdStand?.setReducedMotion?.(this.reducedMotion);
+    if (this.kicker) {
+      this.kicker.reducedMotion = this.reducedMotion;
+      if (this.reducedMotion) this.kicker.pauseAmbient?.();
+      else this.kicker.resumeAmbient?.();
+      this.kicker.applyTransform?.();
+    }
+    this.syncHeroBallMotion(this.reducedMotion);
   }
 
   makeActions(continueIndex, daily, today) {

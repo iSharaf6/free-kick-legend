@@ -44,7 +44,8 @@ import {
 } from '../systems/LevelMechanics.js';
 import {
   makeButton, makeIconButton, makeStatChip, titleText, bodyText,
-  drawPanel, addScanlines, configureHdCamera, crispText, FONT
+  drawPanel, addScanlines, configureHdCamera, crispText, canvasHasKeyboardFocus,
+  setCanvasButtonNavigationBlocked, FONT
 } from '../ui.js';
 import { PAL } from '../pixelart.js';
 import { addCrowdStand } from '../art/CrowdStand.js';
@@ -159,6 +160,13 @@ const TUTORIAL_STEPS = Object.freeze([
     bow: 0,
     reach: 96,
     speed: 2.1
+  }),
+  Object.freeze({
+    caption: 'SWIPE HIGHER FOR MORE LOFT',
+    detail: 'A steeper upward drag lifts the ball over the wall.',
+    bow: 0,
+    reach: 112,
+    speed: 1.25
   }),
   Object.freeze({
     caption: 'BOW THE SWIPE TO BEND IT',
@@ -277,6 +285,9 @@ export class GameScene extends Phaser.Scene {
     this.adRequestActive = false;
     this.pauseReturnState = null;
     this.pauseOverlayObjects = [];
+    this.rotateGatePauseActive = false;
+    this.viewportPortrait = false;
+    this.onViewportChange = null;
     this.terminalOverlayObjects = [];
     this.terminalOverlayShown = false;
     this.wall = null;
@@ -301,6 +312,7 @@ export class GameScene extends Phaser.Scene {
     this.tracksideObjects = [];
     this.tracksideTweens = [];
     this.cornerFlags = [];
+    this.cornerFlagTweens = [];
     this.ballGhosts = [];
     this.ballOutlineGfx = null;
     this.ballGlossGfx = null;
@@ -317,6 +329,7 @@ export class GameScene extends Phaser.Scene {
     this.tutorialStep = 0;
     this.tutorialDone = true;
     this.tutorialPhase = 0;
+    this.pendingAttemptHint = null;
     this.ringVisuals = new Map();
     this.ringOrder = [];
     this.threadGfx = null;
@@ -325,10 +338,16 @@ export class GameScene extends Phaser.Scene {
     this.threadTimer = null;
     this.threadFlow = 0;
     this.hazardVisuals = [];
+    this.hazardMotionTweens = [];
     this.snowEmitters = [];
     this.windTxt = null;
     this.pressureMeterGfx = null;
     this.frameContacts = new Set();
+    this.responsiveHudTexts = null;
+    this.careerStyleHud = null;
+    this.conditionHud = [];
+    this.menuButton = null;
+    this.menuHint = null;
 
     this.mode = data.mode || 'career';
     this.levelIndex = data.levelIndex ?? 0;
@@ -372,7 +391,7 @@ export class GameScene extends Phaser.Scene {
     this.aimAssist = this.settings.aimAssist ?? 'full';
     const viewportWidth = Number(globalThis.innerWidth) || GAME_W;
     const viewportHeight = Number(globalThis.innerHeight) || GAME_H;
-    this.compactHud = viewportWidth > viewportHeight && viewportHeight <= 520;
+    this.compactHud = this.isCompactHudViewport(viewportWidth, viewportHeight);
     Audio.setMuted(Boolean(this.settings.muted || PlatformService.shouldMuteAudio()));
     Audio.setVolume(this.settings.sfxVolume ?? 1);
     MenuMusic.configure({
@@ -522,7 +541,9 @@ export class GameScene extends Phaser.Scene {
       pose: 'idle',
       scale: 2.37 * (stance.s / ballScale),
       depth: 1260,
-      ambient: !this.settings.reducedMotion,
+      // Reduced motion suppresses the loop; it must not permanently remove the
+      // striker's ability to breathe if the player enables motion later.
+      ambient: true,
       reducedMotion: this.settings.reducedMotion
     });
 
@@ -575,7 +596,9 @@ export class GameScene extends Phaser.Scene {
       this,
       (shot) => this.takeShot(shot),
       {
-        onInvalidShot: (reason) => this.showSwipeHint(reason),
+        onInvalidShot: (reason, points) => {
+          if (!this.isPauseControlPoint(points?.[0])) this.showSwipeHint(reason);
+        },
         canStart: (point) => this.canStartSwipe(point),
         onStart: () => this.onSwipeStart(),
         onEnd: (valid) => this.onSwipeEnd(valid)
@@ -585,6 +608,7 @@ export class GameScene extends Phaser.Scene {
 
     this.installKeyboardControls();
     this.installVisibilityPause();
+    this.installViewportLifecycle();
 
     this.loadDeferredKeeperArt();
 
@@ -600,7 +624,13 @@ export class GameScene extends Phaser.Scene {
     if (!queueKeeperSheets(this, { initial: false })) return;
     this.load.once('complete', () => {
       if (!this.sessionAlive) return;
-      this.keepers?.forEach((keeper) => keeper.refreshTextureAvailability?.());
+      this.keepers?.forEach((keeper) => {
+        keeper.refreshTextureAvailability?.();
+        // On a cold first match the wall command was requested before its
+        // deferred reaction sheet existed. Retry only while play is still in the
+        // untouched aiming state; never inject a presentation into a live shot.
+        if (this.wall && this.state === 'AIMING') keeper.organiseWall?.();
+      });
     });
     this.load.start();
   }
@@ -661,27 +691,114 @@ export class GameScene extends Phaser.Scene {
     const keyboard = this.input.keyboard;
     if (!keyboard) return;
 
-    keyboard.addCapture('TAB');
     this.onTabKey = (event) => {
+      const settingsPanel = globalThis.document?.getElementById?.('settings-panel');
+      if (settingsPanel && !settingsPanel.hidden) return;
+      // Leave the browser's first Tab alone so it can move DOM focus onto the
+      // advertised canvas entry point. Phaser owns Tab only after that focus
+      // boundary has been crossed.
+      if (!canvasHasKeyboardFocus(this)) return;
+      // Once paused, Tab belongs to the shared canvas-button navigator. The
+      // opening key is claimed here; subsequent Tabs move through the visible
+      // pause actions instead of unexpectedly resuming the match.
+      if (this.state === 'PAUSED') {
+        if (this.viewportPortrait) {
+          event?.preventDefault?.();
+          if (event) event.cancelled = 1;
+        }
+        return;
+      }
+      if (!PAUSABLE_STATES.has(this.state)) return;
       event?.preventDefault?.();
       if (event) event.cancelled = 1;
       if (event?.repeat || this.adRequestActive || this.transitioning) return;
       this.togglePauseMenu();
     };
+    this.onEscapeKey = (event) => {
+      const settingsPanel = globalThis.document?.getElementById?.('settings-panel');
+      if (settingsPanel && !settingsPanel.hidden) return;
+      if (event?.repeat || this.state !== 'PAUSED' || this.viewportPortrait) return;
+      event?.preventDefault?.();
+      if (event) event.cancelled = 1;
+      this.closePauseMenu();
+    };
     keyboard.on('keydown-TAB', this.onTabKey);
+    keyboard.on('keydown-ESC', this.onEscapeKey);
   }
 
   installVisibilityPause() {
     const documentRef = globalThis.document;
     if (!documentRef?.addEventListener) return false;
     this.onDocumentVisibility = () => {
-      if (!documentRef.hidden || this.state === 'PAUSED') return;
-      if (PAUSABLE_STATES.has(this.state) && !this.transitioning && !this.terminalOverlayShown) {
-        this.openPauseMenu();
+      if (documentRef.hidden) {
+        if (this.state !== 'PAUSED' && PAUSABLE_STATES.has(this.state) &&
+          !this.transitioning && !this.terminalOverlayShown) {
+          this.openPauseMenu();
+        }
+        return;
+      }
+      // If landscape returned while the tab was hidden, keep the match frozen
+      // until it is actually visible again. Only a pause created by the rotate
+      // gate is eligible for this automatic resume.
+      if (this.rotateGatePauseActive && !this.viewportPortrait) {
+        this.resumeFromRotateGate();
       }
     };
     documentRef.addEventListener('visibilitychange', this.onDocumentVisibility);
     return true;
+  }
+
+  isCompactHudViewport(width = globalThis.innerWidth, height = globalThis.innerHeight) {
+    const viewportWidth = Number(width) || GAME_W;
+    const viewportHeight = Number(height) || GAME_H;
+    return viewportWidth > viewportHeight && viewportHeight <= 520;
+  }
+
+  isPortraitViewport(width = globalThis.innerWidth, height = globalThis.innerHeight) {
+    const viewportWidth = Number(width) || GAME_W;
+    const viewportHeight = Number(height) || GAME_H;
+    return viewportHeight >= viewportWidth;
+  }
+
+  installViewportLifecycle() {
+    const windowRef = globalThis.window;
+    if (!windowRef?.addEventListener) return false;
+    this.onViewportChange = () => this.handleViewportChange(windowRef.innerWidth, windowRef.innerHeight);
+    windowRef.addEventListener('resize', this.onViewportChange);
+    windowRef.addEventListener('orientationchange', this.onViewportChange);
+    // A match can be launched while the rotate gate is already covering the
+    // menu. Synchronise immediately so its clock never advances underneath it.
+    this.onViewportChange();
+    return true;
+  }
+
+  handleViewportChange(width, height) {
+    const compact = this.isCompactHudViewport(width, height);
+    if (compact !== this.compactHud) {
+      this.compactHud = compact;
+      this.refreshResponsiveHud();
+    }
+
+    const portrait = this.isPortraitViewport(width, height);
+    this.viewportPortrait = portrait;
+    if (portrait) {
+      if (!this.rotateGatePauseActive && PAUSABLE_STATES.has(this.state) &&
+        !this.transitioning && !this.terminalOverlayShown && this.openPauseMenu()) {
+        this.rotateGatePauseActive = true;
+      }
+      return;
+    }
+
+    if (this.rotateGatePauseActive && !globalThis.document?.hidden) {
+      this.resumeFromRotateGate();
+    }
+  }
+
+  resumeFromRotateGate() {
+    if (!this.rotateGatePauseActive || this.viewportPortrait || globalThis.document?.hidden) return false;
+    const resumed = this.closePauseMenu({ fromRotateGate: true });
+    if (resumed || this.state !== 'PAUSED') this.rotateGatePauseActive = false;
+    return resumed;
   }
 
   currentRestartData() {
@@ -733,8 +850,24 @@ export class GameScene extends Phaser.Scene {
     this.openPauseMenu();
   }
 
+  setPauseUnderlayAvailable(available) {
+    for (const button of [this.muteButton, this.menuButton]) {
+      if (!button?.active) continue;
+      button.setButtonEnabled?.(available);
+      button.setVisible?.(available);
+    }
+    this.menuHint?.setVisible?.(available);
+  }
+
+  setTerminalActionsAvailable(available) {
+    for (const object of this.terminalOverlayObjects || []) {
+      if (!object?.active || typeof object.setButtonEnabled !== 'function') continue;
+      object.setButtonEnabled(available);
+    }
+  }
+
   openPauseMenu() {
-    if (!PAUSABLE_STATES.has(this.state) || this.pauseOverlayObjects.length) return;
+    if (!PAUSABLE_STATES.has(this.state) || this.pauseOverlayObjects.length) return false;
     this.pauseReturnState = this.state;
     this.state = 'PAUSED';
     this.swipe.cancel();
@@ -745,6 +878,7 @@ export class GameScene extends Phaser.Scene {
     this.tweens.pauseAll();
     this.kicker?.pauseAction?.();
     PlatformService.gameplayStop();
+    this.setPauseUnderlayAvailable(false);
 
     const objects = this.pauseOverlayObjects;
     objects.push(
@@ -794,35 +928,81 @@ export class GameScene extends Phaser.Scene {
         fontSize: action.label.length > 7 ? '6px' : '7px', hitHeight: 32
       }).setDepth(3501));
     });
-    objects.push(bodyText(this, GAME_W / 2, 198, 'TAB TO RESUME  ·  CHOOSE RESTART OR EXIT MATCH', {
+    objects.push(bodyText(this, GAME_W / 2, 198, 'TAB / ARROWS CHOOSE  ·  ENTER SELECTS  ·  ESC RESUMES', {
       originX: 0.5, originY: 0.5, align: 'center', fontSize: '6px', color: '#8fa2ab'
     }).setDepth(3501));
     this.announceStatus('Match paused. Settings, resume, restart, and exit controls are available.');
+    return true;
   }
 
   applyLiveSettings(nextSettings = {}) {
+    const wasReduced = Boolean(this.settings?.reducedMotion);
     this.settings = { ...this.settings, ...nextSettings };
     this.aimAssist = AIM_ASSIST_MODES.includes(this.settings.aimAssist)
       ? this.settings.aimAssist
       : 'full';
+    const reduced = Boolean(this.settings.reducedMotion);
     if (this.kicker) {
-      this.kicker.reducedMotion = Boolean(this.settings.reducedMotion);
-      if (this.kicker.reducedMotion) this.kicker.pauseAmbient?.();
-      else this.kicker.resumeAmbient?.();
+      // Unrelated controls (aim assist, volume, contrast) must not resume an
+      // explicitly paused actor. Only a reduced-motion transition owns this
+      // lifecycle; otherwise preserve the exact animation pause state.
+      if (wasReduced !== reduced) {
+        if (this.kicker.setReducedMotion) this.kicker.setReducedMotion(reduced);
+        else {
+          this.kicker.reducedMotion = reduced;
+          if (reduced) this.kicker.pauseAmbient?.();
+          else this.kicker.resumeAmbient?.();
+          this.kicker.applyTransform?.();
+        }
+      } else {
+        this.kicker.reducedMotion = reduced;
+      }
     }
-    for (const keeper of this.keepers || []) keeper.reducedMotion = Boolean(this.settings.reducedMotion);
+    for (const keeper of this.keepers || []) keeper.reducedMotion = reduced;
+    if (wasReduced !== reduced) {
+      this.goalCelebration?.setReducedMotion?.(reduced);
+      this.syncAmbientMotion(reduced);
+    }
     return this.settings;
   }
 
-  closePauseMenu() {
+  syncAmbientMotion(reduced = Boolean(this.settings?.reducedMotion)) {
+    if (!this.sessionAlive || this.transitioning) return false;
+    this.crowdTiers?.setReducedMotion?.(reduced);
+    this.crowdImage?.setAlpha?.(1);
+    this.syncSecurityGuardMotion(reduced);
+    this.syncTracksideMotion();
+    this.syncHazardMotion();
+    this.syncThreadMotion(reduced);
+    this.syncHoopAndTargetMotion();
+    // Settings are opened from the live pause menu. Newly-created decorative
+    // tweens must inherit that freeze instead of moving behind the modal.
+    if (this.state === 'PAUSED') this.tweens.pauseAll?.();
+    return true;
+  }
+
+  closePauseMenu({ fromRotateGate = false } = {}) {
     if (this.state !== 'PAUSED' || this.transitioning) return false;
+    // The canvas is completely covered in portrait. Ignore TAB or any stale
+    // pointer release until landscape is restored; the gate owns its resume.
+    if (this.viewportPortrait && !fromRotateGate) return false;
     const returnState = this.pauseReturnState || 'AIMING';
     this.destroyPauseOverlay();
+    this.setPauseUnderlayAvailable(true);
     this.time.paused = false;
     this.tweens.resumeAll();
+    // resumeAll() is intentionally broad, but reduced motion is a hard policy,
+    // not a paused tween. Reassert it after the sweep so no old idle handle can
+    // come back to life when Settings closes.
+    if (this.settings?.reducedMotion) {
+      if (this.kicker?.setReducedMotion) this.kicker.setReducedMotion(true);
+      else this.kicker?.pauseAmbient?.();
+      this.goalCelebration?.setReducedMotion?.(true);
+    }
     this.kicker?.resumeAction?.();
     this.state = returnState;
     this.pauseReturnState = null;
+    if (fromRotateGate) this.rotateGatePauseActive = false;
     this.swipe.enabled = returnState === 'AIMING';
     if (!globalThis.document?.hidden && (returnState === 'AIMING' || returnState === 'WINDUP' || returnState === 'FLIGHT')) {
       PlatformService.gameplayStart();
@@ -853,9 +1033,15 @@ export class GameScene extends Phaser.Scene {
 
     const keyboard = this.input.keyboard;
     keyboard?.off?.('keydown-TAB', this.onTabKey);
+    keyboard?.off?.('keydown-ESC', this.onEscapeKey);
     keyboard?.removeCapture?.('TAB');
+    this.tabCaptureSuspended = false;
     globalThis.document?.removeEventListener?.('visibilitychange', this.onDocumentVisibility);
     this.onDocumentVisibility = null;
+    globalThis.window?.removeEventListener?.('resize', this.onViewportChange);
+    globalThis.window?.removeEventListener?.('orientationchange', this.onViewportChange);
+    this.onViewportChange = null;
+    this.rotateGatePauseActive = false;
     if (import.meta.env.DEV && globalThis.window?.__fkl === this) globalThis.window.__fkl = null;
     PlatformService.gameplayStop();
     GameplayAmbience.stop();
@@ -871,10 +1057,7 @@ export class GameScene extends Phaser.Scene {
     this.wall = null;
     this.kicker?.destroy?.();
     this.kicker = null;
-    this.snowEmitters?.forEach((emitter) => emitter?.destroy?.());
-    this.snowEmitters = [];
-    this.hazardVisuals?.forEach((v) => { if (v?.destroy) v.destroy(); });
-    this.hazardVisuals = [];
+    this.destroyHazardMotion();
     this.ringVisuals?.forEach((v) => this.destroyRingVisual(v));
     this.ringVisuals?.clear();
     this.threadTimer?.remove?.();
@@ -894,8 +1077,9 @@ export class GameScene extends Phaser.Scene {
     this.pressureMeterGfx = null;
     this.crowdTiers?.destroy?.();
     this.crowdTiers = null;
-    this.tracksideTweens?.forEach((timer) => timer?.remove?.(false));
-    this.tracksideTweens = [];
+    this.destroyTracksideMotion();
+    this.securityGuardTweens?.forEach((tween) => tween?.remove?.());
+    this.securityGuardTweens = [];
 
     // Drop references to objects the DisplayList destroyed during shutdown.
     this.nearCrowd = [];
@@ -904,6 +1088,7 @@ export class GameScene extends Phaser.Scene {
     this.sponsorBoardObjects = [];
     this.tracksideObjects = [];
     this.cornerFlags = [];
+    this.cornerFlagTweens = [];
     this.ballGhosts = [];
     this.objectiveUi = null;
     this.objectiveStripGfx = null;
@@ -958,6 +1143,14 @@ export class GameScene extends Phaser.Scene {
         .setOrigin(0.5, 1)
         .setDisplaySize(14, 32)
         .setDepth(1.4);
+      guard.fklAmbientPose = {
+        x: guard.x,
+        y: guard.y,
+        angle: guard.angle || 0,
+        scaleX: guard.scaleX,
+        scaleY: guard.scaleY,
+        flipX: Boolean(guard.flipX)
+      };
       this.securityGuards.push(guard);
 
       if (!this.settings.reducedMotion) this.animateSecurityGuard(guard, index);
@@ -988,6 +1181,23 @@ export class GameScene extends Phaser.Scene {
       }
     });
     this.securityGuardTweens.push(tween);
+  }
+
+  syncSecurityGuardMotion(reduced = Boolean(this.settings?.reducedMotion)) {
+    this.securityGuardTweens?.forEach((tween) => tween?.remove?.());
+    this.securityGuardTweens = [];
+    for (const [index, guard] of (this.securityGuards || []).entries()) {
+      if (!guard?.active) continue;
+      this.tweens.killTweensOf?.(guard);
+      const pose = guard.fklAmbientPose;
+      if (pose) {
+        guard.setPosition?.(pose.x, pose.y);
+        guard.setAngle?.(pose.angle);
+        guard.setScale?.(pose.scaleX, pose.scaleY);
+        guard.setFlipX?.(pose.flipX);
+      }
+      if (!reduced) this.animateSecurityGuard(guard, index);
+    }
   }
 
   drawSponsorBoards() {
@@ -1066,10 +1276,28 @@ export class GameScene extends Phaser.Scene {
     this.buildCornerFlags();
   }
 
+  destroyTracksideMotion() {
+    this.tracksideTweens?.forEach((timer) => timer?.remove?.(false));
+    this.tracksideTweens = [];
+    this.cornerFlagTweens?.forEach((tween) => tween?.remove?.());
+    this.cornerFlagTweens = [];
+    const objects = [...(this.tracksideObjects || []), ...(this.cornerFlags || [])];
+    this.tweens.killTweensOf?.(objects);
+    objects.forEach((object) => object?.destroy?.());
+    this.tracksideObjects = [];
+    this.cornerFlags = [];
+  }
+
+  syncTracksideMotion() {
+    this.destroyTracksideMotion();
+    this.buildTrackside();
+  }
+
   // Corner flags belong to the pitch, so they are projected like everything
   // else and lean with the level's wind instead of standing to attention.
   buildCornerFlags() {
     this.cornerFlags = [];
+    this.cornerFlagTweens = [];
     if (!this.textures.exists('corner-flag')) return;
     const windX = this.currentWind?.x ?? this.level.wind?.x ?? 0;
 
@@ -1091,14 +1319,14 @@ export class GameScene extends Phaser.Scene {
       this.cornerFlags.push(flag);
 
       if (this.settings.reducedMotion) continue;
-      this.tweens.add({
+      this.cornerFlagTweens.push(this.tweens.add({
         targets: flag,
         scaleX: flag.scaleX * (0.82 + Math.min(Math.abs(windX), 1) * 0.1),
         duration: 520 + side * 90,
         yoyo: true,
         repeat: -1,
         ease: 'Sine.easeInOut'
-      });
+      }));
     }
   }
 
@@ -1620,21 +1848,32 @@ export class GameScene extends Phaser.Scene {
       ? this.add.graphics().setDepth(1000 - this.zGoal * 10 - 6)
       : null;
     this.buildThreadPath();
-    this.threadFlow = 0;
-    this.threadTimer?.remove?.();
-    this.threadTimer = null;
-    if (this.threadGfx && !this.settings.reducedMotion) {
-      this.threadTimer = this.time.addEvent({
-        delay: 90,
-        loop: true,
-        callback: () => {
-          this.threadFlow = (this.threadFlow + 1) % 9;
-          this.refreshThread();
-        }
-      });
-    }
+    this.syncThreadMotion();
 
     this.updateHoopSequence();
+  }
+
+  syncThreadMotion(reduced = Boolean(this.settings?.reducedMotion)) {
+    this.threadTimer?.remove?.();
+    this.threadTimer = null;
+    this.threadFlow = 0;
+    this.refreshThread?.();
+    if (!this.threadGfx || reduced) return;
+    this.threadTimer = this.time.addEvent({
+      delay: 90,
+      loop: true,
+      callback: () => {
+        this.threadFlow = (this.threadFlow + 1) % 9;
+        this.refreshThread();
+      }
+    });
+  }
+
+  syncHoopAndTargetMotion() {
+    for (const visual of this.ringVisuals?.values?.() || []) {
+      this.setHoopStage(visual, visual.stage || 'pending');
+    }
+    if (this.targetGfx?.active) this.setTargetArmed(this.targetArmed, { instant: true });
   }
 
   /**
@@ -1740,8 +1979,25 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  destroyHazardMotion() {
+    const visuals = this.hazardVisuals || [];
+    this.hazardMotionTweens?.forEach((tween) => tween?.remove?.());
+    this.hazardMotionTweens = [];
+    this.tweens.killTweensOf?.(visuals);
+    visuals.forEach((visual) => visual?.destroy?.());
+    this.hazardVisuals = [];
+    this.snowEmitters = [];
+    this.pressureMeterGfx = null;
+  }
+
+  syncHazardMotion() {
+    this.destroyHazardMotion();
+    this.buildHazardVisuals();
+  }
+
   buildHazardVisuals() {
     this.hazardVisuals = [];
+    this.hazardMotionTweens = [];
     const fog = getHazard(this.hazards, 'fog');
     if (fog) {
       const fogBands = [
@@ -1753,14 +2009,14 @@ export class GameScene extends Phaser.Scene {
         band.setDepth(1180 + index).setBlendMode(Phaser.BlendModes.SCREEN);
         this.hazardVisuals.push(band);
         if (!this.settings.reducedMotion && index < 2) {
-          this.tweens.add({
+          this.hazardMotionTweens.push(this.tweens.add({
             targets: band,
             x: band.x + (index ? -18 : 18),
             duration: 5200 + index * 900,
             yoyo: true,
             repeat: -1,
             ease: 'Sine.easeInOut'
-          });
+          }));
         }
       });
     }
@@ -1809,24 +2065,24 @@ export class GameScene extends Phaser.Scene {
         .setBlendMode(Phaser.BlendModes.SCREEN);
       this.hazardVisuals.push(lowMist);
       if (!this.settings.reducedMotion) {
-        this.tweens.add({
+        this.hazardMotionTweens.push(this.tweens.add({
           targets: lowMist, x: GAME_W / 2 + 12, alpha: lowMist.alpha * 1.45,
           duration: 4100, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
-        });
+        }));
       }
 
-      const farFlakes = this.add.particles(0, 0, 'spark', {
-        x: { min: -16, max: GAME_W + 16 }, y: { min: CAM.horizonY - 12, max: CAM.horizonY + 18 },
-        speedX: { min: -5 - snow.density * 8, max: 2 }, speedY: { min: 13, max: 25 },
-        lifespan: { min: 4300, max: 6900 }, scale: { start: 0.38, end: 0.15 },
-        alpha: { start: 0.72, end: 0.12 }, tint: [0xffffff, 0xd9efff], quantity: 1,
-        frequency: Math.round(132 - snow.density * 68), advance: 2300,
-        maxParticles: 136, maxAliveParticles: 108, reserve: 108
-      }).setDepth(1420);
-      this.snowEmitters.push(farFlakes);
-      this.hazardVisuals.push(farFlakes);
-
       if (!this.settings.reducedMotion) {
+        const farFlakes = this.add.particles(0, 0, 'spark', {
+          x: { min: -16, max: GAME_W + 16 }, y: { min: CAM.horizonY - 12, max: CAM.horizonY + 18 },
+          speedX: { min: -5 - snow.density * 8, max: 2 }, speedY: { min: 13, max: 25 },
+          lifespan: { min: 4300, max: 6900 }, scale: { start: 0.38, end: 0.15 },
+          alpha: { start: 0.72, end: 0.12 }, tint: [0xffffff, 0xd9efff], quantity: 1,
+          frequency: Math.round(132 - snow.density * 68), advance: 2300,
+          maxParticles: 136, maxAliveParticles: 108, reserve: 108
+        }).setDepth(1420);
+        this.snowEmitters.push(farFlakes);
+        this.hazardVisuals.push(farFlakes);
+
         const nearFlakes = this.add.particles(0, 0, 'spark', {
           x: { min: -25, max: GAME_W + 25 }, y: { min: -8, max: GAME_H * 0.48 },
           speedX: { min: -24 - snow.density * 18, max: -5 }, speedY: { min: 42, max: 76 },
@@ -1951,6 +2207,56 @@ export class GameScene extends Phaser.Scene {
     this.walls = [this.wall];
   }
 
+  trackResponsiveHudText(text, tier) {
+    if (text?.active && this.responsiveHudTexts?.[tier]) {
+      this.responsiveHudTexts[tier].push(text);
+    }
+    return text;
+  }
+
+  refreshResponsiveHud() {
+    if (!this.responsiveHudTexts) return;
+    const sizes = {
+      primary: this.compactHud ? '5px' : '4px',
+      tiny: this.compactHud ? '5px' : '3px',
+      secondary: this.compactHud ? '5px' : '4px',
+      menu: this.compactHud ? '5px' : '4px'
+    };
+    for (const [tier, texts] of Object.entries(this.responsiveHudTexts)) {
+      for (const text of texts) {
+        if (text?.active) text.setFontSize(sizes[tier]);
+      }
+    }
+    this.layoutCareerSecondaryHud();
+  }
+
+  layoutCareerSecondaryHud() {
+    const style = this.careerStyleHud;
+    if (!style?.plate?.active || !style?.text?.active) return;
+    const width = Math.min(this.compactHud ? 128 : 112,
+      style.label.length * (this.compactHud ? 2.8 : 2.25) + 10);
+    style.plate.clear();
+    drawPanel(style.plate, style.x, 11.5, width, 8, {
+      fill: 0x153d3a, border: PAL.borderDark, corner: PAL.greenHi, alpha: 0.92
+    });
+    style.text.setX(style.x + width / 2);
+
+    let x = style.x + width + 4;
+    for (const item of this.conditionHud) {
+      const chipWidth = item.label.length * (this.compactHud ? 2.9 : 2.4) + 10;
+      const visible = x + chipWidth <= GAME_W - 4;
+      item.plate.setVisible(visible);
+      item.text.setVisible(visible);
+      if (!visible) continue;
+      item.plate.clear();
+      drawPanel(item.plate, x, 11.5, chipWidth, 8, {
+        fill: PAL.panelMuted, border: PAL.borderDark, corner: PAL.goldDark, alpha: 0.9
+      });
+      item.text.setX(x + chipWidth / 2);
+      x += chipWidth + 4;
+    }
+  }
+
   buildHud() {
     // At short landscape heights each logical pixel maps to roughly 1.4 device
     // pixels. Promote the smallest broadcast labels so the HUD remains
@@ -1958,6 +2264,9 @@ export class GameScene extends Phaser.Scene {
     const primaryHudFont = this.compactHud ? '5px' : '4px';
     const tinyHudFont = this.compactHud ? '5px' : '3px';
     const secondaryHudFont = this.compactHud ? '5px' : '4px';
+    this.responsiveHudTexts = { primary: [], tiny: [], secondary: [], menu: [] };
+    this.careerStyleHud = null;
+    this.conditionHud = [];
     const chrome = this.add.graphics().setDepth(1988);
     drawPanel(chrome, 4, 1, GAME_W - 8, 9, {
       fill: PAL.panel,
@@ -1979,9 +2288,10 @@ export class GameScene extends Phaser.Scene {
     if (this.mode === 'career') {
       // One strip, three zones: identity left, match title centred, conditions
       // right. Everything used to compete inside the same run of text.
-      bodyText(this, 24, 5.5, `MATCH ${String(this.levelIndex + 1).padStart(2, '0')}`, {
+      this.matchHudText = this.trackResponsiveHudText(bodyText(this, 24, 5.5,
+        `MATCH ${String(this.levelIndex + 1).padStart(2, '0')}`, {
         fontFamily: FONT, fontSize: primaryHudFont, color: '#f3e7c3', letterSpacing: 0.2
-      }).setDepth(2000);
+      }).setDepth(2000), 'primary');
       bodyText(this, GAME_W / 2, 5.5, String(this.level.name).toUpperCase(), {
         originX: 0.5, fontFamily: FONT, fontSize: '6px', color: '#f3c449', letterSpacing: 0.3
       }).setDepth(2000);
@@ -1999,9 +2309,10 @@ export class GameScene extends Phaser.Scene {
       const attemptsWidth = this.maxAttempts * 8;
       if (wind.magnitude >= 0.1 || this.level.wind?.rotation) {
         const arrow = Math.abs(wind.x) < 0.06 ? (wind.y >= 0 ? '^' : 'v') : wind.x > 0 ? '>' : '<';
-        this.windTxt = bodyText(this, GAME_W - 8 - attemptsWidth, 5.5, `WIND ${wind.magnitude.toFixed(1)} ${arrow}`, {
+        this.windTxt = this.trackResponsiveHudText(bodyText(this, GAME_W - 8 - attemptsWidth, 5.5,
+          `WIND ${wind.magnitude.toFixed(1)} ${arrow}`, {
           originX: 1, fontFamily: FONT, fontSize: primaryHudFont, color: '#f3c449', letterSpacing: 0.2
-        }).setDepth(2000);
+        }).setDepth(2000), 'primary');
       }
 
       // Secondary strip: cup identity and objective count, out of the way of
@@ -2012,43 +2323,42 @@ export class GameScene extends Phaser.Scene {
       drawPanel(subChrome, 4, 11.5, subWidth, 8, {
         fill: PAL.panelMuted, border: PAL.borderDark, corner: PAL.goldDark, alpha: 0.9
       });
-      bodyText(this, 9, 15.5, `${String(this.level.cup || 'career').toUpperCase()} CUP`, {
+      this.trackResponsiveHudText(bodyText(this, 9, 15.5,
+        `${String(this.level.cup || 'career').toUpperCase()} CUP`, {
         fontSize: secondaryHudFont, color: '#b9c6c5', letterSpacing: 0.24
-      }).setDepth(2000);
+      }).setDepth(2000), 'secondary');
       if (needed > 1) {
-        this.objectiveProgressTxt = bodyText(this, 4 + subWidth - 5, 15.5, `0 / ${needed} TARGETS`, {
+        this.objectiveProgressTxt = this.trackResponsiveHudText(bodyText(this, 4 + subWidth - 5, 15.5,
+          `0 / ${needed} TARGETS`, {
           originX: 1, fontFamily: FONT, fontSize: secondaryHudFont, color: '#f3c449', letterSpacing: 0.2
-        }).setDepth(2000);
+        }).setDepth(2000), 'secondary');
       }
 
       const styleX = 4 + subWidth + 4;
       const styleLabel = `${this.loadoutGameplay.ability} · ${this.loadoutGameplay.ballFeel}`.toUpperCase();
-      const styleWidth = Math.min(this.compactHud ? 128 : 112,
-        styleLabel.length * (this.compactHud ? 2.8 : 2.25) + 10);
       const stylePlate = this.add.graphics().setDepth(1988);
-      drawPanel(stylePlate, styleX, 11.5, styleWidth, 8, {
-        fill: 0x153d3a, border: PAL.borderDark, corner: PAL.greenHi, alpha: 0.92
-      });
-      bodyText(this, styleX + styleWidth / 2, 15.5, styleLabel, {
+      const styleText = this.trackResponsiveHudText(bodyText(this, styleX, 15.5, styleLabel, {
         originX: 0.5, fontSize: secondaryHudFont, color: '#9ef0dc', letterSpacing: 0.14
-      }).setDepth(2000);
-      this.buildConditionChips(styleX + styleWidth + 4);
+      }).setDepth(2000), 'secondary');
+      this.careerStyleHud = { x: styleX, label: styleLabel, plate: stylePlate, text: styleText };
+      this.buildConditionChips();
+      this.layoutCareerSecondaryHud();
       this.buildTutorial();
       this.buildObjectiveStrip();
     } else if (this.mode === 'daily') {
-      bodyText(this, 38, 5.5, `DAILY KICK  ·  ${this.dailyDate}`, {
+      this.trackResponsiveHudText(bodyText(this, 38, 5.5, `DAILY KICK  ·  ${this.dailyDate}`, {
         fontSize: tinyHudFont, color: '#f3c449', letterSpacing: 0.18
-      }).setDepth(2000);
-      bodyText(this, 132, 5.5, 'FIVE SHOTS  ·  ONE SHARED CHALLENGE', {
+      }).setDepth(2000), 'tiny');
+      this.trackResponsiveHudText(bodyText(this, 132, 5.5, 'FIVE SHOTS  ·  ONE SHARED CHALLENGE', {
         fontFamily: FONT, fontSize: tinyHudFont, color: '#f3e7c3', letterSpacing: 0.08
-      }).setDepth(2000);
-      this.scoreTxt = bodyText(this, 342, 5.5, `SCORE ${this.score}`, {
+      }).setDepth(2000), 'tiny');
+      this.scoreTxt = this.trackResponsiveHudText(bodyText(this, 342, 5.5, `SCORE ${this.score}`, {
         originX: 0.5, fontFamily: FONT, fontSize: primaryHudFont, color: '#f3e7c3'
-      }).setDepth(2000);
+      }).setDepth(2000), 'primary');
       const shots = makeStatChip(this, GAME_W - 28, 5.5, 44, 'icon-star', `1/${this.maxAttempts}`, {
         height: 8, fill: PAL.night, border: PAL.goldDark, color: '#f3c449', fontSize: primaryHudFont, iconScale: 0.42
       }).setDepth(2000);
-      this.dailyShotsTxt = shots.valueText;
+      this.dailyShotsTxt = this.trackResponsiveHudText(shots.valueText, 'primary');
 
       const objectivePlate = this.add.graphics().setDepth(1975);
       drawPanel(objectivePlate, 130, GAME_H - 39, 344, 25, {
@@ -2062,23 +2372,23 @@ export class GameScene extends Phaser.Scene {
       }).setDepth(2000);
       this.objectiveUi = [objectivePlate, dailyLabel, dailyCopy];
     } else {
-      this.scoreTxt = bodyText(this, GAME_W / 2 - 32, 5.5, `SCORE ${this.score}`, {
+      this.scoreTxt = this.trackResponsiveHudText(bodyText(this, GAME_W / 2 - 32, 5.5, `SCORE ${this.score}`, {
         originX: 0.5, fontFamily: FONT, fontSize: primaryHudFont, color: '#f3e7c3'
-      }).setDepth(2000);
-      this.comboTxt = bodyText(this, GAME_W / 2 + 32, 5.5,
+      }).setDepth(2000), 'primary');
+      this.comboTxt = this.trackResponsiveHudText(bodyText(this, GAME_W / 2 + 32, 5.5,
         this.combo > 1 ? `x${this.combo} COMBO` : `${this.goals} GOALS`, {
           originX: 0.5, fontSize: tinyHudFont, color: '#74bde8', letterSpacing: 0.18
-        }).setDepth(2000);
+        }).setDepth(2000), 'tiny');
       const timer = makeStatChip(this, GAME_W - 27, 5.5, 42, 'icon-clock', Math.ceil(this.timeLeft), {
         height: 8, fill: PAL.night, border: PAL.goldDark, color: '#f3c449', fontSize: primaryHudFont, iconScale: 0.42
       }).setDepth(2000);
-      this.timerTxt = timer.valueText;
+      this.timerTxt = this.trackResponsiveHudText(timer.valueText, 'primary');
     }
 
     this.bannerPlate = this.add.graphics().setDepth(2095).setAlpha(0);
     this.bannerExtrusion = crispText(this.add.text(GAME_W / 2, 61, '', {
       fontFamily: RESULT_FONT,
-      fontStyle: 'bold',
+      fontStyle: 'normal',
       fontSize: '32px',
       color: '#934000',
       stroke: '#020508',
@@ -2087,7 +2397,7 @@ export class GameScene extends Phaser.Scene {
     }).setOrigin(0.5).setDepth(2099).setAlpha(0));
     this.banner = crispText(this.add.text(GAME_W / 2, 55, '', {
       fontFamily: RESULT_FONT,
-      fontStyle: 'bold',
+      fontStyle: 'normal',
       fontSize: '32px',
       color: '#ffd12f',
       stroke: '#020508',
@@ -2112,13 +2422,19 @@ export class GameScene extends Phaser.Scene {
         .setY(COACHING_HINT_Y)
         .setAlpha(1);
     }
-    // A small, permanently visible route to the only match-control surface.
-    // It stays in the lower safe area so the objective, swipe cue and goal
-    // never compete with it at any responsive size.
-    this.menuHint = bodyText(this, GAME_W - 7, GAME_H - 8, 'TAB  MATCH MENU', {
-      originX: 1, originY: 0.5, fontFamily: FONT, fontSize: this.compactHud ? '5px' : '4px',
+    // Touch players need the same route to match controls that keyboard users
+    // get from TAB. The 32px logical hit box resolves to at least 44px at the
+    // smallest supported 844x390 landscape viewport, while the slimmer visible
+    // plate leaves the playfield and objective strip clear.
+    this.menuButton = makeButton(this, 43, GAME_H - 18, 78, 24, 'II  MATCH MENU',
+      () => this.togglePauseMenu(), {
+        color: PAL.panelHi, hover: PAL.blue, border: PAL.goldDark,
+        fontSize: '6px', hitWidth: 78, hitHeight: 32, letterSpacing: 0.18
+      }).setDepth(2102);
+    this.menuHint = this.trackResponsiveHudText(bodyText(this, 87, GAME_H - 18, 'TAB', {
+      originY: 0.5, fontFamily: FONT, fontSize: this.compactHud ? '5px' : '4px',
       color: '#cfe8ff', letterSpacing: 0.28
-    }).setDepth(2102);
+    }).setDepth(2102), 'menu');
 
     // Labels for the live gesture meter; drawAim toggles their visibility.
     const meterX = GAME_W / 2 - 48;
@@ -2146,21 +2462,16 @@ export class GameScene extends Phaser.Scene {
    * of contact. Both are deliberate, and both look like faults until the game
    * says so out loud.
    */
-  buildConditionChips(startX) {
-    let x = startX;
+  buildConditionChips() {
+    this.conditionHud = [];
     for (const hazard of this.hazards) {
       const chip = CONDITION_CHIPS[hazard.type];
       if (!chip) continue;
-      const width = chip.label.length * (this.compactHud ? 2.9 : 2.4) + 10;
-      if (x + width > GAME_W - 4) break;
       const plate = this.add.graphics().setDepth(1988);
-      drawPanel(plate, x, 11.5, width, 8, {
-        fill: PAL.panelMuted, border: PAL.borderDark, corner: PAL.goldDark, alpha: 0.9
-      });
-      bodyText(this, x + width / 2, 15.5, chip.label, {
+      const text = this.trackResponsiveHudText(bodyText(this, 0, 15.5, chip.label, {
         originX: 0.5, fontSize: this.compactHud ? '5px' : '4px', color: chip.color, letterSpacing: 0.18
-      }).setDepth(2000);
-      x += width + 4;
+      }).setDepth(2000), 'secondary');
+      this.conditionHud.push({ ...chip, plate, text });
     }
   }
 
@@ -2295,14 +2606,13 @@ export class GameScene extends Phaser.Scene {
   /**
    * Match 01 teaches the swipe instead of assuming it.
    *
-   * The tutorial only ever runs on the first career level, for a player who has
-   * not finished it, and it never takes control: the ghost swipe is a loop the
-   * player can copy or ignore, and it gets out of the way the moment they put a
-   * finger down. Each attempt advances one concept - direction, then power,
-   * then bend - so nothing arrives at the same time as anything else.
+   * The tutorial follows a new player through the opening Academy matches until
+   * all four gestures have actually been shown. A first-shot goal no longer
+   * silently skips power, loft and curl; the saved step continues next match.
+   * It never takes control, and each accepted shot advances only one concept.
    */
   tutorialActive() {
-    return this.mode === 'career' && this.levelIndex === 0 && !this.tutorialDone;
+    return this.mode === 'career' && this.levelIndex < TUTORIAL_STEPS.length && !this.tutorialDone;
   }
 
   buildTutorial() {
@@ -2324,11 +2634,11 @@ export class GameScene extends Phaser.Scene {
     this.refreshTutorialCopy();
   }
 
-  refreshTutorialCopy() {
+  refreshTutorialCopy({ visible = this.state === 'AIMING' } = {}) {
     const step = TUTORIAL_STEPS[this.tutorialStep];
     if (!step || !this.tutorialCaption) return;
-    this.tutorialCaption.setText(step.caption).setAlpha(1);
-    this.tutorialDetail.setText(step.detail).setAlpha(1);
+    this.tutorialCaption.setText(step.caption).setAlpha(visible ? 1 : 0);
+    this.tutorialDetail.setText(step.detail).setAlpha(visible ? 1 : 0);
   }
 
   setTutorialCopyAlpha(alpha, duration = 0) {
@@ -2387,11 +2697,11 @@ export class GameScene extends Phaser.Scene {
     gfx.fillRect(Math.round(head.x) - 1, Math.round(head.y) - 1, 2, 2);
   }
 
-  /** One concept per attempt; scoring ends the lesson early. */
+  /** One concept per accepted shot; early success must not skip later skills. */
   advanceTutorial(outcome) {
     if (!this.tutorialActive()) return;
     const last = this.tutorialStep >= TUTORIAL_STEPS.length - 1;
-    if (outcome === 'GOAL' || last) {
+    if (last) {
       this.tutorialDone = true;
       SaveManager.setTutorial?.({ completed: true, step: TUTORIAL_STEPS.length });
       this.tutorialGfx?.clear();
@@ -2401,6 +2711,21 @@ export class GameScene extends Phaser.Scene {
     this.tutorialStep += 1;
     SaveManager.setTutorial?.({ step: this.tutorialStep });
     this.refreshTutorialCopy();
+  }
+
+  /**
+   * Clear coaching copy before the authored strike and result presentation.
+   *
+   * Hint tweens used to survive into the next state, leaving corrections such
+   * as "TOO CLOSE" painted over a goal. Keeping this transition in one helper
+   * makes every valid shot and every result an explicit clean-screen boundary.
+   */
+  clearCoachingLayers({ hideTutorial = true } = {}) {
+    if (this.inputHint?.active) {
+      this.tweens?.killTweensOf?.(this.inputHint);
+      this.inputHint.setAlpha(0);
+    }
+    if (hideTutorial) this.setTutorialCopyAlpha(0);
   }
 
   /**
@@ -2585,6 +2910,14 @@ export class GameScene extends Phaser.Scene {
     this.showSwipeHintMessage(copy[reason] || 'TRY A CLEAN UPWARD SWIPE');
   }
 
+  isPauseControlPoint(point) {
+    const button = this.menuButton;
+    const hitArea = button?.input?.hitArea;
+    if (!point || !button?.active || !hitArea) return false;
+    return Math.abs(point.x - button.x) <= hitArea.width / 2 &&
+      Math.abs(point.y - button.y) <= hitArea.height / 2;
+  }
+
   canStartSwipe(point) {
     if (!point || point.y >= GAME_H - 30) return false;
     const ball = project(this.ball.x, this.ball.y, this.ball.z);
@@ -2597,14 +2930,9 @@ export class GameScene extends Phaser.Scene {
     // Aiming has begun: the striker loads into the ready stance. Until now he
     // has been standing, which is what the frame should show before any input.
     if (this.state === 'AIMING') this.kicker?.setPose('ready');
-    if (this.mode === 'arcade' && !this.arcadeStarted && this.inputHint?.active) {
-      // The ready CTA occupies the same lower lane as the truthful live meter.
-      // Clear it as soon as aiming begins; an invalid release supplies its own
-      // corrective message, while a valid release starts the clock.
-      this.tweens?.killTweensOf?.(this.inputHint);
-      this.inputHint.setAlpha(0);
-    }
-    this.setTutorialCopyAlpha(0.12, 110);
+    // The player's live gesture is the only instruction that should occupy the
+    // coaching lane while aiming. Invalid releases restore the tutorial below.
+    this.clearCoachingLayers();
     if (!this.objectiveUi) return;
     this.tweens.killTweensOf(this.objectiveUi);
     this.tweens.add({ targets: this.objectiveUi, alpha: 0.14, duration: 140, ease: 'Cubic.easeOut' });
@@ -2699,6 +3027,7 @@ export class GameScene extends Phaser.Scene {
   takeShot(inputShot) {
     if (this.state !== 'AIMING' || this.over) return;
     this.startArcadeClock();
+    this.clearCoachingLayers();
     const shot = this.prepareShot(inputShot);
     this.state = 'WINDUP';
     this.flightT = 0;
@@ -2742,13 +3071,16 @@ export class GameScene extends Phaser.Scene {
     // Where this shot was headed before a wall or a keeper got involved. Solved
     // once, from the launch state, so it already contains the curl.
     const heading = this.ball.predictAt(this.zGoal);
+    const wallPrediction = this.ball.predictAt(this.zWall);
     this.headingFor = heading?.reached ? { x: heading.x, y: heading.y } : null;
     const wallContext = {
       seed: `${this.level.id}:${this.attempt}`,
       attempt: this.attempt,
       levelId: this.level.id,
       vx: shot.vx,
-      targetX: this.ball.predictAt(this.zWall)?.x,
+      targetX: wallPrediction?.x,
+      wallEta: wallPrediction?.T,
+      wallPrediction,
       ball: this.ball
     };
     this.wall?.onStrike(wallContext);
@@ -2891,6 +3223,7 @@ export class GameScene extends Phaser.Scene {
         this.ball.vy *= damping;
         this.ball.vz *= damping;
       }
+      this.recordBallTrailSample();
       if (this.state === 'FLIGHT' && this.level.rings?.length) {
         this.ringProgress = updateRingProgress(
           this.ringProgress,
@@ -3188,6 +3521,7 @@ export class GameScene extends Phaser.Scene {
     if (this.state === 'RESULT' || this.state === 'OVERLAY' || this.state === 'PAUSED' ||
         this.state === 'TRANSITIONING' || !this.sys?.isActive?.()) return;
     this.state = 'RESULT';
+    this.clearCoachingLayers();
     PlatformService.gameplayStop();
     this.simSpeed = 1;
     this.slowmoT = 0;
@@ -3371,11 +3705,9 @@ export class GameScene extends Phaser.Scene {
     this.attempt++;
     const remaining = this.maxAttempts - this.attempt + 1;
     this.dailyShotsTxt?.setText(`${this.attempt}/${this.maxAttempts}`);
-    this.schedule(550, () => this.showSwipeHintMessage(
-      outcome === 'GOAL'
-        ? `${rating.label.toUpperCase()}  ·  ${remaining} SHOTS LEFT`
-        : `${remaining} SHOTS LEFT  ·  BUILD THE SCORE`
-    ));
+    this.pendingAttemptHint = outcome === 'GOAL'
+      ? `${rating.label.toUpperCase()}  ·  ${remaining} SHOTS LEFT`
+      : `${remaining} SHOTS LEFT  ·  BUILD THE SCORE`;
     this.schedule(this.resultResetDelay(outcome), () => this.resetAttempt());
   }
 
@@ -3513,7 +3845,7 @@ export class GameScene extends Phaser.Scene {
       const message = scored && !check.qualifies
         ? check.reason
         : scored ? `${this.goalsThisLevel}/${needed} DONE — ${remaining} SHOTS LEFT` : `${check.reason}  ·  ${remaining} LEFT`;
-      this.schedule(550, () => this.showSwipeHintMessage(message));
+      this.pendingAttemptHint = message;
       this.schedule(this.resultResetDelay(outcome), () => this.resetAttempt());
     }
   }
@@ -3529,6 +3861,7 @@ export class GameScene extends Phaser.Scene {
 
   resetAttempt() {
     if (this.state === 'OVERLAY') return;
+    this.clearCoachingLayers();
     this.ball.reset(this.level.offsetX);
     this.ball.setGoalBounds(this.goalWidth, this.goalHeight);
     this.currentWind = getWindVectorAt(this.level.wind, this.simTime);
@@ -3580,11 +3913,17 @@ export class GameScene extends Phaser.Scene {
     this.aimGuideHidden = false;
     this.state = 'AIMING';
     this.swipe.enabled = true;
+    if (this.tutorialActive()) this.refreshTutorialCopy({ visible: true });
     if (this.objectiveUi) {
       this.tweens.add({ targets: this.objectiveUi, alpha: 1, duration: 240, ease: 'Sine.easeIn' });
     }
     PlatformService.gameplayStart();
     Audio.whistle();
+    if (this.pendingAttemptHint) {
+      const message = this.pendingAttemptHint;
+      this.pendingAttemptHint = null;
+      this.showSwipeHintMessage(message);
+    }
   }
 
   endArcade() {
@@ -3614,6 +3953,7 @@ export class GameScene extends Phaser.Scene {
     this.swipe.enabled = false;
     this.swipe.cancel();
     this.cancelScheduledCalls();
+    this.setPauseUnderlayAvailable(false);
 
     const overlayObjects = this.terminalOverlayObjects;
     const dim = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, PAL.ink, 0.84)
@@ -3779,6 +4119,8 @@ export class GameScene extends Phaser.Scene {
     if (this.adRequestActive || !this.isSessionActive() || !PlatformService.supportsAds()) return;
     const token = this.sessionToken;
     this.adRequestActive = true;
+    setCanvasButtonNavigationBlocked(this, true);
+    this.setTerminalActionsAvailable(false);
     const wasMuted = Audio.muted;
     const blocker = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, PAL.ink, 0.28)
       .setDepth(4000).setInteractive();
@@ -3791,6 +4133,8 @@ export class GameScene extends Phaser.Scene {
       cleaned = true;
       if (this.activeAdCleanup === cleanup) this.activeAdCleanup = null;
       this.adRequestActive = false;
+      setCanvasButtonNavigationBlocked(this, false);
+      this.setTerminalActionsAvailable(true);
       Audio.setMuted(Boolean(wasMuted || this.settings?.muted));
       if (blocker.active) blocker.destroy();
       if (status.active) status.destroy();
@@ -3831,6 +4175,7 @@ export class GameScene extends Phaser.Scene {
     this.swipe.enabled = false;
     this.swipe.cancel();
     this.cancelScheduledCalls();
+    this.setPauseUnderlayAvailable(false);
 
     const overlayObjects = this.terminalOverlayObjects;
     const dim = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, PAL.ink, 0.84)
@@ -3992,6 +4337,7 @@ export class GameScene extends Phaser.Scene {
     this.swipe.enabled = false;
     this.swipe.cancel();
     this.cancelScheduledCalls();
+    this.setPauseUnderlayAvailable(false);
     const overlayObjects = this.terminalOverlayObjects;
     const dim = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, PAL.ink, 0.74)
       .setDepth(2999).setInteractive();
@@ -4049,6 +4395,11 @@ export class GameScene extends Phaser.Scene {
       ).setDepth(3001);
       overlayObjects.push(button);
     });
+    const spokenLines = lines.filter(Boolean).join('. ');
+    const spokenActions = buttons.map((button) => button.label).filter(Boolean).join(', ');
+    this.announceStatus(
+      `${title}. ${spokenLines}.${spokenActions ? ` Actions: ${spokenActions}.` : ''}`
+    );
   }
 
   async requestNaturalBreakAd() {
@@ -4056,6 +4407,8 @@ export class GameScene extends Phaser.Scene {
         !PlatformService.supportsAds() || this.adRequestActive) return;
     const token = this.sessionToken;
     this.adRequestActive = true;
+    setCanvasButtonNavigationBlocked(this, true);
+    this.setTerminalActionsAvailable(false);
     const wasMuted = Audio.muted;
     const blocker = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, PAL.ink, 0.18)
       .setDepth(4000).setInteractive();
@@ -4068,6 +4421,8 @@ export class GameScene extends Phaser.Scene {
       cleaned = true;
       if (this.activeAdCleanup === cleanup) this.activeAdCleanup = null;
       this.adRequestActive = false;
+      setCanvasButtonNavigationBlocked(this, false);
+      this.setTerminalActionsAvailable(true);
       Audio.setMuted(Boolean(wasMuted || this.settings?.muted));
       if (blocker.active) blocker.destroy();
       if (status.active) status.destroy();
@@ -4121,14 +4476,9 @@ export class GameScene extends Phaser.Scene {
     }
     const b = this.ball;
     const pos = project(b.x, b.y, b.z);
-    // A resting ball breathes very slightly. Purely visual: the physics body
-    // never moves, so the swipe hit-test and the launch point are unaffected.
-    if (this.state === 'AIMING' && !this.settings.reducedMotion) {
-      this.ballIdlePhase += 0.05;
-      pos.y += Math.sin(this.ballIdlePhase) * 0.35;
-    } else {
-      this.ballIdlePhase = 0;
-    }
+    // A dead ball stays planted. Ambient motion belongs to the player and the
+    // stadium; moving the ball while its shadow and swipe hitbox remain fixed
+    // reads as hovering and makes the most important contact point feel loose.
     const depth = 1000 - b.z * 10;
     // The ball is the subject of the shot, so it is allowed to read a little
     // larger than strict projection - just not so large it out-masses a player.
@@ -4193,11 +4543,6 @@ export class GameScene extends Phaser.Scene {
     // trail: fading pixel squares
     if (this.state === 'FLIGHT' || this.state === 'RESULT') {
       const snowTrail = Boolean(this.hazardMap.get('snow')?.trail);
-      if (b.flying) {
-        this.trailPts.push({ x: pos.x, y: pos.y, r: Math.max(pos.s * BALL_R, 1) });
-        const maxTrail = snowTrail && !this.trailStyle.enabled ? 24 : this.trailStyle.samples;
-        if (this.trailPts.length > maxTrail) this.trailPts.shift();
-      }
       this.trailGfx.clear().setDepth(depth - 2);
       const n = this.trailPts.length;
       for (let i = 0; i < n; i++) {
@@ -4241,6 +4586,25 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
+  }
+
+  /**
+   * Sample the trail from the fixed simulation clock, never from render().
+   * This gives a shot the same visual history at 30, 60 and 120 Hz and avoids
+   * filling the trail with duplicate points while contact hit-stop is active.
+   */
+  recordBallTrailSample() {
+    const b = this.ball;
+    if (!b?.flying || (this.state !== 'FLIGHT' && this.state !== 'RESULT')) return false;
+    const pos = project(b.x, b.y, b.z);
+    const previous = this.trailPts.at(-1);
+    if (previous && Math.hypot(pos.x - previous.x, pos.y - previous.y) < 0.05) return false;
+
+    this.trailPts.push({ x: pos.x, y: pos.y, r: Math.max(pos.s * BALL_R, 1) });
+    const snowTrail = Boolean(this.hazardMap.get('snow')?.trail);
+    const maxTrail = snowTrail && !this.trailStyle.enabled ? 24 : this.trailStyle.samples;
+    if (this.trailPts.length > maxTrail) this.trailPts.splice(0, this.trailPts.length - maxTrail);
+    return true;
   }
 
   /**

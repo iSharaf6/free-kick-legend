@@ -260,6 +260,7 @@ export class LevelSelectScene extends Phaser.Scene {
 
   create() {
     configureTourCamera(this);
+    this.reducedMotion = Boolean(SaveManager.getSettings().reducedMotion);
     MenuMusic.enterMenu();
     this.backgroundImage = addAspectCoverImage(this, 'stadium-menu').setDepth(0);
     this.crowdBackdrop = addAspectCoverRegion(
@@ -293,7 +294,7 @@ export class LevelSelectScene extends Phaser.Scene {
     scanlines.fillStyle(PAL.ink, 0.022);
     for (let y = 1; y < TOUR_H; y += 4) scanlines.fillRect(TOUR_VIEW_X, y, TOUR_VIEW_W, 1);
     scanlines.setBlendMode('MULTIPLY');
-    sceneIntro(this);
+    if (!this.reducedMotion) sceneIntro(this);
 
     // Choosing a level is the last quiet moment before kick-off. Warm the match
     // atlases here too, so arriving from a cold Career tap is as instant as

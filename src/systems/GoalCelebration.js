@@ -1,5 +1,4 @@
-import Phaser from 'phaser';
-import { GAME_H, GAME_W } from '../config.js';
+import { CAM, GAME_H, GAME_W, GOAL_W, project } from '../config.js';
 import { PAL } from '../pixelart.js';
 import { crispText, drawPanel } from '../ui.js';
 import { scorerCardCopy } from './OutcomePresentation.js';
@@ -23,6 +22,45 @@ const STAND_SKY_ROWS = 102;
 const STAND_SKY_TOP = 14;
 const PYRO_TEXTURE = 'goal-pyro-fountain-v1';
 const PYRO_ANIM = 'goal-pyro-fountain-burst-v1';
+const PYRO_FRAME_HEIGHT = 256;
+const PYRO_BACK_OFFSET = 0.25;
+const PYRO_POST_GAP = 0.36;
+const PYRO_STAGGER_MS = 96;
+const PYRO_WORLD_HEIGHTS = Object.freeze([3.25, 2.95]);
+
+function finitePositive(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+/**
+ * Build the two fountain transforms from the same world-space goal geometry as
+ * the posts. Keeping this pure makes perspective, grounding and layer ordering
+ * testable without booting a renderer.
+ */
+export function goalPyroLayout({ goalWidth = GOAL_W, goalZ = CAM.ballDist + 18 } = {}) {
+  const width = finitePositive(goalWidth, GOAL_W);
+  const frontZ = finitePositive(goalZ, CAM.ballDist + 18);
+  const effectZ = frontZ + PYRO_BACK_OFFSET;
+  const frameDepth = 1000 - frontZ * 10 + 2;
+
+  return Object.freeze([-1, 1].map((side, index) => {
+    const worldX = side * (width / 2 + PYRO_POST_GAP);
+    const base = project(worldX, 0, effectZ);
+    const scale = (base.s * PYRO_WORLD_HEIGHTS[index]) / PYRO_FRAME_HEIGHT;
+    return Object.freeze({
+      x: base.x,
+      y: base.y,
+      scale,
+      // The extra depth offset follows the world z and guarantees the effect is
+      // behind the posts, ball and keeper while remaining in front of the stand.
+      depth: Math.min(frameDepth - 0.5, 1000 - effectZ * 10),
+      flipX: index === 1,
+      delay: index * PYRO_STAGGER_MS,
+      reducedFrame: index === 0 ? 1 : 2
+    });
+  }));
+}
 
 /**
  * Renderer-only goal payoff. Gameplay owns scoring and timing; this controller
@@ -33,6 +71,7 @@ export class GoalCelebration {
     this.scene = scene;
     this.objects = new Set();
     this.timers = new Set();
+    this.active = null;
   }
 
   track(object) {
@@ -62,22 +101,45 @@ export class GoalCelebration {
     this.stop();
     const scene = this.scene;
     const reduced = Boolean(scene.settings?.reducedMotion);
+    const options = {
+      scorerName,
+      shirtNumber,
+      goalNumber,
+      ballTexture,
+      kicker,
+      scoreDelta,
+      shotLabel,
+      contextLabel
+    };
+    this.active = { options, reduced };
 
     // Keep the camera completely stable. A goal should feel bigger because the
     // stadium comes alive, not because the whole pitch vibrates or washes out.
     this.showCelebrationStand(reduced);
     this.showPitchPyro(reduced);
     this.after(reduced ? 0 : 55, () => kicker?.celebrate?.(650));
-    this.after(70, () => this.showScorerCard({
-      scorerName,
-      shirtNumber,
-      goalNumber,
-      ballTexture,
-      scoreDelta,
-      shotLabel,
-      contextLabel
-    }));
+    this.after(70, () => this.showScorerCard(options));
     this.after(1050, () => this.stop());
+  }
+
+  setReducedMotion(reduced) {
+    const value = Boolean(reduced);
+    if (!this.active || this.active.reduced === value) return false;
+
+    const options = this.active.options;
+    this.clearPresentation();
+    this.active = { options, reduced: value };
+
+    // Rebuild from static/animated primitives instead of trying to retime a
+    // half-played sprite clip. Kicker.celebrate() invalidates its old sequence
+    // and neutralises action offsets before adopting the correct presentation.
+    options.kicker?.setReducedMotion?.(value);
+    options.kicker?.celebrate?.(650);
+    this.showCelebrationStand(value);
+    this.showPitchPyro(value);
+    this.showScorerCard(options);
+    this.after(650, () => this.stop());
+    return true;
   }
 
   /**
@@ -111,7 +173,7 @@ export class GoalCelebration {
       .setOrigin(0.5, 0)
       .setScale(0.5)
       .setDepth(1.34)
-      .setBlendMode(Phaser.BlendModes.ADD)
+      .setBlendMode('ADD')
       .setAlpha(reduced ? 0.7 : 0));
     if (!reduced) {
       scene.tweens.add({ targets: stand, alpha: 0.88, duration: 110, ease: 'Quad.easeOut' });
@@ -140,15 +202,26 @@ export class GoalCelebration {
       });
     }
 
-    [82, GAME_W - 82].forEach((x, index) => {
-      const fountain = this.track(scene.add.sprite(x, 116, PYRO_TEXTURE, reduced ? 2 : 0)
+    goalPyroLayout({ goalWidth: scene.goalWidth, goalZ: scene.zGoal }).forEach((layout) => {
+      const fountain = this.track(scene.add.sprite(
+        layout.x,
+        layout.y,
+        PYRO_TEXTURE,
+        reduced ? layout.reducedFrame : 0
+      )
         .setOrigin(0.5, 1)
-        // 96x256 source frame -> 40x106: exact aspect within rounding.
-        .setDisplaySize(40, 106)
-        .setDepth(1880)
-        .setFlipX(index === 1)
-        .setBlendMode(Phaser.BlendModes.ADD));
-      if (!reduced) fountain.play(PYRO_ANIM);
+        .setScale(layout.scale)
+        .setDepth(layout.depth)
+        .setFlipX(layout.flipX)
+        .setBlendMode('ADD')
+        .setAlpha(reduced ? 0.72 : 1));
+      if (!reduced) {
+        const ignite = () => {
+          if (fountain.active) fountain.play(PYRO_ANIM);
+        };
+        if (layout.delay > 0) this.after(layout.delay, ignite);
+        else ignite();
+      }
     });
   }
 
@@ -204,24 +277,30 @@ export class GoalCelebration {
       card.setX(targetX);
     } else {
       scene.tweens.add({ targets: card, x: targetX, duration: 170, ease: 'Back.easeOut' });
+      scene.tweens.add({
+        targets: card,
+        alpha: 0,
+        delay: 500,
+        duration: 120,
+        ease: 'Quad.easeIn'
+      });
     }
-    scene.tweens.add({
-      targets: card,
-      alpha: 0,
-      delay: 500,
-      duration: 120,
-      ease: 'Quad.easeIn'
-    });
   }
 
-  stop() {
+  clearPresentation() {
     for (const timer of this.timers) timer?.remove?.(false);
     this.timers.clear();
     for (const object of this.objects) {
       this.scene.tweens?.killTweensOf?.(object);
+      object?.anims?.stop?.();
       if (object?.active) object.destroy?.(true);
     }
     this.objects.clear();
+  }
+
+  stop() {
+    this.clearPresentation();
+    this.active = null;
   }
 
   destroy() {

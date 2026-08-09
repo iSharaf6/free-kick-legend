@@ -103,7 +103,8 @@ export class BootScene extends Phaser.Scene {
       if (handedOff || !this.scene.isActive('Boot')) return;
       handedOff = true;
       try {
-        const settings = SaveManager.reload().settings;
+        SaveManager.reload();
+        const settings = SaveManager.getSettings();
         const muted = Boolean(settings.muted || PlatformService.shouldMuteAudio());
         Audio.setMuted(muted);
         Audio.setVolume(settings.sfxVolume);
