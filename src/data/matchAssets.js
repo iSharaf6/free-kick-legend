@@ -1,5 +1,6 @@
 import { KEEPER_SHEETS, queueKeeperSheets } from './keeperAssets.js';
 import { assetUrl } from './assetBase.js';
+import { CROWD_MATCH_ANIMATION } from './crowdMatchAnimation.js';
 
 // Sprites that only ever appear once a match is on the pitch. They used to boot
 // with the title screen, which put roughly 4.3 MB of goalkeeper and defender
@@ -25,8 +26,18 @@ const MATCH_SPRITES = Object.freeze([
   Object.freeze({ key: 'trackside-camera-pedestal-v2', path: 'sprites/trackside-camera-pedestal-v2.png' }),
   Object.freeze({ key: 'trackside-photographer-seat-v2', path: 'sprites/trackside-photographer-seat-v2.png' }),
   Object.freeze({ key: 'goal-pyro-fountain-v1', path: 'fx/goal-spark-fountain-static-v2.png' }),
-  Object.freeze({ key: 'goal-flare-static-v2', path: 'fx/goal-flare-static-v2.png' }),
-  Object.freeze({ key: 'goal-flags-static-v2', path: 'fx/goal-flags-static-v2.png' })
+  Object.freeze({
+    key: CROWD_MATCH_ANIMATION.goal.textureKey,
+    path: 'hd/crowd-match-goal-v1.png',
+    frameWidth: CROWD_MATCH_ANIMATION.frameWidth,
+    frameHeight: CROWD_MATCH_ANIMATION.frameHeight
+  }),
+  Object.freeze({
+    key: CROWD_MATCH_ANIMATION.out.textureKey,
+    path: 'hd/crowd-match-out-v1.png',
+    frameWidth: CROWD_MATCH_ANIMATION.frameWidth,
+    frameHeight: CROWD_MATCH_ANIMATION.frameHeight
+  })
 ]);
 
 /**

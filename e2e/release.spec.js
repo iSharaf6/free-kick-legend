@@ -153,7 +153,8 @@ test('the Continue action acknowledges input and rejects re-entry', async ({ pag
     return {
       labels: objects.map((object) => object?.text).filter(Boolean),
       crest: snapshot(image('kick-district-crest')),
-      studio: snapshot(image('calynx-logo-pixel')),
+      studio: snapshot(objects.find((object) =>
+        object?.texture?.key === 'calynx-logo-pixel' && object.depth === 205)),
       pitch: snapshot(image('pitch-grass-pixel-v3')),
       sponsorCount: objects.filter((object) => object?.texture?.key === 'calynx-logo-pixel' && object.depth === 7).length,
       grounded: {
@@ -280,8 +281,12 @@ test('goal celebration layers static generated pixel art, useful scorer data, an
         depth: fountain.depth,
         scale: fountain.scaleX
       })),
+      rigs: [...scene.goalPyroRigs]
+        .sort((left, right) => left.x - right.x)
+        .map((rig) => ({ x: rig.x, y: rig.y, depth: rig.depth, height: rig.displayHeight })),
+      crowdTexture: scene.crowdImage.texture.key,
+      crowdAnimation: scene.crowdImage.anims.currentAnim?.key,
       goalFrameDepth: 1000 - scene.zGoal * 10 + 2,
-      expectedPyroBaseY: 76 + (2.3 * 316) / (scene.zGoal + 0.25),
       scorer: text.filter((line) => line.startsWith('+') || line.includes('MICA VALE') || line.includes('COMBO')),
       shaking: scene.cameras.main.shakeEffect.isRunning,
       resetDelay: scene.resultResetDelay('GOAL', 1150)
@@ -291,17 +296,18 @@ test('goal celebration layers static generated pixel art, useful scorer data, an
   expect(goal.banner).toBe('GOAL!');
   expect(goal.bounds.left).toBeGreaterThan(8);
   expect(goal.bounds.right).toBeLessThan(472);
-  expect(goal.layers).toEqual(expect.arrayContaining([1.34, 2220]));
-  expect(goal.textures).toEqual(expect.arrayContaining([
-    'goal-pyro-fountain-v1',
-    'goal-flare-static-v2',
-    'goal-flags-static-v2'
-  ]));
+  expect(goal.layers).toEqual(expect.arrayContaining([2220]));
+  expect(goal.textures).toEqual(expect.arrayContaining(['goal-pyro-fountain-v1']));
+  expect(goal.crowdTexture).toBe('crowd-match-goal-v1');
+  expect(goal.crowdAnimation).toBe('crowd-match-goal-v1');
   expect(goal.fountains).toHaveLength(2);
   expect(goal.fountains[0].x).toBeGreaterThan(100);
   expect(goal.fountains[1].x).toBeLessThan(380);
   expect(goal.fountains.every((fountain) => fountain.depth < goal.goalFrameDepth)).toBe(true);
-  expect(goal.fountains.every((fountain) => Math.abs(fountain.y - goal.expectedPyroBaseY) < 0.01)).toBe(true);
+  expect(goal.rigs).toHaveLength(2);
+  expect(goal.rigs.every((rig) => rig.height > 12 && rig.depth < goal.goalFrameDepth)).toBe(true);
+  expect(goal.fountains.every((fountain, index) =>
+    Math.abs(fountain.y - goal.rigs[index].y) < 0.01)).toBe(true);
   expect(goal.fountains[0].scale).not.toBeCloseTo(goal.fountains[1].scale, 5);
   expect(goal.scorer).toEqual([
     expect.stringMatching(/^\+\d+ · /),

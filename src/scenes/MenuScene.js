@@ -12,7 +12,7 @@ import { LEVELS } from '../data/levels.js';
 import { PAL } from '../pixelart.js';
 import { Kicker } from '../objects/Kicker.js';
 import { utcDateKey } from '../data/progression.js';
-import { addMenuCrowd } from '../art/CrowdStand.js';
+import { addAnimatedCrowd } from '../art/AnimatedCrowd.js';
 import { getCosmetic } from '../data/cosmetics.js';
 import { prefetchMatchPack } from '../data/matchAssets.js';
 
@@ -363,7 +363,7 @@ export class MenuScene extends Phaser.Scene {
     this.reducedMotion = Boolean(settings.reducedMotion);
     // Kept on the scene so its ambient timer is torn down explicitly rather
     // than being left for Phaser's shutdown to collect.
-    this.crowdStand = addMenuCrowd(this, {
+    this.crowdStand = addAnimatedCrowd(this, {
       depth: 2,
       reducedMotion: this.reducedMotion
     });
@@ -457,11 +457,13 @@ export class MenuScene extends Phaser.Scene {
       board.fillStyle(spec.trim, 0.5).fillRect(x + 3, y + h - 6, w - 6, 1);
       board.fillStyle(INK, 1).fillRect(x + w - 1, y - 1, 2, h + 1);
 
-      const centreX = x + w / 2;
-      if (centreX - 28 >= 1 && centreX + 28 <= GAME_W - 1 &&
-          this.textures.exists('calynx-logo-pixel')) {
-        this.add.image(centreX, y + h / 2, 'calynx-logo-pixel')
-          .setScale(0.8)
+      const visibleLeft = Math.max(1, x + 2);
+      const visibleRight = Math.min(GAME_W - 1, x + w - 2);
+      const visibleWidth = visibleRight - visibleLeft;
+      if (visibleWidth >= 18 && this.textures.exists('calynx-logo-pixel')) {
+        const logoWidth = Math.min(66, visibleWidth - 8);
+        this.add.image((visibleLeft + visibleRight) / 2, y + h / 2, 'calynx-logo-pixel')
+          .setDisplaySize(logoWidth, logoWidth * (20 / 66))
           .setTint(spec.logo)
           .setDepth(7);
       }
