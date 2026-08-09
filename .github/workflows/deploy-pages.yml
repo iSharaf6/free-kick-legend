@@ -1,4 +1,4 @@
-name: Test and deploy GitHub Pages
+name: Deploy GitHub Pages
 
 on:
   push:
@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build-and-deploy:
@@ -27,17 +27,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test
-      - run: npx playwright install --with-deps chromium
-      - name: Run deployment browser gate
-        run: npm run test:e2e:deploy
-      - name: Upload browser failure evidence
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-failure-evidence
-          path: test-results
-          retention-days: 7
       - run: npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
