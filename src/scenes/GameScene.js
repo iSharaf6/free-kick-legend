@@ -139,8 +139,26 @@ const HOOP_SEGMENTS = 52;
 // challenge, it is a lockout - this is the last bit of give.
 const RING_FORGIVENESS = 0.22;
 
-// Frames-worth of freeze on boot-to-ball contact, scaled by shot power.
-const HIT_STOP_SECONDS = 0.055;
+// Freeze on boot-to-ball contact, scaled by shot power. A scuffed shot holds
+// for ~40ms and a maximum-power strike for ~70ms: below 40 the hold reads as a
+// dropped frame, above 70 it reads as a stutter.
+const HIT_STOP_SECONDS = 0.07;
+const HIT_STOP_MIN_SCALE = 0.57;
+
+// Impact shake. Trauma is spent linearly over SHAKE_DECAY_SECONDS while screen
+// offset follows its square, so a full-strength hit rattles hard for ~120ms and
+// has visually settled well before the trauma budget actually runs out.
+const SHAKE_TRAUMA_PER_STRENGTH = 0.62;
+const SHAKE_DECAY_SECONDS = 0.42;
+const SHAKE_MAX_PX = 2.3;        // logical pixels at peak trauma
+const SHAKE_KICK_RECOVERY = 12;  // exponential settle rate for the directional lurch
+
+// Bullet time. The dip arms when the ball is this far (in flight seconds) from
+// the goal line, so it always covers the finish rather than a fixed depth.
+const SLOWMO_LEAD_SECONDS = 0.2;
+const SLOWMO_TOP_CORNER_SCALE = 0.4;
+const SLOWMO_NEAR_MISS_SCALE = 0.62;
+const SLOWMO_RAMP_SECONDS = 0.18;
 
 // First-run coaching for match 01. SaveManager has carried a {completed, step}
 // tutorial record since the save format was written, and nothing ever set it -
@@ -440,11 +458,18 @@ export class GameScene extends Phaser.Scene {
     this.lastReward = 0;
     this.simSpeed = 1;
     this.slowmoT = 0;
+    this.slowmoDepth = SLOWMO_NEAR_MISS_SCALE;
     this.flightT = 0;
     this.accumulator = 0;
     this.simTime = 0;
     this.slowmoUsed = false;
     this.hitStopT = 0;
+    this.shakeTrauma = 0;
+    this.shakeT = 0;
+    this.shakeKickX = 0;
+    this.shakeKickY = 0;
+    this.shakeApplied = false;
+    this.cameraBase = null;
     this.over = false;
     this.ballCaught = false;
     this.keeperContactChecked = new Set();
@@ -1353,22 +1378,64 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  playImpactShake(duration = 90, strength = 0.75) {
+  /**
+   * Impact shake. `strength` is severity, roughly 0.5 for a scuffed contact and
+   * just over 1 for the crossbar.
+   *
+   * The old version tweened scrollX/scrollY through two smooth sine cycles,
+   * which reads as a wobble - the camera drifts somewhere and drifts back. A
+   * jolt needs to start at full amplitude and rattle down, so severity is
+   * banked as trauma and spent frame by frame in updateCameraShake(). Because
+   * amplitude goes as trauma squared, a harder hit is both bigger and longer
+   * without any caller having to say so, and overlapping impacts accumulate
+   * instead of the later tween cancelling the earlier one.
+   *
+   * `kickX`/`kickY` add a one-off directional lurch on top of the rattle: the
+   * camera is shoved and recovers, which is what sells the shot's direction.
+   *
+   * There is deliberately no duration argument: severity alone decides how long
+   * the rattle lasts, which is what keeps a light and a heavy impact from ever
+   * being tuned into the same shake.
+   */
+  playImpactShake(strength = 0.75, { kickX = 0, kickY = 0 } = {}) {
     if (this.settings.screenShake === false || this.settings.reducedMotion) return;
+    this.shakeTrauma = Math.min(1, this.shakeTrauma + Math.max(0, strength) * SHAKE_TRAUMA_PER_STRENGTH);
+    this.shakeKickX += kickX;
+    this.shakeKickY += kickY;
+  }
+
+  updateCameraShake(dt) {
     const camera = this.cameras.main;
-    const baseX = camera.scrollX;
-    const baseY = camera.scrollY;
-    this.tweens.killTweensOf(camera);
-    this.tweens.add({
-      targets: camera,
-      scrollX: baseX + strength,
-      scrollY: baseY - strength * 0.45,
-      duration: Math.max(24, duration / 4),
-      yoyo: true,
-      repeat: 1,
-      ease: 'Sine.easeInOut',
-      onComplete: () => camera.setScroll(baseX, baseY)
-    });
+    if (!camera || !this.cameraBase) return;
+    const kicking = Math.abs(this.shakeKickX) > 0.004 || Math.abs(this.shakeKickY) > 0.004;
+    if (this.shakeTrauma <= 0 && !kicking) {
+      // Park the camera exactly on its authored centre once, then stop writing
+      // to it, so a settled match is pixel-identical to a never-shaken one.
+      if (this.shakeApplied) {
+        camera.setScroll(this.cameraBase.x, this.cameraBase.y);
+        this.shakeApplied = false;
+        this.shakeKickX = 0;
+        this.shakeKickY = 0;
+      }
+      return;
+    }
+
+    this.shakeTrauma = Math.max(0, this.shakeTrauma - dt / SHAKE_DECAY_SECONDS);
+    const recovery = Math.exp(-dt * SHAKE_KICK_RECOVERY);
+    this.shakeKickX *= recovery;
+    this.shakeKickY *= recovery;
+    this.shakeT += dt;
+
+    // Two incommensurate sines per axis: a rattle that never repeats on a short
+    // loop, and unlike Math.random it stays frame-rate independent.
+    const amp = this.shakeTrauma * this.shakeTrauma * SHAKE_MAX_PX;
+    const offsetX = amp * (Math.sin(this.shakeT * 96) * 0.72 + Math.sin(this.shakeT * 37) * 0.28);
+    const offsetY = amp * 0.58 * (Math.sin(this.shakeT * 78 + 1.7) * 0.7 + Math.sin(this.shakeT * 29 + 0.4) * 0.3);
+    camera.setScroll(
+      this.cameraBase.x + offsetX + this.shakeKickX,
+      this.cameraBase.y + offsetY + this.shakeKickY
+    );
+    this.shakeApplied = true;
   }
 
   drawPitch() {
@@ -3034,6 +3101,7 @@ export class GameScene extends Phaser.Scene {
     this.flightT = 0;
     this.slowmoUsed = false;
     this.slowmoT = 0;
+    this.slowmoDepth = SLOWMO_NEAR_MISS_SCALE;
     this.swipe.enabled = false;
     if (this.hint) {
       this.hint.destroy();
@@ -3060,11 +3128,17 @@ export class GameScene extends Phaser.Scene {
     if (!this.settings.reducedMotion) {
       const contact = project(this.ball.x, 0, this.ball.z);
       this.turf?.explode(6 + Math.round(shot.power * 8), contact.x, contact.y);
-      this.playImpactShake(70, 0.5 + shot.power * 0.45);
+      // The camera is shoved down-field with the ball and drifts with any
+      // lateral pace, so power stops being a number on the HUD and becomes a
+      // jolt the player feels through the frame.
+      this.playImpactShake(0.55 + shot.power * 0.75, {
+        kickY: 0.5 + shot.power * 1.5,
+        kickX: Math.max(-1, Math.min(1, shot.vx / SHOT.maxVx)) * (0.35 + shot.power * 0.55)
+      });
       // Hit-stop: the world holds for a couple of frames on the strike. It is
       // the cheapest way to make contact land as an impact rather than the ball
       // simply starting to move, and it scales with how hard it was struck.
-      this.hitStopT = HIT_STOP_SECONDS * (0.6 + shot.power * 0.4);
+      this.hitStopT = HIT_STOP_SECONDS * (HIT_STOP_MIN_SCALE + shot.power * (1 - HIT_STOP_MIN_SCALE));
     }
     if (Math.abs(shot.spin) > 0.45) Audio.whoosh(Math.abs(shot.spin));
     this.ball.kick(shot.vx, shot.vy, shot.vz, shot.spin);
@@ -3100,6 +3174,16 @@ export class GameScene extends Phaser.Scene {
     // canvas so a save/post impact never shrinks the match into a tiny island.
     if (this.cameras.main.zoom !== RENDER_SCALE) {
       this.cameras.main.setZoom(RENDER_SCALE).centerOn(GAME_W / 2, GAME_H / 2);
+      // centerOn has just written the authored resting scroll. Capture it as
+      // the origin every shake offset is measured from, and drop any offset
+      // that belonged to the previous framing.
+      this.cameraBase = { x: this.cameras.main.scrollX, y: this.cameras.main.scrollY };
+      this.shakeApplied = false;
+    } else if (!this.cameraBase) {
+      // The zoom lock above only re-centres when Phaser has clobbered the zoom,
+      // which on a healthy boot never happens - so it cannot be the only place
+      // the shake origin is captured, or the camera never shakes at all.
+      this.cameraBase = { x: this.cameras.main.scrollX, y: this.cameras.main.scrollY };
     }
     // Pause and terminal cards intentionally freeze the simulated match. The
     // Scene remains active so keyboard/pointer UI and overlay tweens still work.
@@ -3114,6 +3198,12 @@ export class GameScene extends Phaser.Scene {
     // shot at 30, 60, 120 Hz and after small browser stalls. The mode clock is
     // real-time based, including result cards; only an explicit pause freezes it.
     const rawDt = Math.min(Math.max(delta, 0), 250) / 1000;
+
+    // Shake runs on wall-clock time, ahead of the hit-stop gate on purpose: a
+    // frozen world that is still rattling is the whole point of the freeze. It
+    // also has to be immune to slow motion, or a bullet-time impact would shake
+    // in treacle.
+    this.updateCameraShake(rawDt);
 
     // Hit-stop takes precedence over everything: the world is stopped, briefly.
     // The restore is not optional - simSpeed is the accumulator's multiplier, so
@@ -3132,10 +3222,10 @@ export class GameScene extends Phaser.Scene {
     // Timed bullet time: hold briefly, then ramp smoothly back to full speed.
     if (this.slowmoT > 0) {
       this.slowmoT = Math.max(0, this.slowmoT - rawDt);
-      const ramp = 0.14;
-      this.simSpeed = this.slowmoT > ramp
-        ? 0.45
-        : 0.45 + 0.55 * (1 - this.slowmoT / ramp);
+      const depth = this.slowmoDepth || SLOWMO_NEAR_MISS_SCALE;
+      this.simSpeed = this.slowmoT > SLOWMO_RAMP_SECONDS
+        ? depth
+        : depth + (1 - depth) * (1 - this.slowmoT / SLOWMO_RAMP_SECONDS);
       if (this.slowmoT === 0) this.simSpeed = 1;
     }
 
@@ -3292,7 +3382,7 @@ export class GameScene extends Phaser.Scene {
 
     const screen = project(point.x, point.y, this.zBoards);
     this.impact.explode(9, screen.x, screen.y);
-    this.playImpactShake(80, 0.6);
+    this.playImpactShake(0.6);
     Audio.post('post');
     this.flashBoard(screen.x, screen.y, this.zBoards);
   }
@@ -3322,13 +3412,21 @@ export class GameScene extends Phaser.Scene {
     if (!this.netTouched && Number.isFinite(ball.netBackZ) &&
         ball.z + BALL_R >= ball.netBackZ - 0.12) {
       this.netTouched = true;
+      const entrySpeed = Math.max(Math.hypot(vx, vy, vz), (this.netEntrySpeed || 0) * 0.7);
+      // A rocket and a rolled finish used to bulge the net by nearly the same
+      // amount, because the membrane clamps its own impulse well below what a
+      // full-pace shot delivers. Widening the strike as well as its speed lets
+      // a hard finish visibly punch the netting out instead of dimpling it.
+      const force = Math.max(0, Math.min(1, (entrySpeed - 9) / 17));
       net.impact({
         x: ball.x,
         y: ball.y,
-        speed: Math.max(Math.hypot(vx, vy, vz), (this.netEntrySpeed || 0) * 0.7) * 1.35,
-        radius: 1.1
+        speed: entrySpeed * 1.35,
+        strength: 1 + force * 0.85,
+        radius: 1.1 + force * 0.5
       });
-      Audio.net();
+      Audio.net(force);
+      this.playImpactShake(0.3 + force * 0.5, { kickY: 0.3 + force * 0.7 });
       return;
     }
 
@@ -3345,7 +3443,9 @@ export class GameScene extends Phaser.Scene {
           strength: 0.55,
           radius: 0.75
         });
-        Audio.net();
+        // A side or roof brush is a graze, not the finish: quieter than the
+        // back-net thunk so the two never compete.
+        Audio.net(0.25);
       }
     }
   }
@@ -3385,7 +3485,7 @@ export class GameScene extends Phaser.Scene {
         ball.spin = 0;
         const spos = project(pt.x, pt.y, crossing.planeZ);
         this.impact.explode(wallContact.part === 'leg' ? 11 : 8, spos.x, spos.y);
-        this.playImpactShake(90, 0.72);
+        this.playImpactShake(0.72);
         Audio.save();
         this.resolve('WALL');
         return;
@@ -3422,25 +3522,38 @@ export class GameScene extends Phaser.Scene {
         ball.spin *= -0.25;
         const spos = project(pt.x, pt.y, crossing.planeZ);
         this.impact.explode(12, spos.x, spos.y);
-        this.playImpactShake(80, 0.68);
+        this.playImpactShake(0.68);
         Audio.save();
         this.resolve('SAVE');
         return;
       }
     }
 
-    // Bullet time is a spice, not a sauce: a short, timed dip reserved for
-    // shots arrowing at the corners or skimming the bar. Ordinary on-target
-    // shots resolve at full speed so the retry loop stays fast.
-    if (!this.settings.reducedMotion && !this.slowmoUsed && ball.z > this.zWall && ball.z < this.zGoal - 2) {
+    // Bullet time is a spice, not a sauce: a short dip reserved for shots
+    // arrowing at the corners or skimming the bar. Ordinary on-target shots
+    // resolve at full speed so the retry loop stays fast.
+    //
+    // The trigger is time-to-goal, not a depth window. Keyed off depth, a
+    // floated shot and a rocket entered slow motion at the same place but with
+    // wildly different amounts of flight left, so the dip regularly expired
+    // before the ball arrived and the highlight played at full speed. Waiting
+    // until the ball is SLOWMO_LEAD_SECONDS from the line means the dip always
+    // covers the finish itself.
+    if (!this.settings.reducedMotion && !this.slowmoUsed && ball.z > this.zWall && ball.z < this.zGoal) {
       const p = ball.predictAt(this.zGoal);
-      if (p.reached && Math.abs(p.x) < this.goalWidth / 2 && p.y < this.goalHeight) {
-        this.slowmoUsed = true;
+      if (p.reached && Math.abs(p.x) < this.goalWidth / 2 && p.y < this.goalHeight &&
+          p.T > 0 && p.T <= SLOWMO_LEAD_SECONDS) {
+        const topCorner = isTopCorner(p, this.goalWidth, this.goalHeight);
         const nearPost = Math.abs(p.x) > this.goalWidth / 2 - 0.9;
         const underBar = p.y > this.goalHeight - 0.55;
-        if (isTopCorner(p, this.goalWidth, this.goalHeight) || nearPost || underBar) {
-          this.slowmoT = 0.4;
-          this.simSpeed = 0.45;
+        if (topCorner || nearPost || underBar) {
+          this.slowmoUsed = true;
+          // The top bins is the shot people replay, so it gets the deeper dip.
+          this.slowmoDepth = topCorner ? SLOWMO_TOP_CORNER_SCALE : SLOWMO_NEAR_MISS_SCALE;
+          // p.T seconds of flight remain. Played at slowmoDepth they occupy
+          // p.T / depth of wall clock; the ramp back to full speed follows.
+          this.slowmoT = p.T / this.slowmoDepth + SLOWMO_RAMP_SECONDS;
+          this.simSpeed = this.slowmoDepth;
         }
       }
     }
@@ -3498,7 +3611,14 @@ export class GameScene extends Phaser.Scene {
     reboundFromGoalFrame(this.ball, point, contact, this.zGoal, 0.72);
     const screen = project(point.x, point.y, point.z ?? this.zGoal);
     this.impact.explode(contact.frame === 'crossbar' ? 14 : 11, screen.x, screen.y);
-    this.playImpactShake(110, contact.frame === 'crossbar' ? 1.05 : 0.82);
+    // Woodwork is the hardest thing in the game to hit and the most painful to
+    // hit, so it gets the heaviest jolt: the bar throws the camera up, a post
+    // throws it sideways away from the upright that was struck.
+    const crossbar = contact.frame === 'crossbar';
+    this.playImpactShake(crossbar ? 1.35 : 1.05, {
+      kickY: crossbar ? -1.6 : -0.5,
+      kickX: crossbar ? 0 : -Math.sign(point.x || 1) * 1.3
+    });
     Audio.post(contact.frame);
 
     // In off the post. The rebound parks the ball tangent to the frame and
@@ -3526,6 +3646,7 @@ export class GameScene extends Phaser.Scene {
     PlatformService.gameplayStop();
     this.simSpeed = 1;
     this.slowmoT = 0;
+    this.slowmoDepth = SLOWMO_NEAR_MISS_SCALE;
     // A result must never be left waiting behind a hit-stop.
     this.hitStopT = 0;
     this.swipe.enabled = false;
@@ -3910,6 +4031,7 @@ export class GameScene extends Phaser.Scene {
     this.ballGhosts?.forEach((ghost) => ghost.spr.setVisible(false));
     this.simSpeed = 1;
     this.slowmoT = 0;
+    this.slowmoDepth = SLOWMO_NEAR_MISS_SCALE;
     this.hitStopT = 0;
     this.aimGuideHidden = false;
     this.state = 'AIMING';

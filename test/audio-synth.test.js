@@ -82,12 +82,18 @@ test('authored UI and frame clips use short SFX-bus markers', () => {
     synth.post('crossbar');
 
     assert.equal(sounds[0].key, 'audio-ui-button-press');
-    assert.equal(sounds[0].marker.duration, 0.18);
+    assert.equal(sounds[0].marker.duration, 0.22);
     assert.equal(sounds[0].playConfig.volume, 0.4);
     assert.equal(sounds[1].key, 'audio-post-impact');
-    assert.equal(sounds[1].marker.duration, 0.82);
+    assert.equal(sounds[1].marker.duration, 0.5);
     assert.equal(sounds[1].playConfig.rate, 1.08);
     assert.equal(synth.lastSample.name, 'post');
+
+    // Both clips were authored with a long silent lead-in. A marker starting at
+    // zero expires inside that silence, which is exactly how these two samples
+    // shipped mute while still reporting success and muting the synth fallback.
+    assert.ok(sounds[0].marker.start > 0.5, `ui marker must skip the silent head, got ${sounds[0].marker.start}`);
+    assert.ok(sounds[1].marker.start > 0.85, `post marker must skip the silent head, got ${sounds[1].marker.start}`);
 
     synth.setMuted(true);
     assert.equal(sounds[0].volume, 0);
