@@ -13,7 +13,6 @@
     "preview": "vite preview --port 4173 --strictPort",
     "test": "node --test test/*.test.js",
     "test:e2e": "playwright test",
-    "test:e2e:deploy": "playwright test --grep-invert @stress",
     "test:release": "npm test && npm run build && npm run test:e2e"
   },
   "dependencies": {
