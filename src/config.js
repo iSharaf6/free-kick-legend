@@ -23,8 +23,7 @@ export const CAM = {
   height: 2.3,    // camera height above the pitch
   horizonY: 76,   // mathematical vanishing line (stadium/pitch seam is STADIUM_Y)
   ballDist: 5.7,  // camera sits this far behind the ball
-  x: 0,           // lateral camera position, set per level
-  yaw: 0          // horizontal look angle, aimed down the ball-to-goal line
+  x: 0            // lateral camera position, set per level
 };
 
 // The scoring area is deliberately a touch wider than the wall's reach. At 9.0m
@@ -79,30 +78,10 @@ export const SHOT = {
 
 // Project world (x, y, z) to screen. z must be > 0.
 export function project(x, y, z) {
-  const dx = x - CAM.x;
-  const cos = Math.cos(CAM.yaw || 0);
-  const sin = Math.sin(CAM.yaw || 0);
-  const cameraX = dx * cos - z * sin;
-  const cameraZ = dx * sin + z * cos;
-  const s = CAM.focal / Math.max(cameraZ, 0.001);
+  const s = CAM.focal / z;
   return {
-    x: GAME_W / 2 + cameraX * s,
+    x: GAME_W / 2 + (x - CAM.x) * s,
     y: CAM.horizonY + (CAM.height - y) * s,
     s
   };
-}
-
-/**
- * Put the camera on the exact approach line through ball and goal.
- *
- * A translated camera that still looked straight ahead made side free kicks
- * shear the six-yard and penalty boxes. Solving the camera intercept and yaw
- * from the two world points keeps both ball and goal centred while every pitch
- * line remains one true projected world-space segment.
- */
-export function configureApproachCamera(ballX, goalZ, ballZ = CAM.ballDist) {
-  const run = Math.max(goalZ - ballZ, 0.001);
-  CAM.x = Number(ballX || 0) * goalZ / run;
-  CAM.yaw = Math.atan2(-CAM.x, goalZ);
-  return CAM;
 }

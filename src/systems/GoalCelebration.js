@@ -4,6 +4,8 @@ import { crispText, drawPanel } from '../ui.js';
 import { scorerCardCopy } from './OutcomePresentation.js';
 
 const RESULT_FONT = '"Pixelify Sans", "Courier New", monospace';
+const STAND_FLAGS_TEXTURE = 'goal-flags-static-v2';
+const STAND_FLARE_TEXTURE = 'goal-flare-static-v2';
 const PYRO_TEXTURE = 'goal-pyro-fountain-v1';
 const PYRO_FRAME_HEIGHT = 160;
 const PYRO_BACK_OFFSET = 0.25;
@@ -94,9 +96,10 @@ export class GoalCelebration {
     };
     this.active = { options, reduced };
 
-    // The match crowd owns the flags, banners, flares and fireworks as one
-    // coherent 30-frame reaction. This controller only lights the permanent
-    // launchers behind the posts and presents the scorer card.
+    // Keep the camera stable and the effects static. The generated pixel plate
+    // reads as part of the stadium instead of briefly replacing it with a
+    // photographic crowd or a looping particle animation.
+    this.showCelebrationStand(reduced);
     this.showPitchPyro(reduced);
     this.after(reduced ? 0 : 55, () => kicker?.celebrate?.(650));
     this.after(70, () => this.showScorerCard(options));
@@ -116,10 +119,34 @@ export class GoalCelebration {
     // and neutralises action offsets before adopting the correct presentation.
     options.kicker?.setReducedMotion?.(value);
     options.kicker?.celebrate?.(650);
+    this.showCelebrationStand(value);
     this.showPitchPyro(value);
     this.showScorerCard(options);
     this.after(650, () => this.stop());
     return true;
+  }
+
+  showCelebrationStand() {
+    const scene = this.scene;
+    if (scene.textures?.exists?.(STAND_FLAGS_TEXTURE)) {
+      for (const [x, flip] of [[150, false], [330, true]]) {
+        this.track(scene.add.image(x, 75, STAND_FLAGS_TEXTURE)
+          .setDisplaySize(58, 46)
+          .setFlipX(flip)
+          .setDepth(1.34)
+          .setAlpha(0.92));
+      }
+    }
+    if (scene.textures?.exists?.(STAND_FLARE_TEXTURE)) {
+      for (const [x, flip] of [[58, false], [422, true]]) {
+        this.track(scene.add.image(x, 101, STAND_FLARE_TEXTURE)
+          .setOrigin(0.5, 1)
+          .setDisplaySize(25, 36)
+          .setFlipX(flip)
+          .setDepth(1.35)
+          .setAlpha(0.9));
+      }
+    }
   }
 
   showPitchPyro() {

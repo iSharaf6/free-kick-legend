@@ -13,9 +13,10 @@ test('OS reduced motion reaches menu, Level Select, progress, locker, and match 
       reducedMotion: scene.reducedMotion,
       crowdReduced: scene.crowdStand.reducedMotion,
       crowdTimer: scene.crowdStand.timer,
-      crowdFrame: scene.crowdStand.sprite.frame.name,
       kickerReduced: scene.kicker.reducedMotion,
       kickerAmbient: scene.kicker.ambient ?? null,
+      heroBallTween: scene.heroBallTween,
+      heroBallRotation: scene.heroBall.rotation,
       fadeRunning: scene.cameras.main.fadeEffect.isRunning
     };
   });
@@ -25,11 +26,12 @@ test('OS reduced motion reaches menu, Level Select, progress, locker, and match 
     crowdTimer: null,
     kickerReduced: true,
     kickerAmbient: null,
+    heroBallTween: null,
     fadeRunning: false
   });
   await page.waitForTimeout(250);
-  expect(await page.evaluate(() => window.__game.scene.getScene('Menu').crowdStand.sprite.frame.name))
-    .toBe(menuBefore.crowdFrame);
+  expect(await page.evaluate(() => window.__game.scene.getScene('Menu').heroBall.rotation))
+    .toBeCloseTo(menuBefore.heroBallRotation, 6);
 
   await page.evaluate(() => window.__game.scene.getScene('Menu').scene.start('LevelSelect'));
   await page.waitForFunction(() => window.__game?.scene?.isActive('LevelSelect'));
@@ -356,7 +358,7 @@ test('live reduced-motion toggle rebuilds ambient weather without changing match
     crowdRunning: true,
     guardTweens: 6,
     guards: 6,
-    tracksideTimers: 2,
+    tracksideTimers: 3,
     hazardTweens: 2,
     targetTweens: 1
   });

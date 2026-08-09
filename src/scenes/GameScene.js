@@ -1,7 +1,6 @@
 import Phaser from 'phaser';
 import {
-  GAME_W, GAME_H, RENDER_SCALE, STADIUM_Y, CAM, GOAL_W, GOAL_H, POST_R, BALL_R, WALL_DIST, PHYS, SHOT,
-  configureApproachCamera, project
+  GAME_W, GAME_H, RENDER_SCALE, STADIUM_Y, CAM, GOAL_W, GOAL_H, POST_R, BALL_R, WALL_DIST, PHYS, SHOT, project
 } from '../config.js';
 import { LEVELS, dailyScenario, randomScenario } from '../data/levels.js';
 import { utcDateKey } from '../data/progression.js';
@@ -27,7 +26,7 @@ import {
   sweepGoalFrame
 } from '../systems/GoalFramePhysics.js';
 import { GoalNetPhysics } from '../systems/GoalNetPhysics.js';
-import { GoalCelebration, goalPyroLayout } from '../systems/GoalCelebration.js';
+import { GoalCelebration } from '../systems/GoalCelebration.js';
 import { outcomeBannerStyle } from '../systems/OutcomePresentation.js';
 import { sweepMovingZPlane } from '../systems/SweptCollision.js';
 import {
@@ -50,7 +49,6 @@ import {
 } from '../ui.js';
 import { PAL } from '../pixelart.js';
 import { addCrowdStand } from '../art/CrowdStand.js';
-import { addAnimatedCrowd } from '../art/AnimatedCrowd.js';
 import { buildPitchMarkingLayout, PITCH_MARKING_DIMENSIONS } from '../art/PitchMarkings.js';
 import { queueKeeperSheets } from '../data/keeperAssets.js';
 
@@ -61,6 +59,15 @@ const FIXED_STEP = PHYS.fixedStep;
 const MAX_STEPS = PHYS.maxSubsteps + 2;
 const AD_TIMEOUT_MS = 15000;
 const PAUSABLE_STATES = new Set(['AIMING', 'WINDUP', 'FLIGHT', 'RESULT']);
+const CUP_TINTS = Object.freeze({
+  academy: 0xe8f5e9,
+  curve: 0xe6f1ff,
+  targets: 0xfff4cc,
+  pressure: 0xffe0d5,
+  legend: 0xe6dcff,
+  daily: 0xffedbd
+});
+
 const SECURITY_GUARD_LAYOUT = Object.freeze([18, 76, 109, 326, 405, 458]);
 const SECURITY_GUARD_MOTION = Object.freeze([
   { dx: -0.45, dy: -0.45, angle: -0.55, duration: 1120, hold: 720, repeatDelay: 1800 },
@@ -400,8 +407,8 @@ export class GameScene extends Phaser.Scene {
     GameplayAmbience.start();
     if (this.mode === 'daily') SaveManager.ensureDaily(this.dailyDate);
     PlatformService.gameplayStart();
+    CAM.x = this.level.offsetX * 0.85;
     this.zGoal = CAM.ballDist + this.level.distance;
-    configureApproachCamera(this.level.offsetX, this.zGoal);
     this.zWall = CAM.ballDist + Math.min(WALL_DIST, this.level.distance * 0.55);
     // Depth of the advertising hoardings, derived from where they are actually
     // painted: their foot sits on the stadium/turf seam, so the depth that
@@ -452,7 +459,9 @@ export class GameScene extends Phaser.Scene {
     this.baseTarget = this.level.target ? { ...this.level.target } : null;
     this.activeTarget = this.baseTarget ? { ...this.baseTarget } : null;
 
-    this.crowdImage = null;
+    this.crowdImage = this.add.image(GAME_W / 2, 0, 'crowd').setOrigin(0.5, 0).setDepth(0);
+    const atmosphereTint = CUP_TINTS[this.level.cup];
+    if (atmosphereTint) this.crowdImage.setTint(atmosphereTint);
     this.crowdGlow = this.add.rectangle(GAME_W / 2, STADIUM_Y / 2, GAME_W, STADIUM_Y, PAL.gold, 0)
       .setDepth(1)
       .setBlendMode('ADD');
@@ -469,7 +478,6 @@ export class GameScene extends Phaser.Scene {
       .setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
     this.add.image(0, 0, 'vignette').setOrigin(0, 0).setDepth(1950);
     this.drawGoal();
-    this.buildGoalPyroRigs();
     this.drawTargetZone();
     this.drawRings();
     this.buildHazardVisuals();
@@ -869,7 +877,6 @@ export class GameScene extends Phaser.Scene {
     this.meterUi?.forEach((label) => label.setVisible(false));
     this.time.paused = true;
     this.tweens.pauseAll();
-    this.crowdTiers?.pause?.();
     this.kicker?.pauseAction?.();
     PlatformService.gameplayStop();
     this.setPauseUnderlayAvailable(false);
@@ -884,8 +891,8 @@ export class GameScene extends Phaser.Scene {
       fill: 0x0d2236, border: PAL.goldDark, corner: PAL.gold, railY: 15
     });
     objects.push(panel);
-    objects.push(this.add.image(96, 75, 'calynx-logo-pixel')
-      .setDisplaySize(34, 10).setTint(PAL.gold).setDepth(3501));
+    objects.push(this.add.image(101, 59, 'calynx-logo-pixel')
+      .setDisplaySize(40, 12).setTint(PAL.gold).setDepth(3501));
     objects.push(titleText(this, GAME_W / 2, 78, 'MATCH PAUSED', '15px', '#f3c449').setDepth(3501));
     objects.push(bodyText(this, GAME_W / 2, 108, 'SHOT FROZEN · RETURN WHEN READY', {
       originX: 0.5, originY: 0.5, align: 'center', fontSize: '7px', color: '#cfe8ff',
@@ -973,10 +980,7 @@ export class GameScene extends Phaser.Scene {
     this.syncHoopAndTargetMotion();
     // Settings are opened from the live pause menu. Newly-created decorative
     // tweens must inherit that freeze instead of moving behind the modal.
-    if (this.state === 'PAUSED') {
-      this.tweens.pauseAll?.();
-      this.crowdTiers?.pause?.();
-    }
+    if (this.state === 'PAUSED') this.tweens.pauseAll?.();
     return true;
   }
 
@@ -990,7 +994,6 @@ export class GameScene extends Phaser.Scene {
     this.setPauseUnderlayAvailable(true);
     this.time.paused = false;
     this.tweens.resumeAll();
-    this.crowdTiers?.resume?.();
     // resumeAll() is intentionally broad, but reduced motion is a hard policy,
     // not a paused tween. Reassert it after the sweep so no old idle handle can
     // come back to life when Settings closes.
@@ -1106,23 +1109,27 @@ export class GameScene extends Phaser.Scene {
   // ---------------------------------------------------------------- visuals
 
   buildNearCrowd() {
+    if (this.crowdImage) {
+      this.crowdImage.setTexture('crowd')
+        .setOrigin(0, 0)
+        .setPosition(0, 0)
+        .setDisplaySize(GAME_W, STADIUM_Y)
+        .setDepth(0)
+        .setVisible(true);
+      const atmosphereTint = CUP_TINTS[this.level.cup];
+      // The empty stand behind the supporters is dimmed hard. Everything in
+      // front of it - players, ball, hoops, goal - then owns the contrast.
+      this.crowdImage.setTint(atmosphereTint ? mixColor(atmosphereTint, 0x4a5a6b, 0.72) : 0x64748a);
+    }
+
+    // Three tiers of shuffled panorama slices, back to front, plus the
+    // structure, lighting and props that turn them into a stand. The controller
+    // owns all of it, including the vomitories this method used to draw itself.
     this.crowdTiers?.destroy?.();
-    this.crowdTiers = addAnimatedCrowd(this, {
-      depth: 1.28,
+    this.crowdTiers = addCrowdStand(this, {
+      viewWidth: GAME_W,
       reducedMotion: Boolean(this.settings.reducedMotion)
     });
-    if (!this.crowdTiers) {
-      this.crowdImage = this.add.image(0, 0, 'crowd')
-        .setOrigin(0, 0)
-        .setDisplaySize(GAME_W, STADIUM_Y)
-        .setDepth(0);
-      this.crowdTiers = addCrowdStand(this, {
-        viewWidth: GAME_W,
-        reducedMotion: Boolean(this.settings.reducedMotion)
-      });
-    } else {
-      this.crowdImage = this.crowdTiers.sprite;
-    }
     this.nearCrowd = this.crowdTiers.tiles;
   }
 
@@ -1216,13 +1223,14 @@ export class GameScene extends Phaser.Scene {
       board.fillStyle(spec.trim, 0.5).fillRect(x + 3, y + h - 6, w - 6, 1);
       board.fillStyle(PAL.ink, 1).fillRect(x + w - 1, y - 1, 2, h + 1);
 
-      const visibleLeft = Math.max(1, x + 2);
-      const visibleRight = Math.min(GAME_W - 1, x + w - 2);
-      const visibleWidth = visibleRight - visibleLeft;
-      if (visibleWidth >= 18 && this.textures.exists('calynx-logo-pixel')) {
-        const logoWidth = Math.min(66, visibleWidth - 8);
-        labels.push(this.add.image((visibleLeft + visibleRight) / 2, y + h / 2, 'calynx-logo-pixel')
-          .setDisplaySize(logoWidth, logoWidth * (20 / 66))
+      // The mark is only drawn when it fits entirely on screen. A half-cut
+      // logo at the frame edge reads as a bug; a plain coloured board that
+      // runs off the edge reads as a stadium.
+      const centreX = x + w / 2;
+      if (centreX - 33 >= 1 && centreX + 33 <= GAME_W - 1 &&
+          this.textures.exists('calynx-logo-pixel')) {
+        labels.push(this.add.image(centreX, y + h / 2, 'calynx-logo-pixel')
+          .setDisplaySize(66, 20)
           .setTint(spec.logo)
           .setDepth(1.5));
       }
@@ -1306,9 +1314,7 @@ export class GameScene extends Phaser.Scene {
         // than the texture centre, keeps the pole planted when the flag flips.
         .setOrigin(2 / 12, 1)
         .setDisplaySize(height * 0.5, height)
-        // The flag is physically behind the LED run. Keeping it under the
-        // board/logo depths prevents its pole cutting through the Calynx mark.
-        .setDepth(1.44)
+        .setDepth(1000 - this.zGoal * 10 - 4)
         .setFlipX(windX < 0)
         .setTint(0xdfe9ef);
       this.cornerFlags.push(flag);
@@ -1327,19 +1333,6 @@ export class GameScene extends Phaser.Scene {
 
   playCrowdGoal() {
     this.crowdTiers?.playGoal((delay, callback) => this.schedule(delay, callback));
-  }
-
-  buildGoalPyroRigs() {
-    this.goalPyroRigs = [];
-    if (!this.textures.exists('goal-pyro-rig-v3')) return;
-    goalPyroLayout({ goalWidth: this.goalWidth, goalZ: this.zGoal }).forEach((layout) => {
-      const height = layout.scale * 160 * 0.62;
-      this.goalPyroRigs.push(this.add.image(layout.x, layout.y, 'goal-pyro-rig-v3')
-        .setOrigin(0.5, 1)
-        .setDisplaySize(height / 3, height)
-        .setDepth(layout.depth - 0.1)
-        .setFlipX(layout.flipX));
-    });
   }
 
   // A short punch on whichever score/progress readout this mode owns, so the
@@ -3112,6 +3105,11 @@ export class GameScene extends Phaser.Scene {
     // Scene remains active so keyboard/pointer UI and overlay tweens still work.
     if (this.state === 'PAUSED' || this.state === 'OVERLAY' || this.state === 'TRANSITIONING') return;
 
+    // Step 3: Subtle slow ambient crowd shimmer (no distracting movement)
+    if (this.crowdImage && !this.settings?.reducedMotion) {
+      const shimmer = 0.96 + Math.sin(time * 0.0018) * 0.04;
+      this.crowdImage.setAlpha(shimmer);
+    }
     // Physics runs at a fixed cadence so the same gesture produces the same
     // shot at 30, 60, 120 Hz and after small browser stalls. The mode clock is
     // real-time based, including result cards; only an explicit pause freezes it.
@@ -3607,12 +3605,10 @@ export class GameScene extends Phaser.Scene {
       case 'POST':
         this.showBanner(this.frameContacts.has('crossbar') ? 'OFF THE BAR!' : 'OFF THE POST!', '#ffab40');
         Audio.groan();
-        this.crowdTiers?.playOut?.();
         break;
       default:
         this.showBanner('OFF TARGET', '#b0bec5');
         Audio.groan();
-        this.crowdTiers?.playOut?.();
     }
 
     this.showShotReadout(outcome, pt, shotRating);

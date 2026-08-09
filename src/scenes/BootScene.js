@@ -10,7 +10,6 @@ import { MenuMusic } from '../systems/MenuMusic.js';
 import { applyDocumentSettings } from '../systems/SettingsPanel.js';
 import { makePuppetTextures } from '../art/PuppetTextures.js';
 import { CROWD_STAND } from '../data/crowdStand.js';
-import { CROWD_MATCH_ANIMATION } from '../data/crowdMatchAnimation.js';
 
 const KICKER_POSES = {
   idle: MAPS.kickerIdle,
@@ -54,15 +53,6 @@ export class BootScene extends Phaser.Scene {
     const base = import.meta.env.BASE_URL;
     this.load.image('pitch-grass-pixel-v3', `${base}assets/hd/pitch-grass-pixel-v3.png`);
     this.load.image(CROWD_STAND.textureKey, `${base}${CROWD_STAND.assetPath}`);
-    this.load.spritesheet(
-      CROWD_MATCH_ANIMATION.idle.textureKey,
-      `${base}${CROWD_MATCH_ANIMATION.idle.assetPath}`,
-      {
-        frameWidth: CROWD_MATCH_ANIMATION.frameWidth,
-        frameHeight: CROWD_MATCH_ANIMATION.frameHeight,
-        endFrame: CROWD_MATCH_ANIMATION.frameCount - 1
-      }
-    );
     this.load.image('calynx-logo-pixel', `${base}assets/hd/calynx-logo-pixel.png`);
 
     // The menu hero wears exactly one striker. Reading the save this early is
@@ -239,7 +229,7 @@ export class BootScene extends Phaser.Scene {
   }
 
   // The generated trackside media crew streams with the match pack. Boot only
-  // retains the tiny projected pitch props used before and during a match.
+  // retains the tiny procedural corner flag needed by projected pitch props.
   makeTracksideSprites() {
     const bake = (key, w, h, paint) => {
       const g = this.add.graphics();
@@ -260,24 +250,6 @@ export class BootScene extends Phaser.Scene {
       px(PAL.gold, 4, 3, 7, 2);
       px(PAL.red, 4, 5, 5, 2);
       px(PAL.ink, 1, 22, 5, 2);        // socket in the turf
-    });
-
-    // Tall, permanent goal-line fountain rig. The black steel body and gold
-    // collars are visible before a shot; the authored spark plume is only
-    // placed over its nozzle after a goal.
-    bake('goal-pyro-rig-v3', 16, 48, (px) => {
-      px(PAL.ink, 4, 1, 8, 7);
-      px(0x3c4650, 5, 2, 6, 5);
-      px(PAL.goldDark, 5, 4, 6, 2);
-      px(PAL.ink, 6, 8, 5, 33);
-      px(0x2d3944, 7, 9, 3, 31);
-      px(PAL.goldDark, 6, 17, 5, 3);
-      px(PAL.gold, 7, 17, 3, 1);
-      px(PAL.goldDark, 6, 31, 5, 3);
-      px(PAL.ink, 3, 40, 11, 6);
-      px(0x3c4650, 4, 41, 9, 3);
-      px(PAL.goldDark, 4, 44, 9, 2);
-      px(PAL.ink, 1, 46, 15, 2);
     });
   }
 

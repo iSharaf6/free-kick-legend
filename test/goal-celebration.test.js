@@ -140,6 +140,7 @@ test('an active celebration is rebuilt coherently when reduced motion changes li
   const options = { kicker, scorerName: 'Mica Vale', goalNumber: 1 };
   celebration.active = { options, reduced: false };
   celebration.clearPresentation = () => calls.push('clear');
+  celebration.showCelebrationStand = (value) => calls.push(['stand', value]);
   celebration.showPitchPyro = (value) => calls.push(['pyro', value]);
   celebration.showScorerCard = (value) => calls.push(['card', value]);
   celebration.after = (delay) => calls.push(['cleanup', delay]);
@@ -151,6 +152,7 @@ test('an active celebration is rebuilt coherently when reduced motion changes li
     'clear',
     ['kicker-motion', true],
     ['kicker-celebrate', 650],
+    ['stand', true],
     ['pyro', true],
     ['card', options],
     ['cleanup', 650]

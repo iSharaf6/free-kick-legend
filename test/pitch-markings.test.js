@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { CAM, GAME_W, configureApproachCamera, project } from '../src/config.js';
+import { CAM, GAME_W, project } from '../src/config.js';
 import {
   buildPitchMarkingLayout,
   PITCH_MARKING_DIMENSIONS
@@ -47,19 +47,3 @@ test('goal-area markings form a plausible nested box around the goal', () => {
   assert.equal(layout.goalAreaFrontZ, 24 - d.goalAreaDepth);
 });
 
-test('side free kicks use one yawed approach camera through ball and goal', () => {
-  const original = { x: CAM.x, yaw: CAM.yaw };
-  try {
-    const goalZ = CAM.ballDist + 18;
-    configureApproachCamera(5.5, goalZ);
-    const ball = project(5.5, 0, CAM.ballDist);
-    const goal = project(0, 0, goalZ);
-
-    assert.ok(Math.abs(ball.x - GAME_W / 2) < 1e-9, 'ball stays on the optical axis');
-    assert.ok(Math.abs(goal.x - GAME_W / 2) < 1e-9, 'goal stays on the same optical axis');
-    assert.ok(CAM.yaw < 0, 'camera turns back toward goal from the right side');
-  } finally {
-    CAM.x = original.x;
-    CAM.yaw = original.yaw;
-  }
-});
