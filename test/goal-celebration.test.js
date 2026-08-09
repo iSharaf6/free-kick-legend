@@ -69,7 +69,7 @@ test('goal fountains are grounded beside the posts and layered behind play at ev
     assert.ok(normal[1].x > rightPost.x);
     assert.ok(normal.every((fountain) => fountain.depth < frameDepth && fountain.depth > 2));
     assert.ok(normal.every((fountain) => Math.abs(fountain.y - project(0, 0, zGoal + 0.25).y) < 1e-9));
-    assert.ok(normal.every((fountain) => fountain.scale * 160 <= (goalBase.y - goalTop.y) * 1.08));
+    assert.ok(normal.every((fountain) => fountain.scale * 192 <= (goalBase.y - goalTop.y) * 1.08));
     assert.notEqual(normal[0].scale, normal[1].scale, 'left/right fountains need different silhouettes');
     assert.deepEqual(normal.map((fountain) => fountain.delay), [0, 0]);
     assert.ok(smaller[1].x - smaller[0].x < normal[1].x - normal[0].x);
@@ -79,15 +79,16 @@ test('goal fountains are grounded beside the posts and layered behind play at ev
   }
 });
 
-test('static fountain sprites never animate and are fully removed by stop', () => {
+test('goal fountains play all eight authored frames and are fully removed by stop', () => {
   const sprites = [];
   const timers = [];
+  const clips = new Map();
   const scene = {
     goalWidth: GOAL_W,
     zGoal: CAM.ballDist + 18,
     textures: { exists: () => true },
     add: {
-      image(x, y, texture) {
+      sprite(x, y, texture) {
         const sprite = {
           x, y, texture: { key: texture }, active: true,
           setOrigin() { return this; },
@@ -95,11 +96,21 @@ test('static fountain sprites never animate and are fully removed by stop', () =
           setDepth(value) { this.depth = value; return this; },
           setFlipX(value) { this.flipX = value; return this; },
           setAlpha(value) { this.alpha = value; return this; },
+          setFrame(value) { this.frame = value; return this; },
+          play(value) { this.animation = value; return this; },
           destroy() { this.active = false; }
         };
         sprites.push(sprite);
         return sprite;
       }
+    },
+    anims: {
+      exists: (key) => clips.has(key),
+      generateFrameNumbers: (texture, range) => Array.from(
+        { length: range.end - range.start + 1 },
+        (_, index) => ({ key: texture, frame: range.start + index })
+      ),
+      create: (config) => { clips.set(config.key, config); return config; }
     },
     time: {
       delayedCall(_delay, callback) {
@@ -115,6 +126,9 @@ test('static fountain sprites never animate and are fully removed by stop', () =
   celebration.showPitchPyro(false);
   assert.equal(sprites.length, 2);
   assert.equal(celebration.timers.size, 0);
+  assert.ok(sprites.every((sprite) => sprite.animation === 'goal-spark-fountain-burst-v3'));
+  assert.equal(clips.get('goal-spark-fountain-burst-v3').frames.length, 8);
+  assert.equal(clips.get('goal-spark-fountain-burst-v3').repeat, -1);
 
   celebration.stop();
   assert.equal(celebration.objects.size, 0);
@@ -125,7 +139,8 @@ test('static fountain sprites never animate and are fully removed by stop', () =
   celebration.showPitchPyro(true);
   const reduced = sprites.slice(2);
   assert.ok(reduced.every((sprite) => sprite.alpha === 0.96));
-  assert.equal(celebration.timers.size, 0, 'the static presentation has no motion policy timers');
+  assert.ok(reduced.every((sprite) => sprite.frame === 3 && !sprite.animation));
+  assert.equal(celebration.timers.size, 0, 'reduced motion needs no policy timers');
   celebration.stop();
 });
 

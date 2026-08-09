@@ -4,10 +4,16 @@ import { crispText, drawPanel } from '../ui.js';
 import { scorerCardCopy } from './OutcomePresentation.js';
 
 const RESULT_FONT = '"Pixelify Sans", "Courier New", monospace';
-const STAND_FLAGS_TEXTURE = 'goal-flags-static-v2';
-const STAND_FLARE_TEXTURE = 'goal-flare-static-v2';
-const PYRO_TEXTURE = 'goal-pyro-fountain-v1';
-const PYRO_FRAME_HEIGHT = 160;
+const STAND_BANNER_TEXTURE = 'goal-crowd-banner-v4';
+const STAND_FLARE_TEXTURE = 'goal-flare-v3';
+const PYRO_TEXTURE = 'goal-spark-fountain-v3';
+const PYRO_FRAME_HEIGHT = 192;
+const CELEBRATION_FRAME_COUNT = 8;
+const CELEBRATION_ANIMATIONS = Object.freeze({
+  banner: Object.freeze({ key: 'goal-crowd-banner-surf-v4', texture: STAND_BANNER_TEXTURE, frameRate: 10 }),
+  flare: Object.freeze({ key: 'goal-flare-billow-v3', texture: STAND_FLARE_TEXTURE, frameRate: 11 }),
+  pyro: Object.freeze({ key: 'goal-spark-fountain-burst-v3', texture: PYRO_TEXTURE, frameRate: 11 })
+});
 const PYRO_BACK_OFFSET = 0.25;
 const PYRO_POST_GAP = 0.36;
 const PYRO_WORLD_HEIGHTS = Object.freeze([3.25, 2.95]);
@@ -43,6 +49,28 @@ export function goalPyroLayout({ goalWidth = GOAL_W, goalZ = CAM.ballDist + 18 }
       delay: 0
     });
   }));
+}
+
+function playCelebrationLoop(scene, sprite, animation, reduced, startFrame = 0) {
+  if (reduced) {
+    sprite.setFrame?.(3);
+    return sprite;
+  }
+  const manager = scene.anims;
+  if (manager?.create && !manager.exists?.(animation.key)) {
+    manager.create({
+      key: animation.key,
+      frames: manager.generateFrameNumbers(animation.texture, {
+        start: 0,
+        end: CELEBRATION_FRAME_COUNT - 1
+      }),
+      frameRate: animation.frameRate,
+      repeat: -1,
+      skipMissedFrames: false
+    });
+  }
+  sprite.play?.(animation.key, false, startFrame);
+  return sprite;
 }
 
 /**
@@ -96,9 +124,8 @@ export class GoalCelebration {
     };
     this.active = { options, reduced };
 
-    // Keep the camera stable and the effects static. The generated pixel plate
-    // reads as part of the stadium instead of briefly replacing it with a
-    // photographic crowd or a looping particle animation.
+    // Keep the camera stable while the authored eight-frame sprites provide
+    // the motion. They read as stadium fixtures rather than screen-space FX.
     this.showCelebrationStand(reduced);
     this.showPitchPyro(reduced);
     this.after(reduced ? 0 : 55, () => kicker?.celebrate?.(650));
@@ -126,35 +153,37 @@ export class GoalCelebration {
     return true;
   }
 
-  showCelebrationStand() {
+  showCelebrationStand(reduced = false) {
     const scene = this.scene;
-    if (scene.textures?.exists?.(STAND_FLAGS_TEXTURE)) {
-      for (const [x, flip] of [[150, false], [330, true]]) {
-        this.track(scene.add.image(x, 75, STAND_FLAGS_TEXTURE)
-          .setDisplaySize(58, 46)
+    if (scene.textures?.exists?.(STAND_BANNER_TEXTURE)) {
+      for (const [index, [x, flip]] of [[132, false], [348, true]].entries()) {
+        const banner = this.track(scene.add.sprite(x, 73, STAND_BANNER_TEXTURE)
+          .setDisplaySize(104, 52)
           .setFlipX(flip)
           .setDepth(1.34)
-          .setAlpha(0.92));
+          .setAlpha(0.96));
+        playCelebrationLoop(scene, banner, CELEBRATION_ANIMATIONS.banner, reduced, index * 4);
       }
     }
     if (scene.textures?.exists?.(STAND_FLARE_TEXTURE)) {
       for (const [x, flip] of [[58, false], [422, true]]) {
-        this.track(scene.add.image(x, 101, STAND_FLARE_TEXTURE)
+        const flare = this.track(scene.add.sprite(x, 101, STAND_FLARE_TEXTURE)
           .setOrigin(0.5, 1)
-          .setDisplaySize(25, 36)
+          .setDisplaySize(25, 40)
           .setFlipX(flip)
           .setDepth(1.35)
           .setAlpha(0.9));
+        playCelebrationLoop(scene, flare, CELEBRATION_ANIMATIONS.flare, reduced);
       }
     }
   }
 
-  showPitchPyro() {
+  showPitchPyro(reduced = false) {
     const scene = this.scene;
     if (!scene.textures?.exists?.(PYRO_TEXTURE)) return;
 
     goalPyroLayout({ goalWidth: scene.goalWidth, goalZ: scene.zGoal }).forEach((layout) => {
-      this.track(scene.add.image(
+      const pyro = this.track(scene.add.sprite(
         layout.x,
         layout.y,
         PYRO_TEXTURE
@@ -164,6 +193,7 @@ export class GoalCelebration {
         .setDepth(layout.depth)
         .setFlipX(layout.flipX)
         .setAlpha(0.96));
+      playCelebrationLoop(scene, pyro, CELEBRATION_ANIMATIONS.pyro, reduced);
     });
   }
 

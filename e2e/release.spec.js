@@ -238,7 +238,7 @@ test('live swipe copy clears the gesture and feedback lanes', async ({ page }) =
   expect(lanes.readoutY - lanes.hintY).toBeGreaterThan(30);
 });
 
-test('goal celebration layers static generated pixel art, useful scorer data, and fitted typography', async ({ page }) => {
+test('goal celebration layers animated generated pixel art, useful scorer data, and fitted typography', async ({ page }) => {
   const game = new GamePage(page);
   await game.open({ width: 1280, height: 720 });
   await page.evaluate(() => {
@@ -259,8 +259,14 @@ test('goal celebration layers static generated pixel art, useful scorer data, an
 
   const goal = await page.evaluate(() => {
     const scene = window.__fkl;
+    const effectTextures = new Set(['goal-spark-fountain-v3', 'goal-flare-v3', 'goal-crowd-banner-v4']);
+    const animatedEffects = [...scene.goalCelebration.objects]
+      .filter((object) => effectTextures.has(object.texture?.key));
+    const crowdBanners = animatedEffects
+      .filter((object) => object.texture?.key === 'goal-crowd-banner-v4')
+      .sort((left, right) => left.x - right.x);
     const fountains = [...scene.goalCelebration.objects]
-      .filter((object) => object.texture?.key === 'goal-pyro-fountain-v1')
+      .filter((object) => object.texture?.key === 'goal-spark-fountain-v3')
       .sort((left, right) => left.x - right.x);
     const text = scene.children.list
       .flatMap((child) => child?.list ?? [child])
@@ -274,11 +280,25 @@ test('goal celebration layers static generated pixel art, useful scorer data, an
       textures: [...scene.goalCelebration.objects]
         .map((object) => object.texture?.key)
         .filter(Boolean),
+      animatedEffects: animatedEffects.map((effect) => ({
+        texture: effect.texture.key,
+        frameTotal: effect.anims.currentAnim?.frames?.length,
+        playing: effect.anims.isPlaying
+      })),
+      crowdBanners: crowdBanners.map((banner) => ({
+        x: banner.x,
+        y: banner.y,
+        depth: banner.depth,
+        width: banner.displayWidth,
+        height: banner.displayHeight
+      })),
       fountains: fountains.map((fountain) => ({
         x: fountain.x,
         y: fountain.y,
         depth: fountain.depth,
-        scale: fountain.scaleX
+        scale: fountain.scaleX,
+        frameTotal: fountain.anims.currentAnim?.frames?.length,
+        playing: fountain.anims.isPlaying
       })),
       goalFrameDepth: 1000 - scene.zGoal * 10 + 2,
       expectedPyroBaseY: 76 + (2.3 * 316) / (scene.zGoal + 0.25),
@@ -293,15 +313,22 @@ test('goal celebration layers static generated pixel art, useful scorer data, an
   expect(goal.bounds.right).toBeLessThan(472);
   expect(goal.layers).toEqual(expect.arrayContaining([1.34, 2220]));
   expect(goal.textures).toEqual(expect.arrayContaining([
-    'goal-pyro-fountain-v1',
-    'goal-flare-static-v2',
-    'goal-flags-static-v2'
+    'goal-spark-fountain-v3',
+    'goal-flare-v3',
+    'goal-crowd-banner-v4'
   ]));
   expect(goal.fountains).toHaveLength(2);
+  expect(goal.animatedEffects).toHaveLength(6);
+  expect(goal.animatedEffects.every((effect) => effect.frameTotal === 8 && effect.playing)).toBe(true);
+  expect(goal.crowdBanners).toEqual([
+    { x: 132, y: 73, depth: 1.34, width: 104, height: 52 },
+    { x: 348, y: 73, depth: 1.34, width: 104, height: 52 }
+  ]);
   expect(goal.fountains[0].x).toBeGreaterThan(100);
   expect(goal.fountains[1].x).toBeLessThan(380);
   expect(goal.fountains.every((fountain) => fountain.depth < goal.goalFrameDepth)).toBe(true);
   expect(goal.fountains.every((fountain) => Math.abs(fountain.y - goal.expectedPyroBaseY) < 0.01)).toBe(true);
+  expect(goal.fountains.every((fountain) => fountain.frameTotal === 8 && fountain.playing)).toBe(true);
   expect(goal.fountains[0].scale).not.toBeCloseTo(goal.fountains[1].scale, 5);
   expect(goal.scorer).toEqual([
     expect.stringMatching(/^\+\d+ · /),

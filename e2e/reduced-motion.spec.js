@@ -205,7 +205,7 @@ test('live reduced motion replaces an active paused goal celebration with a stat
   expect(await page.evaluate(() => {
     const scene = window.__fkl;
     const objects = [...scene.goalCelebration.objects];
-    const fountains = objects.filter((object) => object.texture?.key === 'goal-pyro-fountain-v1');
+    const fountains = objects.filter((object) => object.texture?.key === 'goal-spark-fountain-v3');
     const card = objects.find((object) => object.type === 'Container');
     return {
       state: scene.state,
@@ -216,7 +216,7 @@ test('live reduced motion replaces an active paused goal celebration with a stat
       celebrationReduced: scene.goalCelebration.active?.reduced,
       oldObjectsDestroyed: window.__animatedCelebrationObjects.every((object) => !object.active),
       fountainFrames: fountains.map((fountain) => fountain.frame.name),
-      fountainsStatic: fountains.every((fountain) => !fountain.anims),
+      fountainsStatic: fountains.every((fountain) => !fountain.anims.isPlaying),
       cardX: card?.x,
       objectTweens: objects.reduce((count, object) => count + scene.tweens.getTweensOf(object).length, 0),
       kickerReduced: scene.kicker.reducedMotion,
@@ -232,7 +232,7 @@ test('live reduced motion replaces an active paused goal celebration with a stat
     returnState: session.returnState,
     celebrationReduced: true,
     oldObjectsDestroyed: true,
-    fountainFrames: ['__BASE', '__BASE'],
+    fountainFrames: [3, 3],
     fountainsStatic: true,
     cardX: 72,
     objectTweens: 0,

@@ -100,7 +100,7 @@ test('the match pack carries initial keepers, defenders and generated matchday p
   for (const key of [
     'trackside-photographer-kneel-v2', 'trackside-camera-operator-v2',
     'trackside-camera-pedestal-v2', 'trackside-photographer-seat-v2',
-    'goal-pyro-fountain-v1', 'goal-flare-static-v2', 'goal-flags-static-v2'
+    'goal-spark-fountain-v3', 'goal-flare-v3', 'goal-crowd-banner-v4'
   ]) {
     assert.ok(keys.includes(key), `missing ${key}`);
   }
