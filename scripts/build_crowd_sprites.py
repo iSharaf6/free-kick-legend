@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate and publish the generated 2x3 panoramic crowd atlas."""
+"""Validate and publish the generated v3 2x3 crowd animation atlas."""
 
 from pathlib import Path
 import shutil
@@ -7,8 +7,8 @@ import struct
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "assets/source/crowd-animation-sheet-v2.png"
-OUTPUT = ROOT / "public/assets/hd/crowd-animation-sheet-hd.png"
+SOURCE = ROOT / "assets/source/crowd-animation-sheet-v3.png"
+OUTPUT = ROOT / "public/assets/hd/crowd-animation-sheet-v3.png"
 
 SOURCE_WIDTH = 1536
 SOURCE_HEIGHT = 1023

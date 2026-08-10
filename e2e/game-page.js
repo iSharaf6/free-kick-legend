@@ -21,7 +21,10 @@ const SDK_STUB = `
 export class GamePage {
   constructor(page) {
     this.page = page;
-    this.canvas = page.locator('#app canvas');
+    // The control/accessibility canvas stays underneath the visible Three.js
+    // final-frame canvas. Target it explicitly so visual output never makes
+    // pointer automation ambiguous.
+    this.canvas = page.locator('#app canvas.three-pixel-source');
   }
 
   async open(viewport) {

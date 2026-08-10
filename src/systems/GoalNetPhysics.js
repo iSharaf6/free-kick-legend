@@ -7,10 +7,16 @@ const DEFAULTS = Object.freeze({
   rows: 7,
   stiffness: 27,
   coupling: 29,
-  damping: 5.2,
+  // The net should snap, recoil once, then get out of the way of the result
+  // banner. Near-critical damping preserves the first deep bulge without
+  // leaving the cloth trembling for several seconds.
+  damping: 9,
   maxDisplacement: 1.05,
   fixedStep: 1 / 120,
-  maxFrameDt: 0.05
+  maxFrameDt: 0.05,
+  // Slightly under the public 1.2s gate so fixed-step rounding can never push
+  // the final reset one tick beyond it.
+  maxActiveTime: 1.18
 });
 
 /**
@@ -34,7 +40,8 @@ export class GoalNetPhysics {
     damping = DEFAULTS.damping,
     maxDisplacement = DEFAULTS.maxDisplacement,
     fixedStep = DEFAULTS.fixedStep,
-    maxFrameDt = DEFAULTS.maxFrameDt
+    maxFrameDt = DEFAULTS.maxFrameDt,
+    maxActiveTime = DEFAULTS.maxActiveTime
   }) {
     if (!(goalWidth > 0) || !(goalHeight > 0) || !Number.isFinite(goalZ)) {
       throw new TypeError('GoalNetPhysics requires positive goal dimensions and a finite goalZ');
@@ -53,6 +60,7 @@ export class GoalNetPhysics {
     this.maxDisplacement = Math.max(0.05, maxDisplacement);
     this.fixedStep = clamp(fixedStep, 1 / 300, 1 / 30);
     this.maxFrameDt = clamp(maxFrameDt, this.fixedStep, 0.1);
+    this.maxActiveTime = clamp(maxActiveTime, 0.4, 4);
 
     const nodeCount = (this.columns + 1) * (this.rows + 1);
     this.displacement = new Float32Array(nodeCount);
@@ -60,6 +68,7 @@ export class GoalNetPhysics {
     this.nextDisplacement = new Float32Array(nodeCount);
     this.nextVelocity = new Float32Array(nodeCount);
     this.active = false;
+    this.activeTime = 0;
     this.needsRedraw = true;
   }
 
@@ -91,6 +100,7 @@ export class GoalNetPhysics {
     this.nextDisplacement.fill(0);
     this.nextVelocity.fill(0);
     this.active = false;
+    this.activeTime = 0;
     this.needsRedraw = true;
   }
 
@@ -119,6 +129,7 @@ export class GoalNetPhysics {
       }
     }
     this.active ||= affected;
+    if (affected) this.activeTime = 0;
     this.needsRedraw ||= affected;
   }
 
@@ -135,6 +146,7 @@ export class GoalNetPhysics {
   }
 
   step(dt) {
+    this.activeTime += dt;
     let peakMotion = 0;
     const stride = this.columns + 1;
 
@@ -175,7 +187,10 @@ export class GoalNetPhysics {
     [this.velocity, this.nextVelocity] = [this.nextVelocity, this.velocity];
     this.needsRedraw = true;
 
-    if (peakMotion < 0.0025) this.reset();
+    // At the hard lifetime the residual offset is far below one projected
+    // gameplay pixel with the default damping. Snapping that invisible tail to
+    // zero keeps result/retry timing crisp and makes the contract explicit.
+    if (peakMotion < 0.0025 || this.activeTime >= this.maxActiveTime) this.reset();
   }
 
   /**

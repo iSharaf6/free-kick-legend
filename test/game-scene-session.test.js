@@ -508,7 +508,7 @@ test('Time Attack clock waits for the first valid shot, then continues through r
   assert.equal(displayed, '11');
 });
 
-test('goals return to the original fast result cadence and expose useful mode context', () => {
+test('goals hold the complete broadcast celebration and expose useful mode context', () => {
   const scene = Object.create(GameScene.prototype);
   Object.assign(scene, {
     mode: 'arcade',
@@ -518,8 +518,8 @@ test('goals return to the original fast result cadence and expose useful mode co
     keepers: []
   });
 
-  assert.equal(scene.resultResetDelay('GOAL'), 750);
-  assert.equal(scene.resultResetDelay('GOAL', 1150), 1150);
+  assert.equal(scene.resultResetDelay('GOAL'), 1760);
+  assert.equal(scene.resultResetDelay('GOAL', 1150), 1760);
   assert.equal(
     scene.goalCardContext({ x: 0, y: 1.4 }, { points: 1454 }),
     '3 GOALS · x2 COMBO · 43 SEC'

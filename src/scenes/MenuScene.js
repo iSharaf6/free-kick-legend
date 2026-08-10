@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { GAME_W, GAME_H, STADIUM_Y } from '../config.js';
 import {
-  addScanlines, sceneIntro, formatCompact, configureHdCamera, crispText, PIXEL_TEXT_WEIGHT
+  sceneIntro, formatCompact, configureHdCamera, crispText, PIXEL_TEXT_WEIGHT
 } from '../ui.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
@@ -13,29 +13,144 @@ import { PAL } from '../pixelart.js';
 import { Kicker } from '../objects/Kicker.js';
 import { utcDateKey } from '../data/progression.js';
 import { addMenuCrowd } from '../art/CrowdStand.js';
+import { addPitchSurface } from '../art/PitchSurface.js';
 import { getCosmetic } from '../data/cosmetics.js';
 import { prefetchMatchPack } from '../data/matchAssets.js';
 
-const DISPLAY_FONT = '"Pixelify Sans", "Courier New", monospace';
-const PIXEL_FONT = '"Pixelify Sans", "Courier New", monospace';
-const NUMBER_FONT = '"Silkscreen", "Courier New", monospace';
-const INK = 0x030a11;
-const NAVY = 0x07182a;
-const PANEL = 0x0b2035;
-const EDGE = 0x315a78;
-const CREAM = '#f7edd2';
-const GOLD = 0xf5c94b;
-const GOLD_HI = 0xffe785;
-const GOLD_DARK = 0x8f6326;
+// Every menu role shares the settings face; hierarchy comes from size, colour
+// and spacing instead of swapping type families.
+const DISPLAY_FONT = '"Pixelify Sans", monospace';
+const PIXEL_FONT = '"Pixelify Sans", monospace';
+const NUMBER_FONT = '"Pixelify Sans", monospace';
+const INK = 0x030714;
+const NAVY = 0x07132c;
+const PANEL = 0x0b2147;
+const EDGE = 0x3478b8;
+const CREAM = '#f7fbff';
+const GOLD = 0xffc928;
+const GOLD_HI = 0xffe56c;
+const GOLD_DARK = 0xb77900;
+const MENU_SHADOW_COLORS = Object.freeze({
+  edge: 0x0b352c,
+  body: 0x082a27,
+  contact: 0x061f20
+});
 
 const MENU_SPONSOR_BOARDS = Object.freeze([
-  Object.freeze({ width: 104, fill: 0x1c4a9a, shade: 0x143676, trim: 0x6e93d3, logo: 0xf8f2df }),
-  Object.freeze({ width: 88, fill: 0x156b45, shade: 0x0e4a2f, trim: 0x49a760, logo: 0xeafff2 }),
-  Object.freeze({ width: 96, fill: 0x2b2413, shade: 0x1a1509, trim: 0xf3c449, logo: 0xffe6a8 }),
-  Object.freeze({ width: 82, fill: 0x8f2f2a, shade: 0x64201c, trim: 0xd75a3a, logo: 0xffe3d8 }),
-  Object.freeze({ width: 100, fill: 0x4a2a7a, shade: 0x321c55, trim: 0x9b5de5, logo: 0xece0ff }),
-  Object.freeze({ width: 90, fill: 0x14555e, shade: 0x0d3a41, trim: 0x66b7bf, logo: 0xdefaff })
+  Object.freeze({ width: 104, fill: 0x1760bd, shade: 0x0c3c7f, trim: 0x52b9ff, logo: 0xffffff }),
+  Object.freeze({ width: 88, fill: 0x087b4c, shade: 0x045032, trim: 0x41e38f, logo: 0xffffff }),
+  Object.freeze({ width: 96, fill: 0x604500, shade: 0x362600, trim: 0xffc928, logo: 0xffffff }),
+  Object.freeze({ width: 82, fill: 0xa52f35, shade: 0x6e171d, trim: 0xff6b63, logo: 0xffffff }),
+  Object.freeze({ width: 100, fill: 0x6135a4, shade: 0x3c1b73, trim: 0xb980ff, logo: 0xffffff }),
+  Object.freeze({ width: 90, fill: 0x087286, shade: 0x054755, trim: 0x3ed9ed, logo: 0xffffff })
 ]);
+
+function frozenPoint(x, y) {
+  return Object.freeze({ x: Math.round(x), y: Math.round(y) });
+}
+
+/**
+ * Compact scene-space shadow for the menu hero. The authored 10x4 shadow map
+ * becomes a heavy rectangle when enlarged nearly eight times; this tapered
+ * layout keeps the boots planted while letting pitch colour breathe through.
+ */
+export function buildMenuGroundShadowLayout({
+  x = 116,
+  y = 198,
+  width = 46,
+  height = 7
+} = {}) {
+  const centerX = Number.isFinite(x) ? x : 116;
+  const centerY = Number.isFinite(y) ? y : 198;
+  const resolvedWidth = Math.max(24, Math.round(Number.isFinite(width) ? width : 46));
+  const resolvedHeight = Math.max(5, Math.round(Number.isFinite(height) ? height : 7));
+  const halfWidth = resolvedWidth / 2;
+  const halfHeight = resolvedHeight / 2;
+  const left = centerX - halfWidth;
+  const right = centerX + halfWidth;
+  const top = centerY - halfHeight;
+  const bottom = centerY + halfHeight;
+
+  const layers = [
+    Object.freeze({
+      color: MENU_SHADOW_COLORS.edge,
+      alpha: 0.24,
+      points: Object.freeze([
+        frozenPoint(left + 7, top),
+        frozenPoint(right - 7, top),
+        frozenPoint(right, centerY),
+        frozenPoint(right - 8, bottom),
+        frozenPoint(left + 8, bottom),
+        frozenPoint(left, centerY)
+      ])
+    }),
+    Object.freeze({
+      color: MENU_SHADOW_COLORS.body,
+      alpha: 0.28,
+      points: Object.freeze([
+        frozenPoint(left + 12, centerY - 2),
+        frozenPoint(right - 12, centerY - 2),
+        frozenPoint(right - 5, centerY),
+        frozenPoint(right - 13, centerY + 2),
+        frozenPoint(left + 13, centerY + 2),
+        frozenPoint(left + 5, centerY)
+      ])
+    })
+  ];
+
+  const contacts = Object.freeze([
+    Object.freeze({ x: Math.round(centerX - 11), y: Math.round(centerY - 2), width: 9, height: 3 }),
+    Object.freeze({ x: Math.round(centerX + 3), y: Math.round(centerY - 2), width: 9, height: 3 })
+  ]);
+  const dither = Object.freeze([
+    frozenPoint(left + 3, centerY - 1),
+    frozenPoint(left + 7, centerY + 2),
+    frozenPoint(left + 11, centerY - 3),
+    frozenPoint(right - 11, centerY + 3),
+    frozenPoint(right - 7, centerY - 2),
+    frozenPoint(right - 3, centerY + 1)
+  ]);
+
+  return Object.freeze({
+    bounds: Object.freeze({
+      x: Math.round(left),
+      y: Math.round(top),
+      width: resolvedWidth,
+      height: resolvedHeight
+    }),
+    colors: MENU_SHADOW_COLORS,
+    layers: Object.freeze(layers),
+    contacts,
+    dither
+  });
+}
+
+function paintShadowPolygon(graphics, layer) {
+  graphics.fillStyle(layer.color, layer.alpha);
+  graphics.beginPath();
+  graphics.moveTo(layer.points[0].x, layer.points[0].y);
+  for (let index = 1; index < layer.points.length; index++) {
+    graphics.lineTo(layer.points[index].x, layer.points[index].y);
+  }
+  graphics.closePath();
+  graphics.fillPath();
+}
+
+export function addMenuGroundShadow(scene, options = {}) {
+  const layout = buildMenuGroundShadowLayout(options);
+  const graphics = scene.add.graphics();
+  layout.layers.forEach((layer) => paintShadowPolygon(graphics, layer));
+  graphics.fillStyle(layout.colors.contact, 0.34);
+  layout.contacts.forEach((contact) => {
+    graphics.fillRect(contact.x, contact.y, contact.width, contact.height);
+  });
+  graphics.fillStyle(layout.colors.edge, 0.16);
+  layout.dither.forEach((pixel) => graphics.fillRect(pixel.x, pixel.y, 1, 1));
+  graphics.setDepth(options.depth ?? 130);
+  graphics.setName('menu-kicker-ground-shadow');
+  graphics.menuGroundShadowLayout = layout;
+  return graphics;
+}
 
 function levelId(level, index) {
   return level?.id ?? index;
@@ -65,50 +180,26 @@ function menuText(scene, x, y, value, opts = {}) {
   return text;
 }
 
-function drawCorners(g, x, y, w, h, color, size = 5) {
-  g.fillStyle(color, 1);
-  g.fillRect(x, y, size, 1);
-  g.fillRect(x, y, 1, size);
-  g.fillRect(x + w - size, y, size, 1);
-  g.fillRect(x + w - 1, y, 1, size);
-  g.fillRect(x, y + h - 1, size, 1);
-  g.fillRect(x, y + h - size, 1, size);
-  g.fillRect(x + w - size, y + h - 1, size, 1);
-  g.fillRect(x + w - 1, y + h - size, 1, size);
-}
-
 function drawPremiumPanel(g, x, y, w, h, opts = {}) {
   const border = opts.border ?? EDGE;
   const fill = opts.fill ?? PANEL;
   const bottom = opts.bottom ?? NAVY;
-  g.fillStyle(INK, 0.82);
-  g.fillRect(x + 3, y + 4, w, h);
+  g.fillStyle(INK, 0.52);
+  g.fillRect(x + 4, y + 4, w, h);
   g.fillStyle(INK, 1);
   g.fillRect(x, y, w, h);
   g.fillStyle(border, 1);
   g.fillRect(x + 1, y + 1, w - 2, h - 2);
-  g.fillStyle(0x07131f, 1);
+  g.fillGradientStyle(shade(fill, 18), shade(fill, 10), bottom, bottom, opts.alpha ?? 1);
   g.fillRect(x + 2, y + 2, w - 4, h - 4);
-  g.fillGradientStyle(shade(fill, 10), shade(fill, 10), bottom, bottom, opts.alpha ?? 1);
-  g.fillRect(x + 4, y + 4, w - 8, h - 8);
-  g.fillStyle(shade(fill, 38), 0.72);
-  g.fillRect(x + 4, y + 4, w - 8, 1);
-  g.fillRect(x + 4, y + 4, 1, h - 8);
-  g.fillStyle(INK, 0.62);
-  g.fillRect(x + 4, y + h - 5, w - 8, 1);
-  g.fillRect(x + w - 5, y + 4, 1, h - 8);
-  g.fillStyle(0x86bce0, 0.045);
-  for (let row = y + 7; row < y + h - 5; row += 4) g.fillRect(x + 6, row, w - 12, 1);
-  drawCorners(g, x + 1, y + 1, w - 2, h - 2, opts.corner ?? GOLD_DARK, opts.cornerSize ?? 5);
+  g.fillStyle(shade(fill, 58), 0.75);
+  g.fillRect(x + 2, y + 2, w - 4, 2);
+  g.fillStyle(INK, 0.46);
+  g.fillRect(x + 2, y + h - 4, w - 4, 2);
+  g.fillStyle(opts.corner ?? border, 1);
+  g.fillRect(x + 1, y + 1, 3, h - 2);
+  g.fillRect(x + 4, y + 1, Math.min(w - 5, Math.max(18, Math.floor(w * 0.26))), 1);
   return g;
-}
-
-function addCoverRegion(scene, key, x, y, width, height, depth) {
-  const image = scene.add.image(x, y, key).setOrigin(0.5).setDepth(depth);
-  const sourceWidth = Math.max(1, image.width || width);
-  const sourceHeight = Math.max(1, image.height || height);
-  image.setScale(Math.max(width / sourceWidth, height / sourceHeight));
-  return image;
 }
 
 function wireButton(container, render, onClick, enabled = true) {
@@ -152,43 +243,29 @@ function drawActionFace(g, w, h, color, accent, state, featured = false) {
   g.clear();
 
   if (featured && !disabled && !pressed) {
-    g.fillStyle(accent, 0.12);
+    g.fillStyle(accent, 0.16);
     g.fillRect(-w / 2 - 3, -h / 2 - 3, w + 6, h + 6);
-    g.fillStyle(accent, 0.08);
-    g.fillRect(-w / 2 - 5, -h / 2 - 1, w + 10, h + 2);
   }
   if (!pressed) {
-    g.fillStyle(INK, 0.86);
+    g.fillStyle(INK, 0.64);
     g.fillRect(-w / 2 + 4, -h / 2 + 5, w, h);
   }
   g.fillStyle(INK, 1);
   g.fillRect(-w / 2, -h / 2 + y, w, h);
   g.fillStyle(disabled ? 0x324653 : accent, 1);
   g.fillRect(-w / 2 + 1, -h / 2 + 1 + y, w - 2, h - 2);
-  g.fillStyle(0x07121d, 1);
+  g.fillGradientStyle(shade(face, 28), shade(face, 14), shade(face, -4), shade(face, -18), 1);
   g.fillRect(-w / 2 + 2, -h / 2 + 2 + y, w - 4, h - 4);
-  g.fillGradientStyle(shade(face, 20), shade(face, -8), shade(face, -14), shade(face, -34), 1);
-  g.fillRect(-w / 2 + 4, -h / 2 + 4 + y, w - 8, h - 8);
 
   const iconCellW = featured ? 42 : 39;
-  g.fillStyle(shade(face, 22), disabled ? 0.28 : 0.84);
-  g.fillRect(-w / 2 + 5, -h / 2 + 5 + y, iconCellW - 6, h - 10);
+  g.fillStyle(INK, disabled ? 0.2 : 0.3);
+  g.fillRect(-w / 2 + 3, -h / 2 + 3 + y, iconCellW - 3, h - 6);
   g.fillStyle(accent, disabled ? 0.3 : 0.92);
-  g.fillRect(-w / 2 + iconCellW, -h / 2 + 4 + y, 1, h - 8);
-  g.fillStyle(shade(face, 60), disabled ? 0.18 : 0.52);
-  g.fillRect(-w / 2 + 4, -h / 2 + 4 + y, w - 8, 1);
-  g.fillStyle(INK, 0.48);
-  g.fillRect(-w / 2 + 4, h / 2 - 5 + y, w - 8, 1);
-
-  // The reference uses diagonal perforations on the action edge. These sparse
-  // pixels retain that sports-console texture without reducing label contrast.
-  g.fillStyle(accent, disabled ? 0.04 : 0.14);
-  for (let dx = w / 2 - 48; dx < w / 2 - 17; dx += 5) {
-    for (let dy = -h / 2 + 7; dy < h / 2 - 5; dy += 5) {
-      if ((Math.round(dx + dy) & 1) === 0) g.fillRect(dx, dy + y, 1, 1);
-    }
-  }
-  drawCorners(g, -w / 2 + 1, -h / 2 + 1 + y, w - 2, h - 2, disabled ? 0x304552 : accent, 7);
+  g.fillRect(-w / 2 + iconCellW, -h / 2 + 2 + y, 2, h - 4);
+  g.fillStyle(shade(face, 68), disabled ? 0.18 : 0.62);
+  g.fillRect(-w / 2 + 2, -h / 2 + 2 + y, w - 4, 2);
+  g.fillStyle(accent, disabled ? 0.15 : 0.75);
+  g.fillRect(-w / 2 + 2, h / 2 - 4 + y, w - 4, 2);
 }
 
 function makeActionIcon(scene, type, color) {
@@ -356,9 +433,19 @@ export class MenuScene extends Phaser.Scene {
 
   create() {
     configureHdCamera(this);
+    this.compactMenu = Number(globalThis.innerHeight) <= 520 &&
+      Number(globalThis.innerWidth) > Number(globalThis.innerHeight);
     this.add.image(0, 0, 'stadium-menu').setOrigin(0).setDepth(0);
-    addCoverRegion(this, 'pitch-grass-pixel-v3', GAME_W / 2, (STADIUM_Y + GAME_H) / 2,
-      GAME_W, GAME_H - STADIUM_Y, 1);
+    addPitchSurface(this, {
+      x: 0,
+      y: STADIUM_Y,
+      width: GAME_W,
+      height: GAME_H - STADIUM_Y,
+      horizon: { x: GAME_W / 2, y: 76 },
+      seed: 0x4d454e55,
+      depth: 1,
+      name: 'menu-procedural-pitch'
+    });
     const settings = SaveManager.getSettings?.() || {};
     this.reducedMotion = Boolean(settings.reducedMotion);
     // Kept on the scene so its ambient timer is torn down explicitly rather
@@ -399,7 +486,6 @@ export class MenuScene extends Phaser.Scene {
     this.makeHero(equippedKit, equippedCharacter, totalStars);
     this.makeActions(continueIndex, daily, today);
 
-    addScanlines(this, 900, 0.024);
     if (!this.reducedMotion) sceneIntro(this);
 
     // The menu is the player's thinking time, so spend it warming the match.
@@ -422,14 +508,14 @@ export class MenuScene extends Phaser.Scene {
   drawComposition() {
     this.add.image(0, 0, 'menu-lighting').setOrigin(0).setDepth(10);
     const wash = this.add.graphics().setDepth(11);
-    wash.fillGradientStyle(0x02070d, 0x02070d, 0x02070d, 0x02070d, 0.02, 0.58, 0.04, 0.72);
+    wash.fillGradientStyle(0x03122c, 0x03122c, 0x03122c, 0x03122c, 0, 0.24, 0, 0.44);
     wash.fillRect(215, 41, 260, 202);
-    wash.fillStyle(0x071018, 0.32);
+    wash.fillStyle(0x041127, 0.22);
     wash.fillRect(0, 0, GAME_W, 43);
 
     const lights = this.add.graphics().setDepth(12);
     for (const x of [47, 433]) {
-      lights.fillStyle(0x66c8ff, 0.12);
+      lights.fillStyle(0x42bcff, 0.15);
       lights.fillCircle(x, 57, 16);
       for (let row = 0; row < 2; row++) {
         for (let col = 0; col < 4; col++) {
@@ -473,24 +559,24 @@ export class MenuScene extends Phaser.Scene {
   makeHeader(totalStars, coins, muted, readyClaims) {
     const bar = this.add.graphics().setDepth(200);
     drawPremiumPanel(bar, 5, 4, GAME_W - 10, 37, {
-      fill: 0x0b2035,
-      bottom: 0x061322,
-      border: 0x254a67,
-      corner: 0x2f90be,
+      fill: 0x0b244a,
+      bottom: 0x06142d,
+      border: 0x3478b8,
+      corner: 0x27b8f4,
       cornerSize: 8
     });
 
     menuText(this, 15, 16, 'KICK DISTRICT', {
       fontFamily: DISPLAY_FONT,
-      fontSize: '18px',
+      fontSize: '17px',
       color: CREAM,
       strokeThickness: 1,
-      letterSpacing: 0.5
+      letterSpacing: -0.2
     }).setDepth(205);
     menuText(this, 16, 32, 'OWN THE CURVE.', {
       fontFamily: PIXEL_FONT,
       fontSize: '6px',
-      color: '#f5c94b',
+      color: '#ffc928',
       letterSpacing: 0.72
     }).setDepth(205);
     menuText(this, 87, 32, '·', {
@@ -499,19 +585,19 @@ export class MenuScene extends Phaser.Scene {
       color: '#587287'
     }).setDepth(205);
     const calynx = this.add.image(110, 32, 'calynx-logo-pixel').setScale(0.48).setDepth(205);
-    calynx.setTint(0x8fb8ff);
+    calynx.setTint(0x64d7ff);
     menuText(this, 128, 32, 'STUDIO', {
       fontSize: '5px',
-      color: '#7895ad',
+      color: '#9ccce8',
       letterSpacing: 0.35
     }).setDepth(205);
 
     this.soundButton = makeHeaderControl(this, 188, 22, 19, 23, {
       icon: muted ? 'icon-mute' : 'icon-sound',
       iconScale: 0.78,
-      color: 0x15324a,
-      border: 0x315a78,
-      corner: 0x315a78
+      color: 0x13365f,
+      border: 0x3478b8,
+      corner: 0x27b8f4
     }, () => this.toggleSound()).setDepth(206);
 
     this.settingsButton = makeHeaderControl(this, 230, 22, 62, 23, {
@@ -520,9 +606,9 @@ export class MenuScene extends Phaser.Scene {
       labelX: -5.5,
       letterSpacing: 0,
       fontSize: '6px',
-      color: 0x13283e,
-      border: 0x315a78,
-      corner: 0x315a78
+      color: 0x13365f,
+      border: 0x3478b8,
+      corner: 0x27b8f4
     }, () => {
       SettingsPanel.open({
         onChange: (nextSettings) => {
@@ -534,14 +620,14 @@ export class MenuScene extends Phaser.Scene {
     makeHeaderControl(this, 280, 22, 30, 23, {
       icon: 'icon-cup',
       iconScale: 1.05,
-      color: readyClaims ? PAL.green : 0x142c43,
+      color: readyClaims ? 0x087b4c : 0x13365f,
       border: readyClaims ? GOLD : GOLD_DARK,
       corner: readyClaims ? GOLD : GOLD_DARK
     }, () => this.scene.start('Progress')).setDepth(206);
 
     this.headerStatPanels = [
-      this.makeHeaderStat(337, 22, 72, 'icon-star', `${totalStars}/${LEVELS.length * 3}`, 0x0c2135),
-      this.makeHeaderStat(423, 22, 80, 'icon-coin', formatCompact(coins), 0x0c2135)
+      this.makeHeaderStat(337, 22, 72, 'icon-star', `${totalStars}/${LEVELS.length * 3}`, 0x0b244a),
+      this.makeHeaderStat(423, 22, 80, 'icon-coin', formatCompact(coins), 0x0b244a)
     ];
 
     if (readyClaims) {
@@ -563,15 +649,15 @@ export class MenuScene extends Phaser.Scene {
     const panel = this.add.graphics();
     drawPremiumPanel(panel, -w / 2, -11.5, w, 23, {
       fill,
-      bottom: 0x061421,
-      border: 0x315a78,
-      corner: GOLD_DARK,
+      bottom: 0x06142d,
+      border: 0x3478b8,
+      corner: 0x27b8f4,
       cornerSize: 4
     });
     const icon = this.add.image(-w / 2 + 15, 0, iconKey).setScale(1.05);
     const label = menuText(this, -w / 2 + 28, 0, String(value), {
       fontFamily: NUMBER_FONT,
-      fontStyle: 'normal',
+      fontStyle: PIXEL_TEXT_WEIGHT,
       fontSize: '8px',
       color: CREAM,
       letterSpacing: 0
@@ -593,81 +679,90 @@ export class MenuScene extends Phaser.Scene {
     const player = getCosmetic(equippedCharacter) || getCosmetic('character-mica');
     const card = this.add.graphics().setDepth(150);
     drawPremiumPanel(card, 28, 202, 192, 65, {
-      fill: 0x0b1d30,
-      bottom: 0x061522,
-      border: GOLD_DARK,
-      corner: GOLD,
+      fill: 0x0b244a,
+      bottom: 0x06142d,
+      border: 0x3478b8,
+      corner: 0x27b8f4,
       cornerSize: 7
     });
 
     drawPremiumPanel(card, 37, 207, 31, 30, {
-      fill: 0x261c51,
-      bottom: 0x160f31,
-      border: GOLD_DARK,
+      fill: 0x163d7a,
+      bottom: 0x0a2454,
+      border: 0x4ebeff,
       corner: GOLD,
       cornerSize: 4
     });
     menuText(this, 52.5, 222, String(player.number), {
       originX: 0.5,
       fontFamily: DISPLAY_FONT,
-      fontSize: '14px',
+      fontSize: '16px',
       color: CREAM,
       strokeThickness: 1
     }).setDepth(154);
     menuText(this, 75, 212, `${player.name.toUpperCase()}  ·  #${player.number}`, {
       fontFamily: DISPLAY_FONT,
-      fontSize: '9px',
+      fontSize: '10px',
       color: CREAM,
       letterSpacing: 0.35
     }).setDepth(154);
-    menuText(this, 75, 228, 'CUP RUN', {
-      fontFamily: PIXEL_FONT,
-      fontSize: '6px',
-      color: '#c5d2dc',
-      letterSpacing: 0.4
-    }).setDepth(154);
-    menuText(this, 108, 228, `${totalStars} STARS`, {
-      fontFamily: PIXEL_FONT,
-      fontSize: '6px',
-      color: '#6ee1df',
-      letterSpacing: 0.35
-    }).setDepth(154);
-
-    const progress = Phaser.Math.Clamp(totalStars / Math.max(LEVELS.length * 3, 1), 0, 1);
-    card.fillStyle(INK, 1);
-    card.fillRect(164, 224, 46, 6);
-    card.fillStyle(0x2e4b62, 1);
-    card.fillRect(165, 225, 44, 4);
-    card.fillStyle(GOLD, 1);
-    card.fillRect(165, 225, Math.floor(44 * progress), 4);
-    card.fillStyle(0x43657c, 0.65);
-    card.fillRect(36, 236, 176, 1);
-
-    const rows = [
-      ['ROLE', player.archetype.toUpperCase(), 0xf3c449],
-      ['SIGNATURE', player.gameplay.ability.toUpperCase(), 0x6ee1df],
-      ['SHOT', player.gameplay.summary.toUpperCase(), 0xc5d2dc]
-    ];
-    rows.forEach(([label, value, color], index) => {
-      const y = 243 + index * 8;
-      menuText(this, 38, y, label, {
-        fontFamily: PIXEL_FONT,
-        fontSize: '5px',
-        color: '#7895ad',
-        letterSpacing: 0.2
+    if (this.compactMenu) {
+      menuText(this, 75, 229, player.archetype.toUpperCase(), {
+        fontFamily: DISPLAY_FONT,
+        fontSize: '8px',
+        color: '#f3c449',
+        letterSpacing: 0.18
       }).setDepth(154);
-      menuText(this, 76, y, String(value), {
+    } else {
+      menuText(this, 75, 228, 'CUP RUN', {
         fontFamily: PIXEL_FONT,
-        fontSize: index === 2 ? '4.5px' : '5.5px',
-        color: `#${color.toString(16).padStart(6, '0')}`,
-        letterSpacing: index === 2 ? 0 : 0.12
+        fontSize: '6px',
+        color: '#c5d2dc',
+        letterSpacing: 0.4
       }).setDepth(154);
-    });
+      menuText(this, 108, 228, `${totalStars} STARS`, {
+        fontFamily: PIXEL_FONT,
+        fontSize: '6px',
+        color: '#6ee1df',
+        letterSpacing: 0.35
+      }).setDepth(154);
+
+      const progress = Phaser.Math.Clamp(totalStars / Math.max(LEVELS.length * 3, 1), 0, 1);
+      card.fillStyle(INK, 1);
+      card.fillRect(164, 224, 46, 6);
+      card.fillStyle(0x2e4b62, 1);
+      card.fillRect(165, 225, 44, 4);
+      card.fillStyle(GOLD, 1);
+      card.fillRect(165, 225, Math.floor(44 * progress), 4);
+      card.fillStyle(0x43657c, 0.65);
+      card.fillRect(36, 236, 176, 1);
+
+      const rows = [
+        ['ROLE', player.archetype.toUpperCase(), 0xf3c449],
+        ['SIGNATURE', player.gameplay.ability.toUpperCase(), 0x6ee1df],
+        ['SHOT', player.gameplay.summary.toUpperCase(), 0xc5d2dc]
+      ];
+      rows.forEach(([label, value, color], index) => {
+        const y = 243 + index * 8;
+        menuText(this, 38, y, label, {
+          fontFamily: PIXEL_FONT,
+          fontSize: '5px',
+        color: '#86b6d4',
+          letterSpacing: 0.2
+        }).setDepth(154);
+        menuText(this, 76, y, String(value), {
+          fontFamily: PIXEL_FONT,
+          fontSize: index === 2 ? '5px' : '5.5px',
+          color: `#${color.toString(16).padStart(6, '0')}`,
+          letterSpacing: index === 2 ? 0 : 0.12
+        }).setDepth(154);
+      });
+    }
 
     this.kicker = new Kicker(this, 116, 198, {
       kitId: equippedKit,
       characterId: equippedCharacter,
-      scale: 5.0,
+      scale: this.compactMenu ? 5.6 : 5.8,
       depth: 130,
       shadowAlpha: 0.66,
       // The front-menu hero is an identity card, so his planted root remains
@@ -675,6 +770,30 @@ export class MenuScene extends Phaser.Scene {
       // shared Kicker contract and any explicit pose work.
       ambient: false,
       reducedMotion: this.reducedMotion
+    });
+    // The shared 10x4 shadow is correct beside a small gameplay sprite but
+    // becomes an opaque slab under this large menu portrait. Retain the object
+    // for Kicker's transform contract, make it invisible, and render a bespoke
+    // tapered/dithered contact shadow at the same grounded root.
+    this.kicker.shadow?.setVisible?.(false);
+    this.kicker.shadow?.setAlpha?.(0);
+    const shadowWidth = (this.compactMenu ? 43 : 47) * Math.max(
+      0.9,
+      Math.min(1.12, this.kicker.characterScale || 1)
+    );
+    this.menuKickerShadow = addMenuGroundShadow(this, {
+      x: 116,
+      y: 198,
+      width: shadowWidth,
+      height: this.compactMenu ? 6 : 7,
+      depth: 130
+    });
+    // Phaser can finish registering the final queued HD texture on the same
+    // turn Menu.create runs. Re-resolve once on the next game tick so the hero
+    // can never remain on the old 24x27 procedural fallback despite the real
+    // 256px sheet being available.
+    this.time.delayedCall(0, () => {
+      if (this.scene.isActive()) this.kicker?.applyPoseTexture?.();
     });
   }
 
@@ -698,11 +817,11 @@ export class MenuScene extends Phaser.Scene {
     continueButton = makeMenuAction(this, actionX, 65, actionW, 37, {
       label: 'CONTINUE',
       subtitle: `LEVEL ${String(continueIndex + 1).padStart(2, '0')}`,
-      subtitleColor: '#91ed5d',
-      color: 0x145b25,
-      accent: 0x8ddd4b,
+      subtitleColor: '#7dffb0',
+      color: 0x08703e,
+      accent: 0x39df83,
       iconType: 'play',
-      subtitleColorValue: 0x91ed5d,
+      subtitleColorValue: 0x7dffb0,
       featured: true
     }, () => {
       if (continuePending) return;
@@ -725,9 +844,9 @@ export class MenuScene extends Phaser.Scene {
     this.menuActionButtons.push(makeMenuAction(this, actionX, 107, actionW, 35, {
       label: 'CAREER',
       subtitle: 'FIVE CUP TOUR',
-      subtitleColor: '#58c6ff',
-      color: 0x0a477c,
-      accent: 0x47baf5,
+      subtitleColor: '#7ad5ff',
+      color: 0x0b4f9c,
+      accent: 0x38adff,
       iconType: 'career',
       subtitleColorValue: 0x58c6ff
     }, () => this.scene.start('LevelSelect')).setDepth(230));
@@ -740,9 +859,9 @@ export class MenuScene extends Phaser.Scene {
     this.menuActionButtons.push(makeMenuAction(this, actionX, 147, actionW, 35, {
       label: 'DAILY KICK',
       subtitle: dailySubtitle,
-      subtitleColor: '#f5c94b',
-      color: 0x6a4813,
-      accent: 0xe7a92e,
+      subtitleColor: '#ffe06a',
+      color: 0x855b00,
+      accent: 0xffc928,
       iconType: 'daily',
       subtitleColorValue: 0xf5c94b
     }, () => {
@@ -753,9 +872,9 @@ export class MenuScene extends Phaser.Scene {
     this.menuActionButtons.push(makeMenuAction(this, actionX, 187, actionW, 35, {
       label: 'TIME ATTACK',
       subtitle: '60 SEC',
-      subtitleColor: '#ff8551',
-      color: 0x732417,
-      accent: 0xf06436,
+      subtitleColor: '#ff9b9d',
+      color: 0x942c36,
+      accent: 0xff5e68,
       iconType: 'time',
       subtitleColorValue: 0xff8551
     }, () => {
@@ -766,9 +885,9 @@ export class MenuScene extends Phaser.Scene {
     this.menuActionButtons.push(makeMenuAction(this, actionX, 227, actionW, 35, {
       label: 'LOCKER',
       subtitle: 'MAKE IT YOURS',
-      subtitleColor: '#da83ff',
-      color: 0x48245f,
-      accent: 0xad5bd9,
+      subtitleColor: '#d1b2ff',
+      color: 0x5630a0,
+      accent: 0xa976ff,
       iconType: 'locker',
       subtitleColorValue: 0xda83ff
     }, () => this.scene.start('Locker')).setDepth(230));

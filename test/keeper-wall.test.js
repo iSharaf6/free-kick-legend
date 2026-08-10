@@ -24,6 +24,10 @@ function sceneStub(textures = []) {
   };
 }
 
+const close = (actual, expected, tolerance = 1e-10) => {
+  assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} should be close to ${expected}`);
+};
+
 test('keeper shot reads are deterministic and ignore outcome RNG', () => {
   const goalZ = CAM.ballDist + 18;
   const ball = new Ball();
@@ -38,6 +42,65 @@ test('keeper shot reads are deterministic and ignore outcome RNG', () => {
   assert.equal(first.targetY, second.targetY);
   assert.equal(first.reactT, second.reactT);
   assert.equal(first.setT, second.setT);
+});
+
+test('keeper reads and physical travel mirror exactly for left and right curl', () => {
+  const goalZ = CAM.ballDist + 18;
+  const rightBall = new Ball();
+  const leftBall = new Ball();
+  rightBall.kick(2.2, 6.6, 26, 0.6);
+  leftBall.kick(-2.2, 6.6, 26, -0.6);
+  const right = new Goalkeeper(sceneStub(), 0.62, goalZ, { seed: 10 });
+  const left = new Goalkeeper(sceneStub(), 0.62, goalZ, { seed: 10 });
+
+  right.onShot(rightBall, goalZ);
+  left.onShot(leftBall, goalZ);
+  close(right.shotX, -left.shotX);
+  close(right.shotY, left.shotY);
+  close(right.targetX, -left.targetX);
+  close(right.targetY, left.targetY);
+  close(right.trackTargetX, -left.trackTargetX);
+  close(right.reactT, left.reactT);
+  close(right.setT, left.setT);
+  close(right.diveDuration, left.diveDuration);
+  assert.equal(right.saveFamily, left.saveFamily);
+  assert.equal(right.diveDir, 1);
+  assert.equal(left.diveDir, -1);
+
+  for (let frame = 0; frame < 96; frame++) {
+    right.update(1 / 120);
+    left.update(1 / 120);
+  }
+  assert.equal(right.state, left.state);
+  close(right.x, -left.x);
+  close(right.moveVx, -left.moveVx);
+  close(right.diveP, left.diveP);
+  close(right.visualLift, left.visualLift);
+  close(right.diveHandY, left.diveHandY);
+});
+
+test('keeper movement is invariant at 30, 60 and 120 render frames per second', () => {
+  const goalZ = CAM.ballDist + 18;
+  const simulate = (fps) => {
+    const ball = new Ball();
+    ball.kick(2.2, 6.6, 26, 0.6);
+    const keeper = new Goalkeeper(sceneStub(), 0.62, goalZ, { seed: 10 });
+    keeper.onShot(ball, goalZ);
+    for (let frame = 0; frame < fps * 0.8; frame++) keeper.update(1 / fps);
+    return keeper;
+  };
+  const baseline = simulate(120);
+
+  for (const fps of [30, 60]) {
+    const candidate = simulate(fps);
+    assert.equal(candidate.state, baseline.state);
+    close(candidate.stateT, baseline.stateT);
+    close(candidate.x, baseline.x);
+    close(candidate.moveVx, baseline.moveVx);
+    close(candidate.diveP, baseline.diveP);
+    close(candidate.visualLift, baseline.visualLift);
+    close(candidate.diveHandY, baseline.diveHandY);
+  }
 });
 
 test('double keepers preserve separate home positions through idle, return and reset', () => {
@@ -189,6 +252,18 @@ test('standing save envelope matches the visible body instead of covering a metr
     false,
     'a visibly wide shot must pass the planted keeper'
   );
+});
+
+test('heavy sidespin turns a borderline clean hold into a deterministic glove parry', () => {
+  const keeper = new Goalkeeper(sceneStub(), 0.7, CAM.ballDist + 17, { seed: 9 });
+  const point = { x: keeper.x, y: 1.72 };
+  const straight = keeper.contact(point, { vx: 0, vy: 0, vz: 26.4, spin: 0 });
+  const curling = keeper.contact(point, { vx: 0, vy: 0, vz: 26.4, spin: 1 });
+
+  assert.equal(straight.result, 'catch');
+  assert.equal(curling.result, 'parry');
+  assert.equal(curling.normalX, 0);
+  assert.equal(curling.normalY, 0);
 });
 
 test('keeper advances through read, set and dive states', () => {

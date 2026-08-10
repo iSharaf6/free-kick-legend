@@ -26,7 +26,12 @@ import {
   sweepGoalFrame
 } from '../systems/GoalFramePhysics.js';
 import { GoalNetPhysics } from '../systems/GoalNetPhysics.js';
-import { GoalCelebration } from '../systems/GoalCelebration.js';
+import {
+  resolveBoardDeflection,
+  resolveKeeperParry,
+  resolveWallDeflection
+} from '../systems/ContactPhysics.js';
+import { GOAL_CELEBRATION_TIMING, GoalCelebration } from '../systems/GoalCelebration.js';
 import { outcomeBannerStyle } from '../systems/OutcomePresentation.js';
 import { sweepMovingZPlane } from '../systems/SweptCollision.js';
 import {
@@ -44,30 +49,22 @@ import {
 } from '../systems/LevelMechanics.js';
 import {
   makeButton, makeIconButton, makeStatChip, titleText, bodyText,
-  drawPanel, drawBroadcastFrame, addScanlines, configureHdCamera, crispText, canvasHasKeyboardFocus,
-  setCanvasButtonNavigationBlocked, FONT
+  drawPanel, drawBroadcastFrame, configureHdCamera, crispText, canvasHasKeyboardFocus,
+  setCanvasButtonNavigationBlocked, FONT, PIXEL_TEXT_WEIGHT
 } from '../ui.js';
 import { PAL } from '../pixelart.js';
 import { addCrowdStand } from '../art/CrowdStand.js';
+import { addPitchSurface } from '../art/PitchSurface.js';
 import { buildPitchMarkingLayout, PITCH_MARKING_DIMENSIONS } from '../art/PitchMarkings.js';
 import { queueKeeperSheets } from '../data/keeperAssets.js';
 
 const ATTEMPTS = 3;
 const ARCADE_TIME = 60;
-const RESULT_FONT = '"Pixelify Sans", "Courier New", monospace';
+const RESULT_FONT = '"Pixelify Sans", monospace';
 const FIXED_STEP = PHYS.fixedStep;
 const MAX_STEPS = PHYS.maxSubsteps + 2;
 const AD_TIMEOUT_MS = 15000;
 const PAUSABLE_STATES = new Set(['AIMING', 'WINDUP', 'FLIGHT', 'RESULT']);
-const CUP_TINTS = Object.freeze({
-  academy: 0xe8f5e9,
-  curve: 0xe6f1ff,
-  targets: 0xfff4cc,
-  pressure: 0xffe0d5,
-  legend: 0xe6dcff,
-  daily: 0xffedbd
-});
-
 const SECURITY_GUARD_LAYOUT = Object.freeze([18, 76, 109, 326, 405, 458]);
 const SECURITY_GUARD_MOTION = Object.freeze([
   { dx: -0.45, dy: -0.45, angle: -0.55, duration: 1120, hold: 720, repeatDelay: 1800 },
@@ -166,7 +163,7 @@ const SLOWMO_RAMP_SECONDS = 0.18;
 // ghost swipe the player can copy, and none of it blocks input.
 const TUTORIAL_STEPS = Object.freeze([
   Object.freeze({
-    caption: 'SWIPE UP FROM THE BALL',
+    caption: 'SWIPE UP TO SHOOT',
     detail: 'Drag from the ball toward the goal, then let go.',
     bow: 0,
     reach: 88,
@@ -198,6 +195,12 @@ const TUTORIAL_STEPS = Object.freeze([
 // The shot readout lives with the bottom chrome. Directly under the banner it
 // covered the goalmouth at the one moment the player wants to watch the net.
 const READOUT_Y = 231;
+const HUD_TOP_Y = 2;
+const HUD_TOP_H = 17;
+const HUD_TOP_MID = HUD_TOP_Y + HUD_TOP_H / 2;
+const HUD_SUB_Y = 21;
+const HUD_SUB_H = 11;
+const HUD_SUB_MID = HUD_SUB_Y + HUD_SUB_H / 2;
 const COACHING_HINT_Y = 197;
 
 // The thread itself: one continuous line drawn through the ball, every gate and
@@ -325,6 +328,7 @@ export class GameScene extends Phaser.Scene {
     this.targetAnchorScreenX = null;
     this.nearCrowd = [];
     this.crowdTiers = null;
+    this.pitchSurface = null;
     this.securityGuards = [];
     this.securityGuardTweens = [];
     this.sponsorBoardObjects = [];
@@ -485,8 +489,6 @@ export class GameScene extends Phaser.Scene {
     this.activeTarget = this.baseTarget ? { ...this.baseTarget } : null;
 
     this.crowdImage = this.add.image(GAME_W / 2, 0, 'crowd').setOrigin(0.5, 0).setDepth(0);
-    const atmosphereTint = CUP_TINTS[this.level.cup];
-    if (atmosphereTint) this.crowdImage.setTint(atmosphereTint);
     this.crowdGlow = this.add.rectangle(GAME_W / 2, STADIUM_Y / 2, GAME_W, STADIUM_Y, PAL.gold, 0)
       .setDepth(1)
       .setBlendMode('ADD');
@@ -496,11 +498,6 @@ export class GameScene extends Phaser.Scene {
     this.buildSecurityGuards();
     this.drawSponsorBoards();
     this.buildTrackside();
-    // A quiet floodlight wash keeps the night-match atmosphere without the
-    // hard triangles that previously read as stray pitch markings.
-    this.add.rectangle(GAME_W / 2, STADIUM_Y + (GAME_H - STADIUM_Y) / 2,
-      GAME_W, GAME_H - STADIUM_Y, PAL.flood, 0.018)
-      .setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
     this.add.image(0, 0, 'vignette').setOrigin(0, 0).setDepth(1950);
     this.drawGoal();
     this.drawTargetZone();
@@ -1099,6 +1096,8 @@ export class GameScene extends Phaser.Scene {
     this.targetGfx = null;
     this.pitchGfx?.destroy?.();
     this.pitchGfx = null;
+    this.pitchSurface?.destroy?.();
+    this.pitchSurface = null;
     this.trailGfx?.destroy?.();
     this.trailGfx = null;
     this.pressureMeterGfx?.destroy?.();
@@ -1141,10 +1140,11 @@ export class GameScene extends Phaser.Scene {
         .setDisplaySize(GAME_W, STADIUM_Y)
         .setDepth(0)
         .setVisible(true);
-      const atmosphereTint = CUP_TINTS[this.level.cup];
-      // The empty stand behind the supporters is dimmed hard. Everything in
-      // front of it - players, ball, hoops, goal - then owns the contrast.
-      this.crowdImage.setTint(atmosphereTint ? mixColor(atmosphereTint, 0x4a5a6b, 0.72) : 0x64748a);
+      // This texture is only the neutral stadium structure behind the authored
+      // supporter tiers. Do not multiply their navy/gold/skin ramps by a cup
+      // tint; depth is handled by lighting overlays in the stand itself.
+      this.crowdImage.clearTint?.();
+      this.crowdImage.setAlpha(1);
     }
 
     // Three tiers of shuffled panorama slices, back to front, plus the
@@ -1333,12 +1333,12 @@ export class GameScene extends Phaser.Scene {
       // legitimately out of frame - skip it rather than clamp it into view.
       const base = project(side * PITCH_MARKING_DIMENSIONS.fieldHalfWidth, 0, this.zGoal);
       if (base.x < -8 || base.x > GAME_W + 8) continue;
-      const height = Math.max(10, base.s * 1.55);
+      const height = Math.max(15, base.s * 2.0);
       const flag = this.add.image(base.x, base.y, 'corner-flag')
         // The pole is at x=2 in the 12px texture. Anchoring its centre, rather
         // than the texture centre, keeps the pole planted when the flag flips.
         .setOrigin(2 / 12, 1)
-        .setDisplaySize(height * 0.5, height)
+        .setDisplaySize(height * 0.58, height)
         .setDepth(1000 - this.zGoal * 10 - 4)
         .setFlipX(windX < 0)
         .setTint(0xdfe9ef);
@@ -1439,17 +1439,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   drawPitch() {
-    if (this.textures.exists('pitch-grass-pixel-v3')) {
-      this.pitchImage = this.add.image(0, STADIUM_Y, 'pitch-grass-pixel-v3')
-        .setOrigin(0, 0)
-        .setDisplaySize(GAME_W, GAME_H - STADIUM_Y)
-        .setTint(0xd6ffdc)
-        .setDepth(1);
-    } else {
-      this.add.rectangle(GAME_W / 2, STADIUM_Y + (GAME_H - STADIUM_Y) / 2,
-        GAME_W, GAME_H - STADIUM_Y, PAL.grass)
-        .setDepth(1);
-    }
+    this.pitchSurface?.destroy?.();
+    this.pitchSurface = addPitchSurface(this, {
+      x: 0,
+      y: STADIUM_Y,
+      width: GAME_W,
+      height: GAME_H - STADIUM_Y,
+      horizon: { x: GAME_W / 2, y: CAM.horizonY },
+      seed: 0x4b49434b,
+      depth: 1,
+      name: 'match-procedural-pitch'
+    });
 
     if (this.pitchGfx) {
       this.pitchGfx.destroy();
@@ -1534,6 +1534,13 @@ export class GameScene extends Phaser.Scene {
     const tl = project(-HW, height, z);
     const tr = project(HW, height, z);
     const br = project(HW, 0, z);
+    // A restrained goal recess separates the keeper and ball from the busiest
+    // crowd detail without crushing their authored colours.
+    this.goalMouthVeil = this.add.graphics().setDepth(1.9);
+    this.goalMouthVeil.fillStyle(0x071018, 0.24);
+    this.goalMouthVeil.fillPoints([tl, tr, br, bl], true);
+    this.goalMouthVeil.lineStyle(1, 0x30465b, 0.55);
+    this.goalMouthVeil.strokePoints([tl, tr, br, bl], true);
     // dark under-stroke so the white frame pops off the crowd
     frame.lineStyle(lw + 2, 0x131b25, 0.9);
     frame.beginPath();
@@ -2284,11 +2291,14 @@ export class GameScene extends Phaser.Scene {
 
   refreshResponsiveHud() {
     if (!this.responsiveHudTexts) return;
+    // Layout still uses 480x270 logical coordinates, so these sizes are tuned
+    // for the final full-HD backing surface and remain readable after the
+    // responsive compositor fits it to desktop or mobile.
     const sizes = {
-      primary: this.compactHud ? '5px' : '4px',
-      tiny: this.compactHud ? '5px' : '3px',
-      secondary: this.compactHud ? '5px' : '4px',
-      menu: this.compactHud ? '5px' : '4px'
+      primary: this.compactHud ? '9px' : '7px',
+      tiny: this.compactHud ? '8px' : '6px',
+      secondary: this.compactHud ? '8px' : '6px',
+      menu: this.compactHud ? '8px' : '6px'
     };
     for (const [tier, texts] of Object.entries(this.responsiveHudTexts)) {
       for (const text of texts) {
@@ -2301,23 +2311,22 @@ export class GameScene extends Phaser.Scene {
   layoutCareerSecondaryHud() {
     const style = this.careerStyleHud;
     if (!style?.plate?.active || !style?.text?.active) return;
-    const width = Math.min(this.compactHud ? 128 : 112,
-      style.label.length * (this.compactHud ? 2.8 : 2.25) + 10);
+    const width = Math.min(150, style.label.length * 3.5 + 14);
     style.plate.clear();
-    drawPanel(style.plate, style.x, 11.5, width, 8, {
+    drawPanel(style.plate, style.x, HUD_SUB_Y, width, HUD_SUB_H, {
       fill: 0x153d3a, border: PAL.borderDark, corner: PAL.greenHi, alpha: 0.92
     });
     style.text.setX(style.x + width / 2);
 
     let x = style.x + width + 4;
     for (const item of this.conditionHud) {
-      const chipWidth = item.label.length * (this.compactHud ? 2.9 : 2.4) + 10;
+      const chipWidth = item.label.length * 3.55 + 12;
       const visible = x + chipWidth <= GAME_W - 4;
       item.plate.setVisible(visible);
       item.text.setVisible(visible);
       if (!visible) continue;
       item.plate.clear();
-      drawPanel(item.plate, x, 11.5, chipWidth, 8, {
+      drawPanel(item.plate, x, HUD_SUB_Y, chipWidth, HUD_SUB_H, {
         fill: PAL.panelMuted, border: PAL.borderDark, corner: PAL.goldDark, alpha: 0.9
       });
       item.text.setX(x + chipWidth / 2);
@@ -2326,23 +2335,20 @@ export class GameScene extends Phaser.Scene {
   }
 
   buildHud() {
-    // At short landscape heights each logical pixel maps to roughly 1.4 device
-    // pixels. Promote the smallest broadcast labels so the HUD remains
-    // glance-readable without covering more of the pitch.
-    const primaryHudFont = this.compactHud ? '5px' : '4px';
-    const tinyHudFont = this.compactHud ? '5px' : '3px';
-    const secondaryHudFont = this.compactHud ? '5px' : '4px';
+    const primaryHudFont = this.compactHud ? '9px' : '7px';
+    const tinyHudFont = this.compactHud ? '8px' : '6px';
+    const secondaryHudFont = this.compactHud ? '8px' : '6px';
     this.responsiveHudTexts = { primary: [], tiny: [], secondary: [], menu: [] };
     this.careerStyleHud = null;
     this.conditionHud = [];
     const chrome = this.add.graphics().setDepth(1988);
-    drawPanel(chrome, 4, 1, GAME_W - 8, 9, {
+    drawPanel(chrome, 4, HUD_TOP_Y, GAME_W - 8, HUD_TOP_H, {
       fill: PAL.panel,
       border: PAL.borderDark,
       corner: PAL.goldDark
     });
 
-    this.muteButton = makeIconButton(this, 10, 5.5, 7,
+    this.muteButton = makeIconButton(this, 12, HUD_TOP_MID, 12,
       Audio.muted ? 'icon-mute' : 'icon-sound', () => {
         const muted = Audio.toggleMuted();
         MenuMusic.setMuted(muted);
@@ -2350,18 +2356,19 @@ export class GameScene extends Phaser.Scene {
         this.muteButton.buttonIcon?.setTexture(muted ? 'icon-mute' : 'icon-sound');
       }, {
         color: PAL.panelHi, hover: PAL.blue, border: PAL.borderDark,
-        iconScale: 0.3, hitWidth: 22, hitHeight: 19
+        iconScale: 0.48, hitWidth: 26, hitHeight: 25
       }).setDepth(2000);
 
     if (this.mode === 'career') {
       // One strip, three zones: identity left, match title centred, conditions
       // right. Everything used to compete inside the same run of text.
-      this.matchHudText = this.trackResponsiveHudText(bodyText(this, 24, 5.5,
+      this.matchHudText = this.trackResponsiveHudText(bodyText(this, 31, HUD_TOP_MID,
         `MATCH ${String(this.levelIndex + 1).padStart(2, '0')}`, {
         fontFamily: FONT, fontSize: primaryHudFont, color: '#f3e7c3', letterSpacing: 0.2
       }).setDepth(2000), 'primary');
-      bodyText(this, GAME_W / 2, 5.5, String(this.level.name).toUpperCase(), {
-        originX: 0.5, fontFamily: FONT, fontSize: '6px', color: '#f3c449', letterSpacing: 0.3
+      bodyText(this, GAME_W / 2, HUD_TOP_MID, String(this.level.name).toUpperCase(), {
+        originX: 0.5, originY: 0.5, fontFamily: FONT,
+        fontSize: this.compactHud ? '11px' : '9px', color: '#f3c449', letterSpacing: 0.2
       }).setDepth(2000);
 
       this.attemptIcons = [];
@@ -2369,62 +2376,70 @@ export class GameScene extends Phaser.Scene {
       // so size the HUD icons from the texture instead of a fixed scale.
       const iconTexW = this.textures.get(this.ballTexture).getSourceImage()?.width || 12;
       for (let i = 0; i < this.maxAttempts; i++) {
-        const icon = this.add.image(GAME_W - 8 - i * 8, 5.5, this.ballTexture)
-          .setScale(5.5 / iconTexW).setDepth(2000);
+        const iconSize = this.compactHud ? 9 : 7.5;
+        const icon = this.add.image(GAME_W - 10 - i * 11, HUD_TOP_MID, this.ballTexture)
+          .setScale(iconSize / iconTexW).setDepth(2000);
         this.attemptIcons.push(icon);
       }
       const wind = getWindVectorAt(this.level.wind, this.simTime);
-      const attemptsWidth = this.maxAttempts * 8;
+      const attemptsWidth = this.maxAttempts * 11;
       if (wind.magnitude >= 0.1 || this.level.wind?.rotation) {
         const arrow = Math.abs(wind.x) < 0.06 ? (wind.y >= 0 ? '^' : 'v') : wind.x > 0 ? '>' : '<';
-        this.windTxt = this.trackResponsiveHudText(bodyText(this, GAME_W - 8 - attemptsWidth, 5.5,
+        this.windTxt = this.trackResponsiveHudText(bodyText(this, GAME_W - 10 - attemptsWidth, HUD_TOP_MID,
           `WIND ${wind.magnitude.toFixed(1)} ${arrow}`, {
           originX: 1, fontFamily: FONT, fontSize: primaryHudFont, color: '#f3c449', letterSpacing: 0.2
         }).setDepth(2000), 'primary');
       }
 
-      // Secondary strip: cup identity and objective count, out of the way of
-      // the primary readout above it.
-      const subChrome = this.add.graphics().setDepth(1988);
       const needed = Math.max(1, this.level.objective?.goals || 1);
-      const subWidth = needed > 1 ? 118 : 78;
-      drawPanel(subChrome, 4, 11.5, subWidth, 8, {
-        fill: PAL.panelMuted, border: PAL.borderDark, corner: PAL.goldDark, alpha: 0.9
-      });
-      this.trackResponsiveHudText(bodyText(this, 9, 15.5,
-        `${String(this.level.cup || 'career').toUpperCase()} CUP`, {
-        fontSize: secondaryHudFont, color: '#b9c6c5', letterSpacing: 0.24
-      }).setDepth(2000), 'secondary');
-      if (needed > 1) {
-        this.objectiveProgressTxt = this.trackResponsiveHudText(bodyText(this, 4 + subWidth - 5, 15.5,
-          `0 / ${needed} TARGETS`, {
-          originX: 1, fontFamily: FONT, fontSize: secondaryHudFont, color: '#f3c449', letterSpacing: 0.2
+      // Desktop has room for broadcast metadata. On a compact landscape
+      // screen the match name, attempts and action prompt must own the rail;
+      // repeating cup/loadout prose there only manufactures microtext.
+      if (!this.compactHud) {
+        const subChrome = this.add.graphics().setDepth(1988);
+        const subWidth = needed > 1 ? 145 : 96;
+        drawPanel(subChrome, 4, HUD_SUB_Y, subWidth, HUD_SUB_H, {
+          fill: PAL.panelMuted, border: PAL.borderDark, corner: PAL.goldDark, alpha: 0.9
+        });
+        this.trackResponsiveHudText(bodyText(this, 9, HUD_SUB_MID,
+          `${String(this.level.cup || 'career').toUpperCase()} CUP`, {
+          originY: 0.5, fontSize: secondaryHudFont, color: '#b9c6c5', letterSpacing: 0.18
         }).setDepth(2000), 'secondary');
-      }
+        if (needed > 1) {
+          this.objectiveProgressTxt = this.trackResponsiveHudText(bodyText(this, 4 + subWidth - 5, HUD_SUB_MID,
+            `0 / ${needed} TARGETS`, {
+            originX: 1, originY: 0.5, fontFamily: FONT, fontSize: secondaryHudFont,
+            color: '#f3c449', letterSpacing: 0.12
+          }).setDepth(2000), 'secondary');
+        }
 
-      const styleX = 4 + subWidth + 4;
-      const styleLabel = `${this.loadoutGameplay.ability} · ${this.loadoutGameplay.ballFeel}`.toUpperCase();
-      const stylePlate = this.add.graphics().setDepth(1988);
-      const styleText = this.trackResponsiveHudText(bodyText(this, styleX, 15.5, styleLabel, {
-        originX: 0.5, fontSize: secondaryHudFont, color: '#9ef0dc', letterSpacing: 0.14
-      }).setDepth(2000), 'secondary');
-      this.careerStyleHud = { x: styleX, label: styleLabel, plate: stylePlate, text: styleText };
-      this.buildConditionChips();
-      this.layoutCareerSecondaryHud();
+        const styleX = 4 + subWidth + 4;
+        const styleLabel = `${this.loadoutGameplay.ability} · ${this.loadoutGameplay.ballFeel}`.toUpperCase();
+        const stylePlate = this.add.graphics().setDepth(1988);
+        const styleText = this.trackResponsiveHudText(bodyText(this, styleX, HUD_SUB_MID, styleLabel, {
+          originX: 0.5, originY: 0.5, fontSize: secondaryHudFont, color: '#9ef0dc', letterSpacing: 0.1
+        }).setDepth(2000), 'secondary');
+        this.careerStyleHud = { x: styleX, label: styleLabel, plate: stylePlate, text: styleText };
+        this.buildConditionChips();
+        this.layoutCareerSecondaryHud();
+      }
       this.buildTutorial();
-      this.buildObjectiveStrip();
+      if (!(this.compactHud && this.tutorialActive())) this.buildObjectiveStrip();
     } else if (this.mode === 'daily') {
-      this.trackResponsiveHudText(bodyText(this, 38, 5.5, `DAILY KICK  ·  ${this.dailyDate}`, {
-        fontSize: tinyHudFont, color: '#f3c449', letterSpacing: 0.18
+      const dailyRail = this.compactHud ? 'DAILY' : `DAILY · ${this.dailyDate}`;
+      this.trackResponsiveHudText(bodyText(this, 31, HUD_TOP_MID, dailyRail, {
+        originY: 0.5, fontSize: tinyHudFont, color: '#f3c449', letterSpacing: 0.12
       }).setDepth(2000), 'tiny');
-      this.trackResponsiveHudText(bodyText(this, 132, 5.5, 'FIVE SHOTS  ·  ONE SHARED CHALLENGE', {
-        fontFamily: FONT, fontSize: tinyHudFont, color: '#f3e7c3', letterSpacing: 0.08
+      this.trackResponsiveHudText(bodyText(this, this.compactHud ? 220 : GAME_W / 2, HUD_TOP_MID,
+        this.compactHud ? 'DAILY KICK' : 'ONE SHARED CHALLENGE', {
+        originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: primaryHudFont,
+        color: '#f3e7c3', letterSpacing: 0.08
       }).setDepth(2000), 'tiny');
-      this.scoreTxt = this.trackResponsiveHudText(bodyText(this, 342, 5.5, `SCORE ${this.score}`, {
-        originX: 0.5, fontFamily: FONT, fontSize: primaryHudFont, color: '#f3e7c3'
+      this.scoreTxt = this.trackResponsiveHudText(bodyText(this, 369, HUD_TOP_MID, `SCORE ${this.score}`, {
+        originX: 1, originY: 0.5, fontFamily: FONT, fontSize: primaryHudFont, color: '#f3e7c3'
       }).setDepth(2000), 'primary');
-      const shots = makeStatChip(this, GAME_W - 28, 5.5, 44, 'icon-star', `1/${this.maxAttempts}`, {
-        height: 8, fill: PAL.night, border: PAL.goldDark, color: '#f3c449', fontSize: primaryHudFont, iconScale: 0.42
+      const shots = makeStatChip(this, GAME_W - 29, HUD_TOP_MID, 48, 'icon-star', `1/${this.maxAttempts}`, {
+        height: 14, fill: PAL.night, border: PAL.goldDark, color: '#f3c449', fontSize: primaryHudFont, iconScale: 0.52
       }).setDepth(2000);
       this.dailyShotsTxt = this.trackResponsiveHudText(shots.valueText, 'primary');
 
@@ -2440,15 +2455,15 @@ export class GameScene extends Phaser.Scene {
       }).setDepth(2000);
       this.objectiveUi = [objectivePlate, dailyLabel, dailyCopy];
     } else {
-      this.scoreTxt = this.trackResponsiveHudText(bodyText(this, GAME_W / 2 - 32, 5.5, `SCORE ${this.score}`, {
-        originX: 0.5, fontFamily: FONT, fontSize: primaryHudFont, color: '#f3e7c3'
+      this.scoreTxt = this.trackResponsiveHudText(bodyText(this, GAME_W / 2 - 40, HUD_TOP_MID, `SCORE ${this.score}`, {
+        originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: primaryHudFont, color: '#f3e7c3'
       }).setDepth(2000), 'primary');
-      this.comboTxt = this.trackResponsiveHudText(bodyText(this, GAME_W / 2 + 32, 5.5,
+      this.comboTxt = this.trackResponsiveHudText(bodyText(this, GAME_W / 2 + 40, HUD_TOP_MID,
         this.combo > 1 ? `x${this.combo} COMBO` : `${this.goals} GOALS`, {
-          originX: 0.5, fontSize: tinyHudFont, color: '#74bde8', letterSpacing: 0.18
+          originX: 0.5, originY: 0.5, fontSize: tinyHudFont, color: '#74bde8', letterSpacing: 0.18
         }).setDepth(2000), 'tiny');
-      const timer = makeStatChip(this, GAME_W - 27, 5.5, 42, 'icon-clock', Math.ceil(this.timeLeft), {
-        height: 8, fill: PAL.night, border: PAL.goldDark, color: '#f3c449', fontSize: primaryHudFont, iconScale: 0.42
+      const timer = makeStatChip(this, GAME_W - 29, HUD_TOP_MID, 48, 'icon-clock', Math.ceil(this.timeLeft), {
+        height: 14, fill: PAL.night, border: PAL.goldDark, color: '#f3c449', fontSize: primaryHudFont, iconScale: 0.52
       }).setDepth(2000);
       this.timerTxt = this.trackResponsiveHudText(timer.valueText, 'primary');
     }
@@ -2456,7 +2471,7 @@ export class GameScene extends Phaser.Scene {
     this.bannerPlate = this.add.graphics().setDepth(2095).setAlpha(0);
     this.bannerExtrusion = crispText(this.add.text(GAME_W / 2, 61, '', {
       fontFamily: RESULT_FONT,
-      fontStyle: 'normal',
+      fontStyle: PIXEL_TEXT_WEIGHT,
       fontSize: '32px',
       color: '#934000',
       stroke: '#020508',
@@ -2465,7 +2480,7 @@ export class GameScene extends Phaser.Scene {
     }).setOrigin(0.5).setDepth(2099).setAlpha(0));
     this.banner = crispText(this.add.text(GAME_W / 2, 55, '', {
       fontFamily: RESULT_FONT,
-      fontStyle: 'normal',
+      fontStyle: PIXEL_TEXT_WEIGHT,
       fontSize: '32px',
       color: '#ffd12f',
       stroke: '#020508',
@@ -2477,7 +2492,8 @@ export class GameScene extends Phaser.Scene {
     // reason. Both clear together when the next attempt starts.
     this.shotReadoutPlate = this.add.graphics().setDepth(2095).setAlpha(0);
     this.shotReadout = bodyText(this, GAME_W / 2, READOUT_Y + 6.5, '', {
-      originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '6px',
+      originX: 0.5, originY: 0.5, fontFamily: FONT,
+      fontSize: this.compactHud ? '8px' : '6px',
       color: '#d7dfda', letterSpacing: 0.2
     }).setDepth(2100).setAlpha(0);
     this.inputHint = crispText(this.add.text(GAME_W / 2, GAME_H - 34, '', {
@@ -2491,16 +2507,16 @@ export class GameScene extends Phaser.Scene {
         .setAlpha(1);
     }
     // Touch players need the same route to match controls that keyboard users
-    // get from TAB. The 32px logical hit box resolves to at least 44px at the
-    // smallest supported 844x390 landscape viewport, while the slimmer visible
-    // plate leaves the playfield and objective strip clear.
-    this.menuButton = makeButton(this, 43, GAME_H - 18, 78, 24, 'II  MATCH MENU',
+    // get from TAB. The native 1x compact viewport therefore receives a real
+    // 44px logical target while the slimmer visible plate leaves the playfield
+    // and objective strip clear.
+    this.menuButton = makeButton(this, 43, GAME_H - 22, 78, 24, 'II  MATCH MENU',
       () => this.togglePauseMenu(), {
         color: PAL.panelHi, hover: PAL.blue, border: PAL.goldDark,
-        fontSize: '6px', hitWidth: 78, hitHeight: 32, letterSpacing: 0.18
+        fontSize: '7px', hitWidth: 78, hitHeight: 44, letterSpacing: 0.12
       }).setDepth(2102);
-    this.menuHint = this.trackResponsiveHudText(bodyText(this, 87, GAME_H - 18, 'TAB', {
-      originY: 0.5, fontFamily: FONT, fontSize: this.compactHud ? '5px' : '4px',
+    this.menuHint = this.trackResponsiveHudText(bodyText(this, 87, GAME_H - 22, 'TAB', {
+      originY: 0.5, fontFamily: FONT, fontSize: this.compactHud ? '8px' : '6px',
       color: '#cfe8ff', letterSpacing: 0.28
     }).setDepth(2102), 'menu');
 
@@ -2509,17 +2525,18 @@ export class GameScene extends Phaser.Scene {
     const meterY = GAME_H - 48;
     this.meterUi = [
       bodyText(this, meterX - 33, meterY + 1, 'LOFT', {
-        fontSize: '5px', color: '#74bde8', letterSpacing: 0.3, originX: 1, originY: 0.5
+        fontSize: this.compactHud ? '8px' : '6px', color: '#74bde8', letterSpacing: 0.2,
+        originX: 1, originY: 0.5
       }),
       bodyText(this, meterX + 1, meterY - 7, 'POWER', {
-        fontSize: '5px', color: '#f3e7c3', letterSpacing: 0.3
+        fontSize: this.compactHud ? '8px' : '6px', color: '#f3e7c3', letterSpacing: 0.2
       }),
       bodyText(this, meterX + 96, meterY + 8, 'CURL', {
-        fontSize: '5px', color: '#d75a3a', letterSpacing: 0.3, originY: 0.5
+        fontSize: this.compactHud ? '8px' : '6px', color: '#d75a3a', letterSpacing: 0.2,
+        originY: 0.5
       })
     ];
     this.meterUi.forEach((label) => label.setDepth(1501).setVisible(false));
-    addScanlines(this, 1850, 0.022);
   }
 
   /**
@@ -2536,8 +2553,8 @@ export class GameScene extends Phaser.Scene {
       const chip = CONDITION_CHIPS[hazard.type];
       if (!chip) continue;
       const plate = this.add.graphics().setDepth(1988);
-      const text = this.trackResponsiveHudText(bodyText(this, 0, 15.5, chip.label, {
-        originX: 0.5, fontSize: this.compactHud ? '5px' : '4px', color: chip.color, letterSpacing: 0.18
+      const text = this.trackResponsiveHudText(bodyText(this, 0, HUD_SUB_MID, chip.label, {
+        originX: 0.5, originY: 0.5, fontSize: '6px', color: chip.color, letterSpacing: 0.1
       }).setDepth(2000), 'secondary');
       this.conditionHud.push({ ...chip, plate, text });
     }
@@ -2559,14 +2576,16 @@ export class GameScene extends Phaser.Scene {
       { kind: 'goal', text: this.describeFinish() }
     ];
 
-    const gap = 7;
-    const chipW = (step) => (step.kind === 'hoop' ? 11 : Math.max(24, step.text.length * 4.4 + 8));
+    const gap = this.compactHud ? 9 : 7;
+    const chipW = (step) => (step.kind === 'hoop'
+      ? (this.compactHud ? 15 : 11)
+      : Math.max(this.compactHud ? 34 : 24, step.text.length * (this.compactHud ? 5.7 : 4.4) + 8));
     const contentW = steps.reduce((sum, step) => sum + chipW(step), 0) + gap * (steps.length - 1);
-    const labelW = 44;
+    const labelW = this.compactHud ? 61 : 44;
     const plateW = Math.round(labelW + contentW + 16);
-    const plateH = 15;
+    const plateH = this.compactHud ? 19 : 15;
     const plateX = Math.round(GAME_W / 2 - plateW / 2);
-    const plateY = GAME_H - 20;
+    const plateY = GAME_H - (this.compactHud ? 22 : 20);
     const midY = plateY + plateH / 2;
 
     const plate = this.add.graphics().setDepth(1975);
@@ -2574,7 +2593,8 @@ export class GameScene extends Phaser.Scene {
       fill: PAL.panel, border: PAL.borderDark, corner: PAL.goldDark, alpha: 0.92
     });
     const label = bodyText(this, plateX + 7, midY, 'OBJECTIVE', {
-      originY: 0.5, fontFamily: FONT, fontSize: '5px', color: '#f3c449', letterSpacing: 0.4
+      originY: 0.5, fontFamily: FONT, fontSize: this.compactHud ? '8px' : '5px',
+      color: '#f3c449', letterSpacing: this.compactHud ? 0.18 : 0.4
     }).setDepth(2000);
 
     const marks = this.add.graphics().setDepth(1990);
@@ -2583,7 +2603,8 @@ export class GameScene extends Phaser.Scene {
     steps.forEach((step, index) => {
       const w = chipW(step);
       const text = bodyText(this, x + w / 2, midY, step.text, {
-        originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '5px', color: '#8fa2ab', letterSpacing: 0.2
+        originX: 0.5, originY: 0.5, fontFamily: FONT,
+        fontSize: this.compactHud ? '8px' : '5px', color: '#8fa2ab', letterSpacing: 0.2
       }).setDepth(2000);
       this.objectiveSteps.push({ ...step, x, w, text, state: 'pending' });
       x += w;
@@ -2611,7 +2632,7 @@ export class GameScene extends Phaser.Scene {
     const brief = this.tutorialActive() ? null : this.level.objective?.label;
     if (brief) {
       this.objectiveBrief = bodyText(this, GAME_W / 2, plateY - 9, brief, {
-        originX: 0.5, originY: 0.5, fontSize: '7px', color: '#d7dfda',
+        originX: 0.5, originY: 0.5, fontSize: this.compactHud ? '9px' : '7px', color: '#d7dfda',
         stroke: '#071018', strokeThickness: 3, letterSpacing: 0.15
       }).setDepth(2000);
       this.tweens.add({
@@ -2657,7 +2678,13 @@ export class GameScene extends Phaser.Scene {
       }
 
       const stage = HOOP_STAGES[state] || HOOP_STAGES.pending;
-      const box = { x: Math.round(step.x), y: Math.round(step.text.y - 5), w: Math.round(step.w), h: 10 };
+      const boxHeight = this.compactHud ? 14 : 10;
+      const box = {
+        x: Math.round(step.x),
+        y: Math.round(step.text.y - boxHeight / 2),
+        w: Math.round(step.w),
+        h: boxHeight
+      };
       gfx.fillStyle(0x071018, 0.55).fillRect(box.x, box.y, box.w, box.h);
       gfx.lineStyle(1, stage.band, state === 'pending' ? 0.5 : 0.95);
       gfx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
@@ -2691,12 +2718,14 @@ export class GameScene extends Phaser.Scene {
 
     this.tutorialGfx = this.add.graphics().setDepth(1495);
     this.tutorialPhase = 0;
-    this.tutorialCaption = bodyText(this, GAME_W / 2, READOUT_Y - 16, '', {
-      originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '8px', color: '#f3c449',
-      stroke: '#071018', strokeThickness: 3, letterSpacing: 0.3
+    this.tutorialCaption = bodyText(this, GAME_W / 2,
+      READOUT_Y - (this.compactHud ? 10 : 16), '', {
+      originX: 0.5, originY: 0.5, fontFamily: FONT,
+      fontSize: this.compactHud ? '11px' : '10px', color: '#f3c449',
+      stroke: '#071018', strokeThickness: 3, letterSpacing: 0.22
     }).setDepth(2000);
     this.tutorialDetail = bodyText(this, GAME_W / 2, READOUT_Y - 6, '', {
-      originX: 0.5, originY: 0.5, fontSize: '7px', color: '#d7dfda',
+      originX: 0.5, originY: 0.5, fontSize: '8px', color: '#d7dfda',
       stroke: '#071018', strokeThickness: 3
     }).setDepth(2000);
     this.refreshTutorialCopy();
@@ -2706,11 +2735,15 @@ export class GameScene extends Phaser.Scene {
     const step = TUTORIAL_STEPS[this.tutorialStep];
     if (!step || !this.tutorialCaption) return;
     this.tutorialCaption.setText(step.caption).setAlpha(visible ? 1 : 0);
-    this.tutorialDetail.setText(step.detail).setAlpha(visible ? 1 : 0);
+    const showDetail = visible && !this.compactHud && this.tutorialStep === 0;
+    this.tutorialDetail.setText(step.detail);
+    this.tutorialDetail.setVisible?.(showDetail);
+    this.tutorialDetail.setAlpha(showDetail ? 1 : 0);
   }
 
   setTutorialCopyAlpha(alpha, duration = 0) {
-    const copy = [this.tutorialCaption, this.tutorialDetail].filter((item) => item?.active);
+    const copy = [this.tutorialCaption, this.tutorialDetail]
+      .filter((item) => item?.active && item.visible !== false);
     if (!copy.length) return;
     this.tweens.killTweensOf(copy);
     if (duration > 0) {
@@ -2891,6 +2924,32 @@ export class GameScene extends Phaser.Scene {
     this.tweens.killTweensOf([this.shotReadout, this.shotReadoutPlate]);
     this.shotReadout.setAlpha(0);
     this.shotReadoutPlate.setAlpha(0);
+  }
+
+  /**
+   * Give the result one unmistakable focal layer.
+   *
+   * The touchline and persistent controls are useful while aiming, but during
+   * a goal they competed with the net, banner, scorer and pyro. Muting only
+   * those peripheral layers preserves the stadium while producing the clean
+   * visual hierarchy of a focused broadcast goal cut-in.
+   */
+  setResultFocus(outcome = null) {
+    const active = Boolean(outcome);
+    const goal = outcome === 'GOAL';
+    this.menuButton?.setVisible?.(!active);
+    this.menuHint?.setVisible?.(!active);
+    this.targetGfx?.setAlpha?.(active ? 0 : 1);
+
+    const boardAlpha = goal ? 0.34 : 1;
+    for (const object of this.sponsorBoardObjects || []) object?.setAlpha?.(boardAlpha);
+    const flagAlpha = goal ? 0.5 : 1;
+    for (const flag of this.cornerFlags || []) flag?.setAlpha?.(flagAlpha);
+
+    if (this.objectiveUi?.length) {
+      this.tweens?.killTweensOf?.(this.objectiveUi);
+      for (const object of this.objectiveUi) object?.setAlpha?.(active ? 0 : 1);
+    }
   }
 
   announceStatus(message) {
@@ -3189,11 +3248,6 @@ export class GameScene extends Phaser.Scene {
     // Scene remains active so keyboard/pointer UI and overlay tweens still work.
     if (this.state === 'PAUSED' || this.state === 'OVERLAY' || this.state === 'TRANSITIONING') return;
 
-    // Step 3: Subtle slow ambient crowd shimmer (no distracting movement)
-    if (this.crowdImage && !this.settings?.reducedMotion) {
-      const shimmer = 0.96 + Math.sin(time * 0.0018) * 0.04;
-      this.crowdImage.setAlpha(shimmer);
-    }
     // Physics runs at a fixed cadence so the same gesture produces the same
     // shot at 30, 60, 120 Hz and after small browser stalls. The mode clock is
     // real-time based, including result cards; only an explicit pause freezes it.
@@ -3375,10 +3429,7 @@ export class GameScene extends Phaser.Scene {
     this.boardStruck = true;
     ball.z = this.zBoards - (BALL_R + 0.02);
     if (ball.prev) ball.prev.z = ball.z;
-    ball.vz = -Math.abs(ball.vz) * 0.44;
-    ball.vx *= 0.58;
-    ball.vy = ball.vy * 0.35 - 0.6;
-    ball.spin *= -0.3;
+    resolveBoardDeflection(ball, point, { boardHeight: BOARD_HEIGHT });
 
     const screen = project(point.x, point.y, this.zBoards);
     this.impact.explode(9, screen.x, screen.y);
@@ -3479,10 +3530,9 @@ export class GameScene extends Phaser.Scene {
         if (!wallContact) continue;
         this.lastWallKnockdown = Boolean(this.lastShot?.wallKnockdown);
         this.wall.impact(wallContact, pt, ball, { collapse: this.lastWallKnockdown });
-        ball.vz *= -0.25;
-        ball.vx = -ball.vx * 0.32 + Math.sign(pt.x - (this.wall.centerX || 0) || 1) * 0.9;
-        ball.vy = Math.min(ball.vy * 0.4 + 1.5, 5);
-        ball.spin = 0;
+        resolveWallDeflection(ball, wallContact, pt, {
+          wallCenterX: this.wall.centerX || 0
+        });
         const spos = project(pt.x, pt.y, crossing.planeZ);
         this.impact.explode(wallContact.part === 'leg' ? 11 : 8, spos.x, spos.y);
         this.playImpactShake(0.72);
@@ -3516,10 +3566,7 @@ export class GameScene extends Phaser.Scene {
       }
       if (contact?.result === 'parry') {
         keeper.impact(pt, ball);
-        ball.vz = -(6.5 + keeper.skill * 2);
-        ball.vx += Math.sign(pt.x - keeper.x || keeper.diveDir) * (3.2 + keeper.skill * 1.8);
-        ball.vy = Math.max(ball.vy * 0.25, 2.8);
-        ball.spin *= -0.25;
+        resolveKeeperParry(ball, contact, keeper, pt);
         const spos = project(pt.x, pt.y, crossing.planeZ);
         this.impact.explode(12, spos.x, spos.y);
         this.playImpactShake(0.68);
@@ -3650,6 +3697,7 @@ export class GameScene extends Phaser.Scene {
     // A result must never be left waiting behind a hit-stop.
     this.hitStopT = 0;
     this.swipe.enabled = false;
+    this.setResultFocus(outcome);
 
     let shotRating = scoreShot({
       outcome,
@@ -3732,7 +3780,14 @@ export class GameScene extends Phaser.Scene {
         Audio.groan();
     }
 
-    this.showShotReadout(outcome, pt, shotRating);
+    // The scorer card already carries the diagnostic on goals. A second plate
+    // at the bottom made the payoff read as debug UI; misses keep the coaching
+    // line because it tells the player exactly what to change next time.
+    if (outcome === 'GOAL') {
+      this.announceStatus(`Goal. ${this.describeShot(outcome, pt, shotRating)}.`);
+    } else {
+      this.showShotReadout(outcome, pt, shotRating);
+    }
     this.advanceTutorial(outcome);
     this.recordShotOutcome(outcome, shotRating);
 
@@ -3973,6 +4028,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   resultResetDelay(outcome, minimum = 750) {
+    if (outcome === 'GOAL') {
+      // Let the scorer card complete its fade before a restart or terminal
+      // overlay destroys the scene. The small tail avoids same-tick teardown.
+      return Math.max(minimum, GOAL_CELEBRATION_TIMING.fullMs + 80);
+    }
     if (outcome !== 'SAVE' && outcome !== 'CAUGHT') return minimum;
     const keeperHold = Math.max(
       minimum,
@@ -4015,6 +4075,7 @@ export class GameScene extends Phaser.Scene {
       keeper.draw();
     });
     this.hideShotReadout();
+    this.setResultFocus(null);
     this.kicker?.cancelSequence().setPose('idle');
     this.buildWall();
     this.ringVisuals?.forEach((visual) => this.destroyRingVisual(visual));
@@ -4085,8 +4146,7 @@ export class GameScene extends Phaser.Scene {
 
     // Time Attack earns a dedicated broadcast-results card. The outer frame,
     // crest, three fast-scanning stat rows, and oversized rematch actions are
-    // deliberately closer to an arcade cabinet result screen than the generic
-    // career/daily terminal overlay.
+    // deliberately more celebratory than the generic career/daily overlay.
     const chrome = this.add.graphics().setDepth(3000);
     drawTrophyResultsFrame(chrome, { x: 64, y: 31, w: 352, h: 211 });
 

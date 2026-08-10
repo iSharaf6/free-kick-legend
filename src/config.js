@@ -1,8 +1,9 @@
 // Global tuning constants. All world units are "game meters" (slightly
 // exaggerated vs real football so shots read well on a small screen).
-// Gameplay stays in a compact 480x270 coordinate system, while Phaser renders
-// to a true 1920x1080 Full-HD backing canvas. The 4x camera preserves physics and layout
-// maths while giving text and high-density sprites a full-resolution grid.
+// Gameplay stays in a compact 480x270 coordinate system, while the render
+// surface is true 1920x1080. The supplied character and crowd sheets are dense
+// HD pixel illustrations; the 4x backing grid preserves their authored fabric,
+// skin and lighting ramps instead of crushing them into coarse retro blocks.
 
 export const GAME_W = 480;
 export const GAME_H = 270;
@@ -46,6 +47,10 @@ export const PHYS = {
   impactFriction: 0.92,
   groundImpactMin: 1.1,
   rollingDrag: 0.62,   // exponential rolling resistance per second
+  // Residual sidespin keeps shaping a skidding/rolling low shot. The value is
+  // an angular heading rate, so it rotates ground velocity without creating
+  // energy and stays exactly mirrored for left/right curl.
+  groundSwerve: 0.095,
   stopSpeed: 0.16,
   fixedStep: 1 / 120,
   maxSubsteps: 12,

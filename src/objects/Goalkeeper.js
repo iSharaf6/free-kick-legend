@@ -1286,7 +1286,14 @@ export class Goalkeeper {
     }
     if (!hit) return false;
 
-    const speed = ball ? Math.hypot(ball.vx, ball.vy, ball.vz) : 20;
+    const speed = ball
+      ? Math.hypot(Number(ball.vx) || 0, Number(ball.vy) || 0, Number(ball.vz) || 0)
+      : 20;
+    // Curling rockets are harder to cushion cleanly than a straight strike at
+    // the same linear speed. Treat spin as a small control load rather than an
+    // RNG roll, preserving replay-stable outcomes while producing more glove
+    // parries on the spectacular shots players expect to spill.
+    const controlLoad = speed + Math.abs(Number(ball?.spin) || 0) * 1.65;
     const catchSpeed = 23 + this.skill * 6;
     const secure = hit.part === 'hands'
       ? hit.distance < (hit.kind === 'low-scoop' ? 0.82 : 0.60)
@@ -1296,12 +1303,21 @@ export class Goalkeeper {
       this.saveFamily === 'low-dive' ||
       this.saveFamily === 'low-catch' ||
       this.saveFamily === 'mid-catch';
+    const gradientX = (pt.x - hit.x) / Math.max(hit.rx * hit.rx, 1e-8);
+    const gradientY = (pt.y - hit.y) / Math.max(hit.ry * hit.ry, 1e-8);
+    const gradientLength = Math.hypot(gradientX, gradientY);
     return {
-      result: divingFamilyCanCatch && secure && speed <= catchSpeed ? 'catch' : 'parry',
+      result: divingFamilyCanCatch && secure && controlLoad <= catchSpeed ? 'catch' : 'parry',
       part: hit.part,
       distance: hit.distance,
+      quality: clamp(1 - hit.distance, 0, 1),
       x: hit.x,
-      y: hit.y
+      y: hit.y,
+      // Surface gradient gives the scene's response solver a real outward
+      // direction. A fingertip at the edge now glances away from the glove;
+      // a square body block still travels mostly back toward the kicker.
+      normalX: gradientLength > 1e-8 ? gradientX / gradientLength : 0,
+      normalY: gradientLength > 1e-8 ? gradientY / gradientLength : 0
     };
   }
 

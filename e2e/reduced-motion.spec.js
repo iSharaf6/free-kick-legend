@@ -13,10 +13,9 @@ test('OS reduced motion reaches menu, Level Select, progress, locker, and match 
       reducedMotion: scene.reducedMotion,
       crowdReduced: scene.crowdStand.reducedMotion,
       crowdTimer: scene.crowdStand.timer,
+      crowdPoses: [...scene.crowdStand.currentPoses],
       kickerReduced: scene.kicker.reducedMotion,
       kickerAmbient: scene.kicker.ambient ?? null,
-      heroBallTween: scene.heroBallTween,
-      heroBallRotation: scene.heroBall.rotation,
       fadeRunning: scene.cameras.main.fadeEffect.isRunning
     };
   });
@@ -24,14 +23,15 @@ test('OS reduced motion reaches menu, Level Select, progress, locker, and match 
     reducedMotion: true,
     crowdReduced: true,
     crowdTimer: null,
+    crowdPoses: menuBefore.crowdPoses.map(() => 0),
     kickerReduced: true,
     kickerAmbient: null,
-    heroBallTween: null,
     fadeRunning: false
   });
   await page.waitForTimeout(250);
-  expect(await page.evaluate(() => window.__game.scene.getScene('Menu').heroBall.rotation))
-    .toBeCloseTo(menuBefore.heroBallRotation, 6);
+  expect(await page.evaluate(() => [
+    ...window.__game.scene.getScene('Menu').crowdStand.currentPoses
+  ])).toEqual(menuBefore.crowdPoses);
 
   await page.evaluate(() => window.__game.scene.getScene('Menu').scene.start('LevelSelect'));
   await page.waitForFunction(() => window.__game?.scene?.isActive('LevelSelect'));
@@ -232,9 +232,9 @@ test('live reduced motion replaces an active paused goal celebration with a stat
     returnState: session.returnState,
     celebrationReduced: true,
     oldObjectsDestroyed: true,
-    fountainFrames: [3, 3],
+    fountainFrames: [3, 3, 3, 3, 3, 3],
     fountainsStatic: true,
-    cardX: 72,
+    cardX: 82,
     objectTweens: 0,
     kickerReduced: true,
     kickerPose: 'celebrate',
@@ -358,7 +358,7 @@ test('live reduced-motion toggle rebuilds ambient weather without changing match
     crowdRunning: true,
     guardTweens: 6,
     guards: 6,
-    tracksideTimers: 3,
+    tracksideTimers: 2,
     hazardTweens: 2,
     targetTweens: 1
   });

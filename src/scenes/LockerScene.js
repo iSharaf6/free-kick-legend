@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { GAME_W, GAME_H } from '../config.js';
 import {
   makeButton, makeIconButton, makeStatChip, titleText, bodyText,
-  drawPanel, addScanlines, sceneIntro, formatCompact, configureHdCamera, FONT
+  drawPanel, sceneIntro, formatCompact, configureHdCamera, FONT
 } from '../ui.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
@@ -16,10 +16,10 @@ import { PAL } from '../pixelart.js';
 import { Kicker } from '../objects/Kicker.js';
 
 const CATEGORY_META = {
-  character: { label: 'PLAYERS', icon: 'kicker-hd-kit-home-idle', color: 0x237064 },
-  kit: { label: 'KITS', icon: 'icon-kit', color: PAL.blue },
-  ball: { label: 'BALLS', icon: 'ball-classic', color: PAL.orange },
-  trail: { label: 'TRAILS', icon: 'icon-trail', color: 0x67549a }
+  character: { label: 'PLAYERS', icon: 'kicker-hd-kit-home-idle', color: 0x087b4c },
+  kit: { label: 'KITS', icon: 'icon-kit', color: 0x1760bd },
+  ball: { label: 'BALLS', icon: 'ball-classic', color: 0xc87312 },
+  trail: { label: 'TRAILS', icon: 'icon-trail', color: 0x6238ae }
 };
 
 const RARITY_COLORS = {
@@ -63,9 +63,9 @@ export class LockerScene extends Phaser.Scene {
     MenuMusic.enterMenu();
     this.add.image(0, 0, 'stadium-menu').setOrigin(0).setDepth(0);
     const wash = this.add.graphics().setDepth(1);
-    wash.fillStyle(PAL.ink, 0.72);
+    wash.fillStyle(0x020816, 0.56);
     wash.fillRect(0, 0, GAME_W, GAME_H);
-    wash.fillStyle(PAL.sky, 0.28);
+    wash.fillStyle(0x36bfff, 0.12);
     wash.fillTriangle(12, 31, 197, 31, 128, 260);
 
     this.selectedId = this.resolveSelection(this.requestedSelection);
@@ -74,7 +74,6 @@ export class LockerScene extends Phaser.Scene {
     this.renderTabs();
     this.renderContent();
 
-    addScanlines(this, 2600, 0.03);
     if (!this.reducedMotion) sceneIntro(this);
   }
 
@@ -88,32 +87,32 @@ export class LockerScene extends Phaser.Scene {
   drawHeader() {
     const g = this.add.graphics().setDepth(100);
     drawPanel(g, 7, 5, GAME_W - 14, 27, {
-      fill: PAL.panel,
-      border: PAL.borderDark,
-      corner: PAL.goldDark
+      fill: 0x0b244a,
+      border: 0x3478b8,
+      corner: 0x27b8f4
     });
     makeIconButton(this, 23, 18, 20, 'icon-back', () => this.scene.start('Menu'), {
-      color: PAL.panelHi,
-      hover: PAL.blue,
-      border: PAL.borderDark,
+      color: 0x14345e,
+      hover: 0x1760bd,
+      border: 0x3478b8,
       iconScale: 0.78,
       hitWidth: 31,
       hitHeight: 29
     }).setDepth(104);
-    titleText(this, 59, 18, 'MATCHDAY LOCKER', '14px', '#f3e7c3')
+    titleText(this, 59, 18, 'LOCKER', '15px', '#f7fbff')
       .setOrigin(0, 0.5).setDepth(104);
-    bodyText(this, 286, 18, 'VISUAL IDENTITY', {
+    bodyText(this, 276, 18, 'MATCHDAY CUSTOMISATION', {
       originX: 0.5,
       fontSize: '5px',
-      color: '#8fa2ab',
+      color: '#9ccce8',
       letterSpacing: 0.26
     }).setDepth(104);
     this.add.image(359, 18, 'calynx-logo-pixel')
-      .setDisplaySize(38, 11.5).setTint(PAL.gold).setDepth(104);
+      .setDisplaySize(38, 11.5).setTint(0x64d7ff).setDepth(104);
     this.coinChip = makeStatChip(this, 425, 18, 80, 'icon-coin', formatCompact(SaveManager.getCoins()), {
       height: 21,
-      fill: PAL.night,
-      border: PAL.borderDark,
+      fill: 0x07152f,
+      border: 0x3478b8,
       fontSize: '8px',
       iconScale: 0.8
     }).setDepth(104);
@@ -122,23 +121,24 @@ export class LockerScene extends Phaser.Scene {
   drawPanels() {
     const g = this.add.graphics().setDepth(70);
     drawPanel(g, 9, 72, 190, 188, {
-      fill: 0x102337,
-      border: PAL.goldDark,
-      corner: PAL.gold
+      fill: 0x0a1c3c,
+      border: 0x3478b8,
+      corner: 0x27b8f4
     });
     drawPanel(g, 207, 72, 264, 188, {
-      fill: PAL.panel,
-      border: PAL.borderDark,
-      corner: PAL.goldDark
+      fill: 0x0b244a,
+      border: 0x3478b8,
+      corner: 0xffc928
     });
 
-    // Dressing-room floor and a simple backlit kit rail.
+    // A simple illuminated presentation stage keeps the detailed selected
+    // sprite dominant and the surrounding chrome deliberately restrained.
     g.fillStyle(PAL.ink, 0.58);
     g.fillRect(14, 217, 180, 38);
-    g.lineStyle(2, PAL.borderDark, 1);
+    g.lineStyle(2, 0x3478b8, 1);
     g.lineBetween(24, 89, 184, 89);
     for (let x = 30; x <= 180; x += 30) g.lineBetween(x, 89, x, 96);
-    g.fillStyle(PAL.flood, 0.08);
+    g.fillStyle(0x64d7ff, 0.08);
     g.fillTriangle(35, 91, 173, 91, 141, 245);
   }
 
@@ -164,10 +164,10 @@ export class LockerScene extends Phaser.Scene {
         this.renderTabs();
         this.renderContent();
       }, {
-        color: selected ? meta.color : PAL.panelHi,
+        color: selected ? meta.color : 0x14345e,
         hover: meta.color,
         selected,
-        border: selected ? PAL.gold : PAL.borderDark,
+        border: selected ? 0xffc928 : 0x3478b8,
         icon: meta.icon,
         iconScale,
         iconX: 14,
@@ -226,14 +226,30 @@ export class LockerScene extends Phaser.Scene {
     const equippedKit = this.category === 'kit'
       ? selected.id
       : SaveManager.getEquippedCosmetic('kit');
-    this.kicker = new Kicker(this, 91, 222, {
+    const ballFocus = selected.category === 'ball';
+    const trailFocus = selected.category === 'trail';
+    this.kicker = new Kicker(this, ballFocus ? 68 : 91, 222, {
       kitId: equippedKit,
       characterId: equippedCharacter,
-      scale: 4.05,
+      scale: ballFocus ? 3.25 : trailFocus ? 4.45 : 4.8,
       depth: 133,
       ambient: !this.reducedMotion,
       reducedMotion: this.reducedMotion
     });
+
+    // The catalog thumbnails are intentionally compact, but the selected ball
+    // needs a true hero read beside the richly shaded player art.
+    if (ballFocus && this.textures.exists(selected.id)) {
+      const ballShadow = this.add.graphics().setDepth(137);
+      ballShadow.fillStyle(PAL.ink, 0.68);
+      ballShadow.fillRect(113, 216, 50, 5);
+      ballShadow.fillStyle(0x3478b8, 0.45);
+      ballShadow.fillRect(119, 213, 38, 3);
+      const ball = this.add.image(138, 187, selected.id)
+        .setDisplaySize(55, 55)
+        .setDepth(139);
+      this.contentLayer.add([ballShadow, ball]);
+    }
 
     const trailId = this.category === 'trail'
       ? selected.id
@@ -241,20 +257,32 @@ export class LockerScene extends Phaser.Scene {
     const trail = getCosmetic(trailId);
     if (trail) {
       const line = this.add.graphics().setDepth(140);
-      for (let i = 0; i < 9; i++) {
-        const p = i / 8;
+      const points = trailFocus ? 16 : 9;
+      for (let i = 0; i < points; i++) {
+        const p = i / (points - 1);
         const color = i % 2 ? trail.palette.start : trail.palette.end;
-        line.fillStyle(color, (0.08 + p * 0.72) * (trail.utility?.opacity ?? 0.2));
-        const size = Math.max(1, Math.ceil(p * 3));
-        line.fillRect(120 + i * 4, 217 - i * 1.1, size, size);
+        const alpha = trailFocus
+          ? 0.24 + p * 0.68
+          : (0.08 + p * 0.72) * (trail.utility?.opacity ?? 0.2);
+        line.fillStyle(color, alpha);
+        const size = Math.max(1, Math.ceil(p * (trailFocus ? 6 : 3)));
+        line.fillRect(
+          (trailFocus ? 34 + i * 8 : 120 + i * 4),
+          (trailFocus ? 226 - i * 4.4 : 217 - i * 1.1),
+          size,
+          size
+        );
       }
       this.contentLayer.add(line);
     }
 
-    const selectedLabel = bodyText(this, 104, 244, 'MATCHDAY PLAYER PREVIEW', {
+    const previewLabel = selected.category === 'character'
+      ? 'SELECTED PLAYER PREVIEW'
+      : `SELECTED ${selected.category.toUpperCase()} PREVIEW`;
+    const selectedLabel = bodyText(this, 104, 244, previewLabel, {
       originX: 0.5,
       fontSize: '6px',
-      color: '#9fb3ba',
+      color: '#9ccce8',
       letterSpacing: 0.45
     });
     this.contentLayer.add(selectedLabel);
@@ -262,7 +290,7 @@ export class LockerScene extends Phaser.Scene {
 
   renderCatalog(items, selected) {
     const rarity = RARITY_COLORS[selected.rarity] ?? PAL.muted;
-    const name = titleText(this, 221, 87, selected.name.toUpperCase(), '12px', '#f3e7c3')
+    const name = titleText(this, 221, 87, selected.name.toUpperCase(), '12px', '#f7fbff')
       .setOrigin(0, 0.5);
     const rarityText = bodyText(this, 458, 88, selected.rarity.toUpperCase(), {
       originX: 1,
@@ -274,7 +302,7 @@ export class LockerScene extends Phaser.Scene {
     const description = bodyText(this, 221, selected.category === 'character' ? 102 : 108, selected.description, {
       originY: 0,
       fontSize: selected.category === 'character' ? '6px' : '7px',
-      color: '#aab9ba',
+      color: '#b8d3e7',
       wordWrap: { width: 235, useAdvancedWrap: true },
       lineSpacing: selected.category === 'character' ? 1 : 2
     });
@@ -288,7 +316,7 @@ export class LockerScene extends Phaser.Scene {
         `${selected.archetype.toUpperCase()}  ·  ${selected.dominantFoot.toUpperCase()} FOOT  ·  ${selected.personality.toUpperCase()}`,
         {
           fontSize: '6px',
-          color: '#f3c449',
+          color: '#ffc928',
           letterSpacing: 0.22
         }
       );
@@ -302,7 +330,7 @@ export class LockerScene extends Phaser.Scene {
         : 'VISUAL IDENTITY  ·  NO GAMEPLAY MODIFIER';
     const styleText = bodyText(this, 221, selected.category === 'character' ? 140 : 130, style.toUpperCase(), {
       fontSize: '6px',
-      color: '#82d9c8',
+      color: '#65e5c2',
       wordWrap: { width: 232, useAdvancedWrap: true },
       lineSpacing: 1,
       letterSpacing: 0.12
@@ -320,7 +348,7 @@ export class LockerScene extends Phaser.Scene {
     const gate = this.unlockGate(selected);
     const requirement = bodyText(this, 221, 202, this.requirementText(selected, owned, gate), {
       fontSize: '7px',
-      color: gate.available || owned ? '#f3c449' : '#d8866e',
+      color: gate.available || owned ? '#ffc928' : '#ff8e91',
       letterSpacing: 0.25
     });
     this.contentLayer.add(requirement);
@@ -345,7 +373,7 @@ export class LockerScene extends Phaser.Scene {
     const action = makeButton(this, 339, 232, 224, 31, label, () => this.handleAction(selected), {
       color: meta.color,
       hover: this.category === 'kit' ? PAL.blueHi : this.category === 'ball' ? 0xe47c3e : 0x836bb5,
-      border: PAL.goldDark,
+      border: 0x3478b8,
       icon,
       iconScale: 0.75,
       iconX: 18,

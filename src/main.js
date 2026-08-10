@@ -5,7 +5,6 @@ import Phaser from 'phaser';
 // synthesised from 400 closes the same aperture, which is why no UI text may
 // ask for `bold` in this family - see PIXEL_TEXT_WEIGHT in the pixel scenes.
 import '@fontsource/pixelify-sans/latin-400.css';
-import '@fontsource/silkscreen/latin-400.css';
 import { RENDER_W, RENDER_H } from './config.js';
 import { BootScene } from './scenes/BootScene.js';
 import { MenuScene } from './scenes/MenuScene.js';
@@ -16,6 +15,7 @@ import { GameScene } from './scenes/GameScene.js';
 import { PuppetLabScene } from './scenes/PuppetLabScene.js';
 import { GameplayAmbience, MenuMusic } from './systems/MenuMusic.js';
 import { Audio } from './systems/AudioSynth.js';
+import { ThreePixelPipeline } from './rendering/ThreePixelPipeline.js';
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,
@@ -24,9 +24,9 @@ const game = new Phaser.Game({
   pixelArt: true,
   render: {
     antialias: false,
-    // Subpixel motion: sprites keep their chunky nearest-neighbour texels but
-    // their POSITIONS resolve on the 4x HD backing grid instead of snapping
-    // to whole logical pixels, so flight, dives and swipes move 4x finer.
+    // Textures keep their authored pixel edges, while positions resolve on the
+    // four-times denser backing grid. This matches the detailed sprite sheets
+    // and keeps ball flight, dives and follow-throughs fluid.
     roundPixels: false,
     powerPreference: 'high-performance'
   },
@@ -70,10 +70,19 @@ const game = new Phaser.Game({
   ]
 });
 
+// Three.js owns the final frame the player sees. Phaser remains underneath as
+// the mature scene/state/input authoring layer; its full-HD canvas is presented
+// without palette reduction so the supplied sprites reach the screen intact.
+// Keeping the source canvas registered underneath preserves input and a direct
+// fallback if WebGL context restoration is ever needed.
+const threePixelPipeline = new ThreePixelPipeline(game);
+globalThis.requestAnimationFrame?.(() => threePixelPipeline.start());
+
 // Debug handle used by automated playtests; stripped from production builds.
 if (import.meta.env.DEV) {
   window.__game = game;
   window.__menuMusic = MenuMusic;
   window.__gameplayAmbience = GameplayAmbience;
   window.__audio = Audio;
+  window.__threePixelPipeline = threePixelPipeline;
 }

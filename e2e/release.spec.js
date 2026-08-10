@@ -113,7 +113,10 @@ test('match atlases stay off the boot critical path', async ({ page }) => {
     return {
       keeper: names.filter((n) => n.includes('/keeper-') && n.includes('-sheet-hd.png')),
       defender: names.filter((n) => n.includes('/defender-')),
-      kicker: names.filter((n) => n.includes('/kicker-hd-'))
+      // The loading card deliberately reuses the equipped ready frame. Some
+      // browsers expose the coalesced DOM/Phaser fetch twice in Resource
+      // Timing, so guard the number of distinct files on the critical path.
+      kicker: [...new Set(names.filter((n) => n.includes('/kicker-hd-')))]
     };
   });
 
@@ -144,6 +147,7 @@ test('the Continue action acknowledges input and rejects re-entry', async ({ pag
     for (const child of scene.children.list) visit(child);
     const image = (key) => objects.find((object) => object?.texture?.key === key);
     const wordmark = objects.find((object) => object?.text === 'KICK DISTRICT');
+    const proceduralPitch = objects.find((object) => object?.name === 'menu-procedural-pitch');
     const snapshot = (object) => object && ({
       scaleX: object.scaleX,
       scaleY: object.scaleY,
@@ -154,7 +158,12 @@ test('the Continue action acknowledges input and rejects re-entry', async ({ pag
       labels: objects.map((object) => object?.text).filter(Boolean),
       crest: snapshot(image('kick-district-crest')),
       studio: snapshot(image('calynx-logo-pixel')),
-      pitch: snapshot(image('pitch-grass-pixel-v3')),
+      pitch: proceduralPitch && {
+        bounds: proceduralPitch.pitchSurfaceLayout?.bounds,
+        laneCount: proceduralPitch.pitchSurfaceLayout?.lanes?.length,
+        fleckCount: proceduralPitch.pitchSurfaceLayout?.flecks?.length,
+        oldRasterLoaded: scene.textures.exists('pitch-grass-hd-v2')
+      },
       sponsorCount: objects.filter((object) => object?.texture?.key === 'calynx-logo-pixel' && object.depth === 7).length,
       grounded: {
         rootY: scene.kicker.sprite.y,
@@ -184,7 +193,7 @@ test('the Continue action acknowledges input and rejects re-entry', async ({ pag
       fonts: {
         display: document.fonts.check('12px "Pixelify Sans"'),
         pixel: document.fonts.check('12px "Pixelify Sans"'),
-        data: document.fonts.check('12px "Silkscreen"')
+        data: document.fonts.check('12px "Pixelify Sans"')
       }
     };
   });
@@ -200,11 +209,17 @@ test('the Continue action acknowledges input and rejects re-entry', async ({ pag
   expect(frontMenu.headerFit).toEqual([true, true, true]);
   expect(frontMenu.wordmarkFit).toBe(true);
   expect(frontMenu.fonts).toEqual({ display: true, pixel: true, data: true });
-  for (const asset of [frontMenu.studio, frontMenu.pitch]) {
+  for (const asset of [frontMenu.studio]) {
     expect(asset).toBeTruthy();
     expect(asset.scaleX).toBeCloseTo(asset.scaleY, 8);
     expect(asset.displayAspect).toBeCloseTo(asset.sourceAspect, 8);
   }
+  expect(frontMenu.pitch).toMatchObject({
+    bounds: { x: 0, y: 104, width: 480, height: 166, right: 480, bottom: 270 },
+    laneCount: 12,
+    oldRasterLoaded: false
+  });
+  expect(frontMenu.pitch.fleckCount).toBeGreaterThan(24);
 
   await game.clickLogical(350, 65);
   const menuLabels = await page.evaluate(() => window.__game.scene.getScene('Menu').children.list
@@ -268,6 +283,9 @@ test('goal celebration layers animated generated pixel art, useful scorer data, 
     const fountains = [...scene.goalCelebration.objects]
       .filter((object) => object.texture?.key === 'goal-spark-fountain-v3')
       .sort((left, right) => left.x - right.x);
+    const pyroSmoke = [...scene.goalCelebration.objects]
+      .filter((object) => object.name === 'goal-pyro-smoke')
+      .sort((left, right) => left.x - right.x);
     const text = scene.children.list
       .flatMap((child) => child?.list ?? [child])
       .map((child) => child?.text)
@@ -293,6 +311,7 @@ test('goal celebration layers animated generated pixel art, useful scorer data, 
         height: banner.displayHeight
       })),
       fountains: fountains.map((fountain) => ({
+        name: fountain.name,
         x: fountain.x,
         y: fountain.y,
         depth: fountain.depth,
@@ -300,6 +319,19 @@ test('goal celebration layers animated generated pixel art, useful scorer data, 
         frameTotal: fountain.anims.currentAnim?.frames?.length,
         playing: fountain.anims.isPlaying
       })),
+      pyroSmoke: pyroSmoke.map((smoke) => ({
+        x: smoke.x,
+        y: smoke.y,
+        depth: smoke.depth,
+        scaleX: smoke.scaleX,
+        scaleY: smoke.scaleY,
+        frameTotal: smoke.anims.currentAnim?.frames?.length,
+        playing: smoke.anims.isPlaying
+      })),
+      // Arcade scenarios shift the world camera laterally. The midpoint of
+      // the two symmetric ground anchors is therefore the projected goal
+      // centre; logical screen x=240 is only correct when that shift is zero.
+      pyroCenterX: pyroSmoke.length === 2 ? (pyroSmoke[0].x + pyroSmoke[1].x) / 2 : null,
       goalFrameDepth: 1000 - scene.zGoal * 10 + 2,
       expectedPyroBaseY: 76 + (2.3 * 316) / (scene.zGoal + 0.25),
       scorer: text.filter((line) => line.startsWith('+') || line.includes('MICA VALE') || line.includes('COMBO')),
@@ -317,26 +349,33 @@ test('goal celebration layers animated generated pixel art, useful scorer data, 
     'goal-flare-v3',
     'goal-crowd-banner-v4'
   ]));
-  expect(goal.fountains).toHaveLength(2);
-  expect(goal.animatedEffects).toHaveLength(6);
+  expect(goal.fountains).toHaveLength(6);
+  expect(goal.pyroSmoke).toHaveLength(2);
+  expect(goal.animatedEffects).toHaveLength(12);
   expect(goal.animatedEffects.every((effect) => effect.frameTotal === 8 && effect.playing)).toBe(true);
   expect(goal.crowdBanners).toEqual([
     { x: 132, y: 73, depth: 1.34, width: 104, height: 52 },
     { x: 348, y: 73, depth: 1.34, width: 104, height: 52 }
   ]);
-  expect(goal.fountains[0].x).toBeGreaterThan(100);
-  expect(goal.fountains[1].x).toBeLessThan(380);
+  expect(goal.fountains.filter((fountain) => fountain.x < goal.pyroCenterX)).toHaveLength(3);
+  expect(goal.fountains.filter((fountain) => fountain.x > goal.pyroCenterX)).toHaveLength(3);
+  expect(goal.fountains.every((fountain) => /goal-pyro-(wing-left|core|wing-right)/.test(fountain.name))).toBe(true);
   expect(goal.fountains.every((fountain) => fountain.depth < goal.goalFrameDepth)).toBe(true);
   expect(goal.fountains.every((fountain) => Math.abs(fountain.y - goal.expectedPyroBaseY) < 0.01)).toBe(true);
   expect(goal.fountains.every((fountain) => fountain.frameTotal === 8 && fountain.playing)).toBe(true);
   expect(goal.fountains[0].scale).not.toBeCloseTo(goal.fountains[1].scale, 5);
+  expect(goal.pyroSmoke.every((smoke) => (
+    smoke.depth < Math.min(...goal.fountains.map((fountain) => fountain.depth)) &&
+    smoke.scaleX > smoke.scaleY * 1.75 &&
+    smoke.frameTotal === 8 && smoke.playing
+  ))).toBe(true);
   expect(goal.scorer).toEqual([
     expect.stringMatching(/^\+\d+ · /),
     '#17  MICA VALE',
     '1 GOAL · X1 COMBO · 60 SEC'
   ]);
   expect(goal.shaking).toBe(false);
-  expect(goal.resetDelay).toBe(1150);
+  expect(goal.resetDelay).toBe(1760);
 
   await page.waitForFunction(() => (
     window.__fkl?.goalCelebration?.objects?.size === 0 &&
@@ -357,7 +396,7 @@ test('goal celebration layers animated generated pixel art, useful scorer data, 
   expect(fits).toEqual(labels.map((label) => ({
     label,
     fits: true,
-    font: '"Pixelify Sans", "Courier New", monospace'
+    font: '"Pixelify Sans", monospace'
   })));
 
   await page.evaluate(() => window.__audio.post('post'));

@@ -263,6 +263,20 @@ export class Ball {
     this.y = BALL_R;
     this.vy = 0;
 
+    // A low free kick does not lose all of its shape the instant it kisses the
+    // turf. Rotate the horizontal velocity by the remaining sidespin before
+    // applying resistance. Rotation preserves speed, so this adds readable
+    // skid/roll swerve without injecting energy into the solver.
+    const turn = this.spin * PHYS.groundSwerve * this.physics.magnus * dt;
+    if (Math.abs(turn) > EPSILON) {
+      const cos = Math.cos(turn);
+      const sin = Math.sin(turn);
+      const vx = this.vx;
+      const vz = this.vz;
+      this.vx = vx * cos + vz * sin;
+      this.vz = vz * cos - vx * sin;
+    }
+
     const rollingDrag = PHYS.rollingDrag * this.physics.rollingDrag;
     const dampingRate = rollingDrag + (this.inNet ? PHYS.netDrag : 0);
     const damping = Math.exp(-dampingRate * dt);

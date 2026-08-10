@@ -141,15 +141,34 @@ export function reboundFromGoalFrame(ball, point, contact, zGoal, restitution = 
     }
   }
 
-  const approach = ball.vx * nx + ball.vy * ny + ball.vz * nz;
+  const incoming = { vx: ball.vx, vy: ball.vy, vz: ball.vz, spin: ball.spin };
+  const approach = incoming.vx * nx + incoming.vy * ny + incoming.vz * nz;
   if (approach < 0) {
-    const impulse = (1 + restitution) * approach;
-    ball.vx = (ball.vx - impulse * nx) * 0.985;
-    ball.vy = (ball.vy - impulse * ny) * 0.985;
-    ball.vz = (ball.vz - impulse * nz) * 0.985;
+    // Steel frame contact keeps a strong normal rebound but scrubs the tangent
+    // separately. This preserves the famous in-off post while stopping near-
+    // frictionless ricochets from carrying implausibly perfect side velocity.
+    const tangentRetention = frame === 'post' ? 0.74 : 0.68;
+    // The public restitution remains the material control, while the arcade
+    // response intentionally spends some energy on the audible/visual impact.
+    // Representative post and bar hits retain roughly 50-65% of linear speed.
+    const bounce = clamp(restitution * 0.72, 0, 0.76);
+    const tx = incoming.vx - approach * nx;
+    const ty = incoming.vy - approach * ny;
+    const tz = incoming.vz - approach * nz;
+    ball.vx = tx * tangentRetention - approach * nx * bounce;
+    ball.vy = ty * tangentRetention - approach * ny * bounce;
+    ball.vz = tz * tangentRetention - approach * nz * bounce;
   }
 
-  ball.spin *= -0.42;
+  // Contact friction both reverses the existing rotation and transfers a small
+  // amount of tangential pace into fresh spin. Mirrored post hits therefore
+  // leave mirrored rotation instead of every impact using the same canned
+  // multiplier.
+  const tangentSlip = frame === 'post'
+    ? incoming.vx * -nz + incoming.vz * nx
+    : incoming.vx;
+  const spinTransfer = clamp(tangentSlip * (frame === 'post' ? 0.014 : 0.009), -0.34, 0.34);
+  ball.spin = clamp(-incoming.spin * 0.38 + spinTransfer, -1.5, 1.5);
   const separation = geometry.clearance + 0.004;
   if (frame === 'post') {
     const postX = Math.sign(point.x || 1) * geometry.halfWidth;
@@ -165,5 +184,14 @@ export function reboundFromGoalFrame(ball, point, contact, zGoal, restitution = 
     ball.prev.y = ball.y;
     ball.prev.z = ball.z;
   }
-  return { nx, ny, nz, speed: Math.hypot(ball.vx, ball.vy, ball.vz) };
+  const speed = Math.hypot(ball.vx, ball.vy, ball.vz);
+  const incomingSpeed = Math.hypot(incoming.vx, incoming.vy, incoming.vz);
+  return {
+    nx,
+    ny,
+    nz,
+    speed,
+    incomingSpeed,
+    energyRatio: incomingSpeed > 1e-8 ? (speed / incomingSpeed) ** 2 : 0
+  };
 }

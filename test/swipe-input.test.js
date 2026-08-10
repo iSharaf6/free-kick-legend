@@ -52,6 +52,10 @@ function pointer(id, x, y, time) {
   return { id, x, y, event: { timeStamp: time } };
 }
 
+const close = (actual, expected, tolerance = 1e-10) => {
+  assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} should be close to ${expected}`);
+};
+
 test('a two-point flick is a valid bounded shot', () => {
   const scene = sceneStub();
   const shots = [];
@@ -94,6 +98,91 @@ test('power calibration leaves room for weak, medium and maximum-speed shots', (
   assert.equal(powerful.power, 1, 'a genuinely fast, long release can still reach maximum power');
   assert.ok(minimumFastFlick.power < 0.7,
     `minimum-length flick must not jump to maximum power, got ${minimumFastFlick.power}`);
+});
+
+test('sub-frame timestamp bursts cannot turn a minimum-length flick into a rocket', () => {
+  const minimumFlick = (duration) => computeShotFromPath([
+    { x: 240, y: 220, t: 0 },
+    { x: 240, y: 194, t: duration }
+  ]).shot;
+  const calibratedFloor = minimumFlick(40);
+
+  for (const duration of [1, 5, 10, 20]) {
+    const burst = minimumFlick(duration);
+    assert.ok(Math.abs(burst.power - calibratedFloor.power) < 1e-12,
+      `${duration}ms event burst produced power ${burst.power} instead of ${calibratedFloor.power}`);
+    assert.ok(burst.power < 0.7, 'browser event timing cannot bypass the minimum gesture duration');
+  }
+});
+
+test('release follow-through adds controlled power without changing shot bounds', () => {
+  const easingIn = computeShotFromPath([
+    { x: 240, y: 230, t: 0 },
+    { x: 240, y: 175, t: 70 },
+    { x: 240, y: 120, t: 200 }
+  ]).shot;
+  const followingThrough = computeShotFromPath([
+    { x: 240, y: 230, t: 0 },
+    { x: 240, y: 175, t: 130 },
+    { x: 240, y: 120, t: 200 }
+  ]).shot;
+
+  assert.ok(followingThrough.power > easingIn.power + 0.08);
+  assert.ok(followingThrough.power <= 1);
+  assert.ok(followingThrough.gesture.releaseSpeed > easingIn.gesture.releaseSpeed);
+});
+
+test('linear swipes produce the same shot at sparse and high-frequency sample rates', () => {
+  const path = (count) => Array.from({ length: count }, (_, index) => {
+    const progress = index / (count - 1);
+    return {
+      x: 240 + 18 * progress,
+      y: 230 - 130 * progress,
+      t: 180 * progress
+    };
+  });
+  const sparse = computeShotFromPath(path(2)).shot;
+  const dense = computeShotFromPath(path(32)).shot;
+
+  for (const key of ['vx', 'vy', 'vz', 'spin', 'power']) close(dense[key], sparse[key]);
+  close(dense.gesture.averageSpeed, sparse.gesture.averageSpeed);
+  close(dense.gesture.releaseSpeed, sparse.gesture.releaseSpeed);
+});
+
+test('mirrored curved gestures produce exactly mirrored lateral pace and spin', () => {
+  const path = (side) => Array.from({ length: 9 }, (_, index) => {
+    const progress = index / 8;
+    return {
+      x: 240 + side * (16 * progress + 30 * Math.sin(Math.PI * progress)),
+      y: 235 - 140 * progress,
+      t: 190 * progress
+    };
+  });
+  const right = computeShotFromPath(path(1)).shot;
+  const left = computeShotFromPath(path(-1)).shot;
+
+  close(right.vx, -left.vx);
+  close(right.vy, left.vy);
+  close(right.vz, left.vz);
+  close(right.spin, -left.spin);
+  close(right.power, left.power);
+});
+
+test('shot timing remains monotonic when a browser delivers an older coalesced timestamp', () => {
+  const scene = sceneStub();
+  const shots = [];
+  const swipe = new SwipeInput(scene, (shot) => shots.push(shot));
+  swipe.enabled = true;
+
+  scene.input.emit('pointerdown', pointer(13, 240, 235, 100));
+  scene.input.emit('pointermove', pointer(13, 245, 180, 145));
+  scene.input.emit('pointermove', pointer(13, 250, 140, 130));
+  assert.deepEqual(swipe.samples.map((sample) => sample.t), [100, 145, 145]);
+  scene.input.emit('pointerup', pointer(13, 255, 95, 190));
+
+  assert.equal(shots.length, 1);
+  assert.ok(Number.isFinite(shots[0].power));
+  assert.ok(shots[0].power >= 0 && shots[0].power <= 1);
 });
 
 test('HD renderer gestures use camera world coordinates instead of doubled canvas pixels', () => {

@@ -38,6 +38,7 @@ export class SettingsPanelController {
     this.onChange = null;
     this.onClose = null;
     this.bound = false;
+    this.handleViewportChange = () => this.syncStageBounds();
   }
 
   initialize(documentRef = globalThis.document) {
@@ -48,6 +49,10 @@ export class SettingsPanelController {
     this.panel = panel;
     this.card = panel.querySelector('[role="dialog"]');
     this.bound = true;
+
+    const view = documentRef?.defaultView ?? globalThis;
+    view?.addEventListener?.('resize', this.handleViewportChange, { passive: true });
+    view?.addEventListener?.('orientationchange', this.handleViewportChange, { passive: true });
 
     panel.querySelectorAll('[data-setting]').forEach((control) => {
       if (control.type === 'range') {
@@ -75,6 +80,7 @@ export class SettingsPanelController {
     this.onChange = onChange;
     this.onClose = onClose;
     this.previousFocus = globalThis.document?.activeElement ?? null;
+    this.syncStageBounds();
     this.sync(SaveManager.getSettings());
     this.panel.hidden = false;
     this.panel.classList.add('is-open');
@@ -135,8 +141,25 @@ export class SettingsPanelController {
   }
 
   updateVolumeOutput(control) {
+    const percent = toPercent(control.value);
     const output = this.panel?.querySelector(`[data-output="${control.dataset.setting}"]`);
-    if (output) output.textContent = toPercent(control.value);
+    if (output) output.textContent = percent;
+    // Keep the native range as the actual accessible control. This custom
+    // property only paints the visible sports-meter fill.
+    control.style?.setProperty?.('--meter-value', percent);
+    control.setAttribute?.('aria-valuetext', percent);
+  }
+
+  syncStageBounds() {
+    if (!this.panel?.style?.setProperty) return false;
+    const documentRef = this.panel.ownerDocument ?? globalThis.document;
+    const canvas = documentRef?.querySelector?.('canvas.three-pixel-output')
+      ?? documentRef?.querySelector?.('#app canvas');
+    const bounds = canvas?.getBoundingClientRect?.();
+    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return false;
+    this.panel.style.setProperty('--settings-stage-width', `${Math.round(bounds.width)}px`);
+    this.panel.style.setProperty('--settings-stage-height', `${Math.round(bounds.height)}px`);
+    return true;
   }
 
   handleKeydown(event) {

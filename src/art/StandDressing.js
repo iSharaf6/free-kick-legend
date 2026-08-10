@@ -11,12 +11,17 @@ import { CROWD_STAND, crowdRandom } from '../data/crowdStand.js';
 // from the plain tiled panorama, which is a large part of why the old stand
 // read flat even before the repeat gave it away.
 //
-// Nothing here is authored art. Every prop is drawn from the palette the rest
-// of the game already uses, so atmosphere costs no bytes on the boot path and
-// cannot desynchronise from a checked-in PNG.
+// The crowd panorama is the visual authority. These props only frame that art:
+// they use its navy, gold and warm-white family without grading the supporters
+// into a different palette or laying a fake hardware treatment over them.
 
 const FLAG_TEXTURE = 'crowd-flag-v1';
-const GLOW_TEXTURE = 'crowd-glow-v1';
+const GLOW_TEXTURE = 'crowd-glow-v2';
+
+// Flag movement is a short sprite animation, matching the authored crowd's
+// deliberate poses while avoiding continuously warped pixel edges.
+const FLAG_FLUTTER_FRAMES = Object.freeze([0, 1, 2, 1]);
+const FLAG_FLUTTER_MS = 96;
 
 // One coherent fictional club identity: midnight navy, matchday gold and warm
 // scarf cream. Keeping every flag in this family makes the end read as a home
@@ -30,9 +35,27 @@ const BANNER_COLOURS = Object.freeze([
   Object.freeze({ cloth: 0xf3e7c3, stripe: 0x17365d, trim: 0xf3c449 })
 ]);
 
-// The floodlight bank positions baked into the stadium backdrop. Pools of light
-// on the crowd have to line up with the lamps that cast them.
-const FLOODLIGHTS = Object.freeze([42, 128, 332, 418]);
+// Wide light zones imply modern roof-mounted LED arrays without drawing a
+// competing floodlight prop over the supporters.
+const STADIUM_LIGHT_COLUMNS = Object.freeze([80, 240, 400]);
+
+/** Smooth, neutral exposure falloff that leaves the authored colours intact. */
+function drawModernStandShade(gfx, viewWidth, back, front) {
+  const top = back.top - 8;
+  const height = front.bottom - top;
+
+  // A shallow roof falloff establishes depth without crushing the back row.
+  gfx.fillGradientStyle(PAL.ink, PAL.ink, PAL.ink, PAL.ink, 0.24, 0.24, 0.015, 0.015);
+  gfx.fillRect(0, top, viewWidth, height);
+
+  // Soft edge falloff keeps the light centred on the pitch. There are no
+  // palette steps or dither patterns, only neutral luminance over the sprites.
+  const edgeWidth = Math.min(92, viewWidth * 0.2);
+  gfx.fillGradientStyle(PAL.ink, PAL.ink, PAL.ink, PAL.ink, 0.13, 0, 0.07, 0);
+  gfx.fillRect(0, top, edgeWidth, height);
+  gfx.fillGradientStyle(PAL.ink, PAL.ink, PAL.ink, PAL.ink, 0, 0.13, 0, 0.07);
+  gfx.fillRect(viewWidth - edgeWidth, top, edgeWidth, height);
+}
 
 /**
  * Two tiny procedural textures, generated once.
@@ -69,20 +92,22 @@ export function makeStandPropTextures(scene) {
   }
 
   if (!scene.textures.exists(GLOW_TEXTURE)) {
-    const g = scene.add.graphics();
-    // A stepped radial falloff: concentric circles rather than a gradient
-    // shader, so the blob stays in the same chunky idiom as everything else.
-    //
-    // The per-ring alpha matters. Ten rings compositing at 0.11 accumulate to
-    // roughly full opacity at the centre and fade to 0.11 at the rim; anything
-    // much lower and the texture peaks so dim that a flare drawn from it is
-    // invisible against the crowd no matter what alpha the caller asks for.
-    for (let step = 10; step >= 1; step--) {
-      g.fillStyle(0xffffff, 0.11);
-      g.fillCircle(16, 16, step * 1.6);
-    }
-    g.generateTexture(GLOW_TEXTURE, 32, 32);
-    g.destroy();
+    // Lighting is intentionally smooth even though the people remain crisp.
+    // That separation mirrors late-1990s arcade art: detailed sprite sheets sit
+    // inside richer, higher-resolution atmosphere instead of being globally
+    // forced through the same low-colour treatment.
+    const texture = scene.textures.createCanvas(GLOW_TEXTURE, 96, 96);
+    const context = texture.getContext();
+    const gradient = context.createRadialGradient(48, 48, 1, 48, 48, 47);
+    gradient.addColorStop(0, 'rgba(255,255,255,1)');
+    gradient.addColorStop(0.16, 'rgba(255,255,255,0.9)');
+    gradient.addColorStop(0.42, 'rgba(255,255,255,0.42)');
+    gradient.addColorStop(0.72, 'rgba(255,255,255,0.12)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 96, 96);
+    texture.refresh();
+    texture.setFilter(Phaser.Textures.FilterMode.LINEAR);
   }
 }
 
@@ -94,6 +119,13 @@ export function makeStandPropTextures(scene) {
  * and a shadow falling onto the supporters below.
  */
 function drawFascia(gfx, y, height, { stanchionStep = 26, lit = 0.16 } = {}) {
+  // The thin safety rail is separated from the concrete by one row of air.
+  // That negative line makes the structure occlude supporters instead of
+  // looking like another coloured stripe painted across them.
+  gfx.fillStyle(PAL.borderDark, 0.62).fillRect(0, y - 2, 480, 1);
+  for (let x = 6; x < 480; x += stanchionStep) {
+    gfx.fillStyle(PAL.borderDark, 0.7).fillRect(x, y - 2, 1, 3);
+  }
   gfx.fillStyle(PAL.ink, 0.96).fillRect(0, y, 480, height);
   gfx.fillStyle(PAL.borderDark, 0.5).fillRect(0, y, 480, 1);
   gfx.fillStyle(PAL.border, lit).fillRect(0, y + 1, 480, 1);
@@ -102,8 +134,8 @@ function drawFascia(gfx, y, height, { stanchionStep = 26, lit = 0.16 } = {}) {
   }
   // The shadow the barrier throws down onto the tier in front of it. Without
   // it the band floats; with it the two tiers are lit by the same lamps.
-  gfx.fillStyle(PAL.ink, 0.5).fillRect(0, y + height, 480, 1);
-  gfx.fillStyle(PAL.ink, 0.24).fillRect(0, y + height + 1, 480, 1);
+  gfx.fillStyle(PAL.ink, 0.7).fillRect(0, y + height, 480, 1);
+  gfx.fillStyle(PAL.ink, 0.38).fillRect(0, y + height + 1, 480, 1);
 }
 
 /** Proper club tifos: scarf hoops, shirt stripes, checks and a tiny crest. */
@@ -232,24 +264,10 @@ export function addStandDressing(scene, {
   drawFascia(lowerBarrier, front.top - 4, 4, { stanchionStep: 34, lit: 0.4 });
   drawBanners(lowerBarrier, front.top - 4, random, 2);
 
-  // Exact Calynx marks turn the tier cloth into authored club banners. Text is
-  // never generated here: the checked-in pixel logo stays legible and on-model.
-  if (scene.textures.exists('calynx-logo-pixel')) {
-    const brandBack = track(scene.add.graphics().setDepth(at(1.286)));
-    const placements = [
-      [118, mid.top - 2, 0xf3c449], [360, mid.top - 2, 0x8fd9ff],
-      [176, front.top - 2, 0xf3e7c3], [306, front.top - 2, 0xf3c449]
-    ];
-    placements.forEach(([x, y, tint]) => {
-      brandBack.fillStyle(PAL.ink, 0.88).fillRect(x - 20, y - 4, 40, 8);
-      brandBack.fillStyle(PAL.borderDark, 0.76).fillRect(x - 19, y - 3, 38, 1);
-      track(scene.add.image(x, y, 'calynx-logo-pixel')
-        .setDisplaySize(31, 9.4)
-        .setTint(tint)
-        .setAlpha(0.88)
-        .setDepth(at(1.287)));
-    });
-  }
+  // Sponsor inventory belongs to the pitch-side LED ribbon. Repeating the same
+  // Calynx wordmark across two upper-tier fascias made the stand look like UI
+  // wallpaper and competed with the authored supporter banners, so the terrace
+  // now carries club cloth only.
 
   // Vomitories cut up through the back tier and stop at its barrier. Carrying
   // them further down only ever showed fragments between the front rows' heads,
@@ -258,29 +276,23 @@ export function addStandDressing(scene, {
   for (const x of [64, 186, 302, 424]) drawVomitory(vomitories, x, back.top - 1, mid.top - 3);
 
   // ------------------------------------------------------------------- light
-  // The shading pass goes over every tier and under every prop, so the crowd
-  // falls away into the corners while the flags and flares stay lit.
+  // The shading pass goes over every tier and under every prop. It is a smooth,
+  // neutral exposure layer, never a palette replacement for the crowd art.
   const shade = track(scene.add.graphics().setDepth(at(1.302)));
-  // Roof shadow over the back rows.
-  shade.fillGradientStyle(PAL.ink, PAL.ink, PAL.ink, PAL.ink, 0.9, 0.9, 0, 0);
-  shade.fillRect(0, back.top - 8, viewWidth, 14);
-  // General falloff: the higher up the stand, the further from the lamps.
-  shade.fillGradientStyle(PAL.ink, PAL.ink, PAL.ink, PAL.ink, 0.4, 0.4, 0, 0);
-  shade.fillRect(0, back.top, viewWidth, front.top - back.top);
-  // The corners of a stand are always darker than the halfway line.
-  shade.fillGradientStyle(PAL.ink, PAL.ink, PAL.ink, PAL.ink, 0.5, 0, 0.5, 0);
-  shade.fillRect(0, back.top - 8, 96, front.bottom - back.top + 8);
-  shade.fillGradientStyle(PAL.ink, PAL.ink, PAL.ink, PAL.ink, 0, 0.5, 0, 0.5);
-  shade.fillRect(viewWidth - 96, back.top - 8, 96, front.bottom - back.top + 8);
+  drawModernStandShade(shade, viewWidth, back, front);
 
-  const pools = FLOODLIGHTS.map((x) => track(scene.add.image(x + 6, mid.top + 4, GLOW_TEXTURE)
-    .setDisplaySize(160, 104)
-    .setTint(PAL.flood)
-    // Floodlight spill has to stay under the threshold where it starts washing
-    // faces out; the crowd must never compete with the ball and the goal.
-    .setAlpha(0.05)
-    .setDepth(at(1.303))
-    .setBlendMode(Phaser.BlendModes.ADD)));
+  const pools = STADIUM_LIGHT_COLUMNS.map((x, index) => {
+    const pool = track(scene.add.image(x, back.top + 4, GLOW_TEXTURE)
+      .setDisplaySize(index === 1 ? 236 : 210, 132)
+      .setTint(0xf4fbff)
+      // Broad, low-opacity LED spill lifts highlights while the authored navy,
+      // gold, red and skin tones remain fully recognisable.
+      .setAlpha(index === 1 ? 0.075 : 0.058)
+      .setDepth(at(1.303))
+      .setBlendMode(Phaser.BlendModes.ADD));
+    pool.fklBaseAlpha = pool.alpha;
+    return pool;
+  });
 
   // -------------------------------------------------------------- atmosphere
   // Props draw above every tier. A raised flag is above the heads around it, so
@@ -299,11 +311,12 @@ export function addStandDressing(scene, {
       .setOrigin(0.5, 1)
       .setScale(inBack ? 0.7 : 0.95)
       .setTint(FLAG_COLOURS[Math.floor(random() * FLAG_COLOURS.length)])
-      // Kept under full opacity so a flag sits in the same night light as the
-      // supporters holding it rather than punching out of the stand.
-      .setAlpha(inBack ? 0.6 : 0.78)
+      // Back flags share the rear tier exposure; front flags retain the cloth's
+      // saturated club colours instead of fading into the architecture.
+      .setAlpha(inBack ? 0.76 : 0.94)
       .setFlipX(random() < 0.5)
       .setDepth(at(1.305))));
+    flags.at(-1).fklBaselineY = flags.at(-1).y;
   }
 
   // Flares: the one thing in the stand allowed to be brighter than the pitch,
@@ -345,43 +358,69 @@ export function addStandDressing(scene, {
     ).setAlpha(0).setDepth(at(1.304)).setBlendMode(Phaser.BlendModes.ADD)));
   }
 
+  // Goal presentation gets a short contrast reserve over the stand. This sits
+  // behind the dedicated celebration layer (1.34) but above the crowd detail,
+  // so the scorer silhouettes and banner own the frame instead of every prop
+  // peaking simultaneously.
+  const celebrationVeil = track(scene.add.rectangle(
+    viewWidth / 2,
+    (back.top - 8 + front.bottom) / 2,
+    viewWidth,
+    front.bottom - back.top + 8,
+    PAL.ink,
+    1
+  ).setAlpha(0).setDepth(at(1.329)));
+
   const tweens = [];
+  const timers = [];
   let motionReduced = Boolean(reducedMotion);
+  let flagPhase = 0;
+  let celebrationUntil = 0;
 
   const resetAmbientPose = () => {
-    flags.forEach((flag) => flag?.setAngle?.(0));
+    flags.forEach((flag, index) => {
+      flag?.setAngle?.(0).setY?.(flag.fklBaselineY);
+      flag?.setFrame?.(FLAG_FLUTTER_FRAMES[index % FLAG_FLUTTER_FRAMES.length]);
+    });
     flares.forEach((flare) => {
       flare.bloom?.setAlpha?.(0.32);
       flare.smoke?.setY?.(flare.baseY - 6).setAlpha?.(0.16);
     });
+    pools.forEach((pool) => pool?.setAlpha?.(pool.fklBaseAlpha));
     flashes.forEach((flash) => flash?.setAlpha?.(0));
+    celebrationVeil?.setAlpha?.(0);
   };
 
   const stopAmbient = () => {
     tweens.forEach((tween) => tween?.remove?.());
     tweens.length = 0;
+    timers.forEach((timer) => timer?.remove?.(false));
+    timers.length = 0;
     scene.tweens?.killTweensOf?.([
       ...flags,
       ...pools,
       ...flares.flatMap((flare) => [flare.bloom, flare.smoke, flare.core]),
-      ...flashes
+      ...flashes,
+      celebrationVeil
     ]);
     resetAmbientPose();
   };
 
   const startAmbient = () => {
-    if (motionReduced || tweens.length) return;
-    flags.forEach((flag, index) => {
-      tweens.push(scene.tweens.add({
-        targets: flag,
-        angle: { from: -7, to: 7 },
-        duration: 900 + index * 130,
-        delay: index * 90,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.easeInOut'
-      }));
-    });
+    if (motionReduced || tweens.length || timers.length) return;
+    timers.push(scene.time.addEvent({
+      delay: FLAG_FLUTTER_MS,
+      loop: true,
+      callback: () => {
+        flagPhase += (scene.time?.now ?? 0) < celebrationUntil ? 2 : 1;
+        flags.forEach((flag, index) => {
+          if (!flag?.active) return;
+          const step = flagPhase + index;
+          flag.setFrame(FLAG_FLUTTER_FRAMES[step % FLAG_FLUTTER_FRAMES.length]);
+          flag.setY(flag.fklBaselineY - ((scene.time?.now ?? 0) < celebrationUntil && step % 2 ? 1 : 0));
+        });
+      }
+    }));
     flares.forEach((flare, index) => {
       tweens.push(scene.tweens.add({
         targets: flare.bloom,
@@ -427,10 +466,21 @@ export function addStandDressing(scene, {
     flashes,
     pools,
     tweens,
+    timers,
 
     /** Surge the props for the length of a goal celebration. */
     celebrate() {
       if (motionReduced) return;
+      celebrationUntil = (scene.time?.now ?? 0) + 1040;
+      scene.tweens.killTweensOf?.(celebrationVeil);
+      celebrationVeil.setAlpha(0.18);
+      scene.tweens.add({
+        targets: celebrationVeil,
+        alpha: 0,
+        delay: 620,
+        duration: 360,
+        ease: 'Quad.easeIn'
+      });
       flares.forEach((flare) => {
         scene.tweens.add({
           targets: flare.bloom,
@@ -443,24 +493,14 @@ export function addStandDressing(scene, {
           ease: 'Quad.easeOut'
         });
       });
-      pools.forEach((pool) => {
+      pools.forEach((pool, index) => {
         scene.tweens.add({
           targets: pool,
-          alpha: 0.3,
-          duration: 130,
-          hold: 540,
+          alpha: pool.fklBaseAlpha + (index === 1 ? 0.07 : 0.05),
+          duration: 140,
+          hold: 360,
           yoyo: true,
           ease: 'Quad.easeOut'
-        });
-      });
-      flags.forEach((flag, index) => {
-        scene.tweens.add({
-          targets: flag,
-          angle: { from: -16, to: 16 },
-          duration: 150 + index * 12,
-          yoyo: true,
-          repeat: 3,
-          ease: 'Sine.easeInOut'
         });
       });
     },
@@ -480,6 +520,7 @@ export function addStandDressing(scene, {
       flags.length = 0;
       flares.length = 0;
       flashes.length = 0;
+      timers.length = 0;
     }
   };
 }

@@ -135,6 +135,60 @@ test('legal mirrored curl produces signed airborne rotation while grounded roll 
   }
 });
 
+test('residual sidespin bends a grounded shot without changing its speed', () => {
+  const right = new Ball();
+  const left = new Ball();
+  right.kick(0, 0, 10, 1);
+  left.kick(0, 0, 10, -1);
+  const startSpeed = Math.hypot(right.vx, right.vz);
+
+  right.step(PHYS.fixedStep);
+  left.step(PHYS.fixedStep);
+
+  assert.ok(right.x > 0 && left.x < 0, 'ground curl should follow the signed sidespin');
+  close(right.x, -left.x, 1e-12);
+  close(right.z, left.z, 1e-12);
+  close(Math.hypot(right.vx, right.vz), startSpeed * Math.exp(-PHYS.rollingDrag * PHYS.fixedStep), 1e-12);
+});
+
+test('ground-swerve authority decays and cannot hook a nearly stopped ball', () => {
+  const ball = new Ball();
+  ball.kick(0, 0, 8, 1.2);
+  let previousHeading = Math.atan2(ball.vx, ball.vz);
+  let previousTurn = Infinity;
+  for (let index = 0; index < 90 && ball.flying; index++) {
+    ball.step(PHYS.fixedStep);
+    const heading = Math.atan2(ball.vx, ball.vz);
+    const turn = Math.abs(heading - previousHeading);
+    assert.ok(turn <= previousTurn + 1e-12, 'decaying spin must not make the ground hook sharpen');
+    previousHeading = heading;
+    previousTurn = turn;
+  }
+
+  const trickle = new Ball();
+  trickle.kick(0, 0, 0.3, 1.5);
+  for (let index = 0; index < 240 && trickle.flying; index++) trickle.step(PHYS.fixedStep);
+  assert.ok(Math.abs(trickle.x) < 0.02, `a dying ball curved ${trickle.x}m`);
+  assert.equal(trickle.flying, false);
+});
+
+test('grounded curl is frame-rate invariant at 30, 60 and 120 fps', () => {
+  const simulate = (fps) => {
+    const ball = new Ball();
+    ball.kick(0, 0, 9, 1);
+    for (let frame = 0; frame < fps; frame++) ball.update(1 / fps);
+    return ball;
+  };
+  const baseline = simulate(120);
+  for (const fps of [30, 60]) {
+    const candidate = simulate(fps);
+    close(candidate.x, baseline.x, 1e-10);
+    close(candidate.z, baseline.z, 1e-10);
+    close(candidate.vx, baseline.vx, 1e-10);
+    close(candidate.vz, baseline.vz, 1e-10);
+  }
+});
+
 test('equipped ball profiles change curve, hang time and rebound deterministically', () => {
   const basketball = new Ball({ physics: {
     gravity: 0.94, drag: 1.08, magnus: 0.84, bounce: 1.45, rollingDrag: 0.82

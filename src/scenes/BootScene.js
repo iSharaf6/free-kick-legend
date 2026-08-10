@@ -9,7 +9,8 @@ import { AUDIO_SAMPLES, Audio } from '../systems/AudioSynth.js';
 import { MenuMusic } from '../systems/MenuMusic.js';
 import { applyDocumentSettings } from '../systems/SettingsPanel.js';
 import { makePuppetTextures } from '../art/PuppetTextures.js';
-import { CROWD_STAND } from '../data/crowdStand.js';
+import { CROWD_ANIMATION } from '../data/crowdAnimation.js';
+import { paintPitchSurface } from '../art/PitchSurface.js';
 
 const KICKER_POSES = {
   idle: MAPS.kickerIdle,
@@ -25,12 +26,6 @@ const BALL_ASSET_IDS = Object.freeze([
 const HOME_KIT = { B: 0x17365d, C: PAL.gold, D: 0x0e2038, Y: 0xf8f8f4 };
 // Hard ceiling on the boot screen, whatever the platform SDK decides to do.
 const BOOT_HANDOFF_FAILSAFE_MS = 6000;
-
-function hash01(x, y, seed = 97) {
-  let n = (Math.imul(x + seed, 374761393) + Math.imul(y + seed * 3, 668265263)) >>> 0;
-  n = Math.imul(n ^ (n >>> 13), 1274126177) >>> 0;
-  return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
-}
 
 function darken(color, factor = 0.58) {
   const r = Math.round(((color >> 16) & 0xff) * factor);
@@ -51,8 +46,10 @@ export class BootScene extends Phaser.Scene {
   // first paint and roughly a tenth of it.
   preload() {
     const base = import.meta.env.BASE_URL;
-    this.load.image('pitch-grass-pixel-v3', `${base}assets/hd/pitch-grass-pixel-v3.png`);
-    this.load.image(CROWD_STAND.textureKey, `${base}${CROWD_STAND.assetPath}`);
+    this.load.spritesheet(CROWD_ANIMATION.textureKey, `${base}${CROWD_ANIMATION.assetPath}`, {
+      frameWidth: CROWD_ANIMATION.frameWidth,
+      frameHeight: CROWD_ANIMATION.frameHeight
+    });
     this.load.image('calynx-logo-pixel', `${base}assets/hd/calynx-logo-pixel.png`);
 
     // The menu hero wears exactly one striker. Reading the save this early is
@@ -89,7 +86,6 @@ export class BootScene extends Phaser.Scene {
     this.makeSpark();
     this.makeCrowd();
     this.makeStadiumBackdrop();
-    this.makeGrassNoise();
     this.makeVignette();
     this.makeMenuLighting();
 
@@ -333,40 +329,15 @@ export class BootScene extends Phaser.Scene {
     const g = this.add.graphics();
     this.drawStadium(g, STADIUM_Y);
 
-    // Matchday pitch, with perspective mowing bands and converging touchlines.
-    g.fillStyle(PAL.grass, 1);
-    g.fillRect(0, STADIUM_Y, GAME_W, GAME_H - STADIUM_Y);
-    const bands = [
-      [STADIUM_Y, 115, PAL.grassDark], [115, 129, PAL.grass], [129, 147, PAL.grassDark],
-      [147, 169, PAL.grass], [169, 198, PAL.grassDark], [198, 233, PAL.grass],
-      [233, 270, PAL.grassDark]
-    ];
-    bands.forEach(([y, y2, color]) => {
-      g.fillStyle(color, 1);
-      g.fillRect(0, y, GAME_W, y2 - y);
+    paintPitchSurface(g, {
+      x: 0,
+      y: STADIUM_Y,
+      width: GAME_W,
+      height: GAME_H - STADIUM_Y,
+      horizon: { x: GAME_W / 2, y: 76 },
+      seed: 0x424f4f54
     });
-
-    // Deterministic grass flecks are concentrated in the near field.
-    for (let i = 0; i < 950; i++) {
-      const x = Math.floor(hash01(i, 7, 131) * GAME_W);
-      const y = STADIUM_Y + Math.floor(Math.pow(hash01(i, 17, 197), 0.55) * (GAME_H - STADIUM_Y));
-      g.fillStyle(i % 3 ? PAL.grassDither : PAL.grassShadow, 0.58);
-      g.fillRect(x, y, 1, 1);
-    }
     g.generateTexture('stadium-menu', GAME_W, GAME_H);
-    g.destroy();
-  }
-
-  makeGrassNoise() {
-    const h = GAME_H - STADIUM_Y;
-    const g = this.add.graphics();
-    for (let i = 0; i < 2600; i++) {
-      const x = Math.floor(hash01(i, 23, 271) * GAME_W);
-      const y = Math.floor(Math.pow(hash01(i, 47, 313), 0.7) * h);
-      g.fillStyle(i % 5 < 3 ? PAL.grassDither : PAL.grassShadow, 1);
-      g.fillRect(x, y, 1, 1);
-    }
-    g.generateTexture('grass-noise', GAME_W, h);
     g.destroy();
   }
 

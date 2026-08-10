@@ -9,6 +9,9 @@ import {
 import { Ball } from '../src/objects/Ball.js';
 
 const dimensions = { goalWidth: 9, goalHeight: 3.1, postRadius: 0.13, ballRadius: 0.26 };
+const close = (actual, expected, tolerance = 1e-10) => {
+  assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} should be close to ${expected}`);
+};
 
 test('goal frame classification separates clean goals, posts and crossbar', () => {
   assert.equal(classifyGoalPlane({ x: 0, y: 1.4 }, dimensions).inFrame, true);
@@ -30,6 +33,44 @@ test('central crossbar hits rebound backward and downward', () => {
   reboundFromGoalFrame(ball, { x: 0, y: 2.98 }, contact, 20);
   assert.ok(ball.vz < 0);
   assert.ok(ball.vy < 2);
+});
+
+test('representative post and crossbar hits retain an arcade-readable energy band', () => {
+  const cases = [
+    {
+      ball: { x: 4.2, y: 1.2, z: 20, vx: 2, vy: 0.5, vz: 24, spin: 0.4, prev: { x: 4.1, y: 1.2, z: 19.9 } },
+      point: { x: 4.2, y: 1.2 }
+    },
+    {
+      ball: { x: 0, y: 2.98, z: 20, vx: 0, vy: 2, vz: 22, spin: 0, prev: { x: 0, y: 2.9, z: 19.9 } },
+      point: { x: 0, y: 2.98 }
+    }
+  ];
+
+  for (const sample of cases) {
+    const result = reboundFromGoalFrame(
+      sample.ball,
+      sample.point,
+      classifyGoalPlane(sample.point, dimensions),
+      20
+    );
+    const retainedSpeed = result.speed / result.incomingSpeed;
+    assert.ok(retainedSpeed >= 0.35 && retainedSpeed <= 0.65,
+      `frame retained ${(retainedSpeed * 100).toFixed(1)}% of speed`);
+  }
+});
+
+test('mirrored post glances transfer mirrored spin without adding energy', () => {
+  const right = { x: 4.3, y: 1.2, z: 20, vx: 1, vy: 0.5, vz: 24, spin: 0, prev: { x: 4.2, y: 1.2, z: 19.9 } };
+  const left = { x: -4.3, y: 1.2, z: 20, vx: -1, vy: 0.5, vz: 24, spin: 0, prev: { x: -4.2, y: 1.2, z: 19.9 } };
+  const rightResult = reboundFromGoalFrame(right, { x: 4.3, y: 1.2 }, classifyGoalPlane(right, dimensions), 20);
+  const leftResult = reboundFromGoalFrame(left, { x: -4.3, y: 1.2 }, classifyGoalPlane(left, dimensions), 20);
+
+  close(right.vx, -left.vx);
+  close(right.vy, left.vy);
+  close(right.vz, left.vz);
+  close(right.spin, -left.spin);
+  assert.ok(rightResult.energyRatio < 1 && leftResult.energyRatio < 1);
 });
 
 test('swept post contact is detected before the ball centre reaches the goal plane', () => {

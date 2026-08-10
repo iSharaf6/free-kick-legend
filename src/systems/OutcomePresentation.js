@@ -32,6 +32,7 @@ export function outcomeBannerStyle(label, fallbackColor = '#f0e8d0') {
   const positive = text.includes('GOAL') || text === 'TOP BINS!' || text === 'WORLD CLASS!' || text.includes('FLATTENED');
   const frame = text.includes('POST') || text.includes('BAR');
   const neutral = text.includes('TARGET');
+  const stadiumCelebration = text === 'GOAL!' || text === 'TOP BINS!' || text === 'WORLD CLASS!';
   const fill = positive
     ? ['#fff6bd', '#ffd12f', '#ef9200']
     : frame
@@ -41,12 +42,14 @@ export function outcomeBannerStyle(label, fallbackColor = '#f0e8d0') {
         : ['#ffe4d2', '#ff8b61', '#d94534'];
   return Object.freeze({
     text,
-    stadiumCelebration: text === 'GOAL!' || text === 'TOP BINS!' || text === 'WORLD CLASS!',
-    fontSize: Math.max(18, Math.min(44, Math.floor(270 / Math.max(text.length * 0.62, 1)))),
+    stadiumCelebration,
+    // A 24px stadium callout stays clear of the crossbar and first crowd tier.
+    // Long outcome copy still steps down to preserve the existing safe width.
+    fontSize: Math.max(18, Math.min(24, Math.floor(184 / Math.max(text.length * 0.62, 1)))),
     fill,
     extrusion: positive ? '#d86a00' : frame ? '#b24c1e' : neutral ? '#526b7a' : '#a92f28',
     glow: positive ? 0xffa51d : frame ? 0xff6e2c : neutral ? 0x7396ad : 0xff493b,
     fallbackColor,
-    holdMs: positive ? 760 : 620
+    holdMs: stadiumCelebration ? 1180 : positive ? 900 : 620
   });
 }

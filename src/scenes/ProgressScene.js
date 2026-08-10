@@ -1,7 +1,6 @@
 import Phaser from 'phaser';
 import { GAME_W, GAME_H } from '../config.js';
 import {
-  addScanlines,
   bodyText,
   configureHdCamera,
   drawPanel,
@@ -51,7 +50,6 @@ export class ProgressScene extends Phaser.Scene {
     this.drawHeader();
     this.drawTabs();
     this.renderContent();
-    addScanlines(this, 2600, 0.03);
     if (!this.reducedMotion) sceneIntro(this);
   }
 

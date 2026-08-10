@@ -2,10 +2,10 @@ import { Audio } from './systems/AudioSynth.js';
 import { PAL } from './pixelart.js';
 import { GAME_W, GAME_H, RENDER_SCALE, RENDER_W, RENDER_H } from './config.js';
 
-// Kept system-only so the portal build remains self-contained. Heavy weight,
-// tight tracking and integer positioning make it read like late-90s broadcast UI.
-export const FONT = '"Arial Black", "Trebuchet MS", sans-serif';
-export const MONO_FONT = '"Courier New", monospace';
+// One authored face keeps every menu, HUD and information label aligned with
+// the settings chrome. Pixelify is intentionally loaded at its open-C 400 cut.
+export const FONT = '"Pixelify Sans", monospace';
+export const MONO_FONT = '"Pixelify Sans", monospace';
 
 // Pixelify Sans ships only one usable cut here (400, loaded in main.js). Asking
 // a canvas for `bold` in that family synthesises a faux-bold that thickens the
@@ -123,6 +123,31 @@ function createButtonNavigation(scene) {
   let focused = null;
   let blocked = false;
   let cleaned = false;
+  let lastHandledKeyEvent = null;
+  let lastHandledKeySignature = null;
+
+  const keySignature = (event) => {
+    const stamp = Number(event?.timeStamp);
+    const code = event?.code ?? event?.key ?? event?.keyCode;
+    return Number.isFinite(stamp) && code !== undefined
+      ? `${event?.type ?? 'keydown'}:${String(code)}:${stamp}`
+      : null;
+  };
+
+  // Phaser can fan one modified DOM key event through the paused Scene input
+  // queue more than once. Without an identity guard a single Shift+Tab may
+  // traverse three buttons. Event.cancelled cannot serve as the guard because
+  // the KeyboardPlugin resets it between those deliveries.
+  const isRepeatedKeyEvent = (event) => {
+    if (!event) return false;
+    const signature = keySignature(event);
+    return event === lastHandledKeyEvent || Boolean(signature && signature === lastHandledKeySignature);
+  };
+
+  const rememberKeyEvent = (event) => {
+    lastHandledKeyEvent = event ?? null;
+    lastHandledKeySignature = keySignature(event);
+  };
 
   const availableButtons = () => {
     const available = buttons.filter(isButtonFocusable);
@@ -191,12 +216,18 @@ function createButtonNavigation(scene) {
   const handle = (event, action) => {
     if (hasActiveDomDialog()) return;
     if (!canvasHasKeyboardFocus(scene)) return;
+    if (isRepeatedKeyEvent(event)) {
+      event?.preventDefault?.();
+      if (event) event.cancelled = 1;
+      return;
+    }
     if (blocked) {
       event?.preventDefault?.();
       if (event) event.cancelled = 1;
       return;
     }
     if (!action()) return;
+    rememberKeyEvent(event);
     event?.preventDefault?.();
     if (event) event.cancelled = 1;
   };
@@ -278,8 +309,9 @@ export function configureHdCamera(scene) {
   camera.setViewport(0, 0, RENDER_W, RENDER_H);
   camera.setZoom(RENDER_SCALE);
   camera.centerOn(GAME_W / 2, GAME_H / 2);
-  // Subpixel motion: static art sits on integer logical pixels and stays
-  // crisp; moving sprites are allowed quarter-pixel positions on the HD grid.
+  // Static art stays crisp, but motion resolves on quarter-logical-pixel steps
+  // through the HD backing surface. The supplied sprites were authored for
+  // this density and lose both silhouette and shading when snapped to 480p.
   camera.roundPixels = false;
   return camera;
 }
@@ -302,90 +334,70 @@ export function drawPanel(g, x, y, w, h, opts = {}) {
   const shadow = opts.shadow ?? PAL.ink;
   const alpha = opts.alpha ?? 0.98;
 
-  g.fillStyle(shadow, 0.72 * alpha);
-  g.fillRect(x + 3, y + 3, w, h);
-  g.fillStyle(PAL.ink, alpha);
-  g.fillRect(x, y, w, h);
+  g.fillStyle(shadow, 0.54 * alpha);
+  g.fillRect(x + 4, y + 4, w, h);
   g.fillStyle(border, alpha);
+  g.fillRect(x, y, w, h);
+  g.fillStyle(fill, 0.96 * alpha);
   g.fillRect(x + 1, y + 1, w - 2, h - 2);
-  g.fillStyle(fill, alpha);
-  g.fillRect(x + 3, y + 3, w - 6, h - 6);
 
-  // A one-pixel light source from the upper left, plus clipped brass corners.
+  // A clean top light and a saturated team-colour rail mirror the shading on
+  // the native player sprites without introducing faux-aged brass details.
   g.fillStyle(opts.highlight ?? PAL.panelHi, 0.92 * alpha);
-  g.fillRect(x + 3, y + 3, w - 6, 1);
-  g.fillRect(x + 3, y + 3, 1, h - 6);
+  g.fillRect(x + 1, y + 1, w - 2, 1);
   g.fillStyle(PAL.ink, 0.52 * alpha);
-  g.fillRect(x + 3, y + h - 4, w - 6, 1);
-  g.fillRect(x + w - 4, y + 3, 1, h - 6);
+  g.fillRect(x + 1, y + h - 2, w - 2, 1);
 
-  const corner = opts.corner ?? PAL.goldDark;
-  g.fillStyle(corner, 0.88 * alpha);
-  g.fillRect(x + 1, y + 1, 4, 1);
-  g.fillRect(x + 1, y + 1, 1, 4);
-  g.fillRect(x + w - 5, y + 1, 4, 1);
-  g.fillRect(x + w - 2, y + 1, 1, 4);
-  g.fillRect(x + 1, y + h - 2, 4, 1);
-  g.fillRect(x + 1, y + h - 5, 1, 4);
-  g.fillRect(x + w - 5, y + h - 2, 4, 1);
-  g.fillRect(x + w - 2, y + h - 5, 1, 4);
+  const accent = opts.corner ?? opts.accent ?? PAL.blueHi;
+  g.fillStyle(accent, 0.96 * alpha);
+  g.fillRect(x, y, 2, h);
   return g;
 }
 
-/** Shared full-screen/menu chrome: one inset frame and one gold broadcast rail. */
+/** Shared full-screen/menu chrome with clean pixel-sports hierarchy. */
 export function drawBroadcastFrame(g, x, y, w, h, opts = {}) {
   drawPanel(g, x, y, w, h, {
     fill: opts.fill ?? 0x0d2236,
-    border: opts.border ?? PAL.goldDark,
-    corner: opts.corner ?? PAL.gold,
-    highlight: opts.highlight ?? 0x31506a,
+    border: opts.border ?? PAL.blue,
+    corner: opts.corner ?? PAL.blueHi,
+    highlight: opts.highlight ?? 0x2b67a1,
     alpha: opts.alpha
   });
-  const inset = opts.inset ?? 6;
-  g.fillStyle(PAL.borderDark, 0.88).fillRect(x + inset, y + inset, w - inset * 2, 1);
-  g.fillStyle(PAL.borderDark, 0.88).fillRect(x + inset, y + inset, 1, h - inset * 2);
-  g.fillStyle(PAL.ink, 0.9).fillRect(x + inset, y + h - inset - 1, w - inset * 2, 1);
-  g.fillStyle(PAL.ink, 0.9).fillRect(x + w - inset - 1, y + inset, 1, h - inset * 2);
   const railY = y + (opts.railY ?? 13);
-  g.fillStyle(PAL.goldDark, 0.9).fillRect(x + 10, railY, w - 20, 2);
-  g.fillStyle(PAL.gold, 0.95).fillRect(x + 18, railY, Math.max(18, w * 0.22), 1);
+  g.fillStyle(PAL.blueHi, 0.78).fillRect(x + 8, railY, w - 16, 1);
   return g;
 }
 
 function drawButton(g, w, h, fill, state, opts, focused = false) {
   const pressed = state === 'pressed';
   const disabled = state === 'disabled';
-  // A two-pixel travel plus the disappearing drop shadow reads as a physical
-  // broadcast-console key even after the 480px layout is scaled down on a
-  // phone. One pixel was technically different but visually imperceptible.
+  // Short travel and a clean colour rail keep interaction obvious at every
+  // scale while letting the detailed sprite art remain the visual lead.
   const y = pressed ? 2 : 0;
   const border = opts.border ?? (opts.selected ? PAL.gold : PAL.border);
 
   g.clear();
   if (!pressed) {
-    g.fillStyle(PAL.ink, 0.78);
-    g.fillRect(-w / 2 + 2, -h / 2 + 3, w, h);
+    g.fillStyle(PAL.ink, 0.62);
+    g.fillRect(-w / 2 + 3, -h / 2 + 4, w, h);
   }
-  g.fillStyle(PAL.ink, disabled ? 0.62 : 1);
-  g.fillRect(-w / 2, -h / 2 + y, w, h);
   g.fillStyle(disabled ? PAL.borderDark : border, 1);
-  g.fillRect(-w / 2 + 1, -h / 2 + 1 + y, w - 2, h - 2);
+  g.fillRect(-w / 2, -h / 2 + y, w, h);
   g.fillStyle(disabled ? PAL.panelMuted : fill, 1);
-  g.fillRect(-w / 2 + 3, -h / 2 + 3 + y, w - 6, h - 6);
+  g.fillRect(-w / 2 + 1, -h / 2 + 1 + y, w - 2, h - 2);
 
   if (!disabled) {
     g.fillStyle(opts.highlight ?? shade(fill, 28), 0.9);
-    g.fillRect(-w / 2 + 3, -h / 2 + 3 + y, w - 6, 1);
-    g.fillRect(-w / 2 + 3, -h / 2 + 3 + y, 1, h - 6);
+    g.fillRect(-w / 2 + 1, -h / 2 + 1 + y, w - 2, 1);
     g.fillStyle(opts.lowlight ?? shade(fill, -30), 0.95);
-    g.fillRect(-w / 2 + 3, h / 2 - 4 + y, w - 6, 1);
-    g.fillRect(w / 2 - 4, -h / 2 + 3 + y, 1, h - 6);
+    g.fillRect(-w / 2 + 1, h / 2 - 2 + y, w - 2, 1);
+    g.fillStyle(border, 1);
+    g.fillRect(-w / 2, -h / 2 + y, 2, h);
   }
 
   if (opts.selected) {
     g.fillStyle(PAL.gold, 1);
-    g.fillRect(-w / 2 + 1, -h / 2 + 1 + y, 3, 3);
-    g.fillRect(w / 2 - 4, -h / 2 + 1 + y, 3, 3);
+    g.fillRect(-w / 2 + 2, h / 2 - 3 + y, w - 4, 2);
   }
 
   if (focused && !disabled) {
@@ -423,7 +435,7 @@ export function makeButton(scene, x, y, w, h, label, onClick, opts = {}) {
     : (opts.icon ? 7 : 0);
   const txt = crispText(scene.add.text(labelX, opts.labelY ?? 0, label, {
     fontFamily: opts.fontFamily ?? FONT,
-    fontStyle: opts.fontStyle ?? 'bold',
+    fontStyle: opts.fontStyle ?? PIXEL_TEXT_WEIGHT,
     fontSize: opts.fontSize ?? '10px',
     color: opts.textColor ?? toCss(PAL.cream),
     stroke: opts.stroke ?? toCss(PAL.ink),
@@ -542,7 +554,7 @@ export function makeIconButton(scene, x, y, size, icon, onClick, opts = {}) {
 export function titleText(scene, x, y, str, size = '26px', color = toCss(PAL.cream)) {
   const text = crispText(scene.add.text(x, y, str, {
     fontFamily: FONT,
-    fontStyle: 'bold',
+    fontStyle: PIXEL_TEXT_WEIGHT,
     fontSize: size,
     color,
     stroke: toCss(PAL.ink),
@@ -556,7 +568,7 @@ export function titleText(scene, x, y, str, size = '26px', color = toCss(PAL.cre
 export function bodyText(scene, x, y, str, opts = {}) {
   const text = crispText(scene.add.text(x, y, str, {
     fontFamily: opts.fontFamily ?? MONO_FONT,
-    fontStyle: opts.fontStyle ?? 'bold',
+    fontStyle: opts.fontStyle ?? PIXEL_TEXT_WEIGHT,
     fontSize: opts.fontSize ?? '9px',
     color: opts.color ?? toCss(PAL.cream),
     stroke: opts.stroke ?? toCss(PAL.ink),
@@ -601,10 +613,9 @@ export function makeStars(scene, x, y, count, opts = {}) {
 }
 
 export function addScanlines(scene, depth = 2500, alpha = 0.045) {
+  // Kept as an API-compatible presentation layer for existing scenes. Full-
+  // frame filters muddied the detailed sprite work, so this stays clean.
   const g = scene.add.graphics().setDepth(depth);
-  g.fillStyle(PAL.ink, alpha);
-  for (let y = 1; y < 270; y += 4) g.fillRect(0, y, 480, 1);
-  g.setBlendMode('MULTIPLY');
   return g;
 }
 

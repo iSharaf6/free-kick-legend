@@ -7,20 +7,22 @@ import { Audio } from '../systems/AudioSynth.js';
 import { LEVELS, CUPS as CUP_DATA } from '../data/levels.js';
 import { prefetchMatchPack } from '../data/matchAssets.js';
 import { PAL } from '../pixelart.js';
+import { addPitchSurface } from '../art/PitchSurface.js';
+import { addCrowdStand } from '../art/CrowdStand.js';
 
 const LEVELS_PER_CUP = 10;
 const CUP_COUNT = 5;
-const CUP_COLORS = [0x248c43, 0x2475b9, 0xb56a31, 0x67549a, 0xa9463b];
-const DISPLAY_FONT = '"Pixelify Sans", "Courier New", monospace';
-const PIXEL_FONT = '"Pixelify Sans", "Courier New", monospace';
-const CREAM = '#f6e9c7';
-const GOLD = 0xf4c84b;
-const GOLD_HI = 0xffe47b;
-const GOLD_DARK = 0x8f6326;
-const BLUE_EDGE = 0x365874;
-const BLUE_MID = 0x18334b;
-const BLUE_DEEP = 0x081b2d;
-const INK = 0x030a11;
+const CUP_COLORS = [0x087b4c, 0x1760bd, 0xc87312, 0x6238ae, 0xa52f35];
+const DISPLAY_FONT = '"Pixelify Sans", monospace';
+const PIXEL_FONT = '"Pixelify Sans", monospace';
+const CREAM = '#f7fbff';
+const GOLD = 0xffc928;
+const GOLD_HI = 0xffe56c;
+const GOLD_DARK = 0xffc928;
+const BLUE_EDGE = 0x3478b8;
+const BLUE_MID = 0x164379;
+const BLUE_DEEP = 0x071a38;
+const INK = 0x030714;
 const TOUR_H = 320;
 const TOUR_ZOOM = RENDER_H / TOUR_H;
 const TOUR_VIEW_W = RENDER_W / TOUR_ZOOM;
@@ -68,14 +70,6 @@ function addAspectCoverImage(scene, key, width = TOUR_VIEW_W, height = TOUR_H) {
   return image;
 }
 
-function addAspectCoverRegion(scene, key, x, y, width, height) {
-  const image = scene.add.image(x, y, key).setOrigin(0.5);
-  const sourceWidth = Math.max(1, Number(image.width) || width);
-  const sourceHeight = Math.max(1, Number(image.height) || height);
-  image.setScale(Math.max(width / sourceWidth, height / sourceHeight));
-  return image;
-}
-
 function tourText(scene, x, y, value, opts = {}) {
   const text = crispText(scene.add.text(x, y, value, {
     fontFamily: opts.fontFamily ?? PIXEL_FONT,
@@ -93,55 +87,25 @@ function tourText(scene, x, y, value, opts = {}) {
   return text;
 }
 
-function drawCornerBrackets(g, x, y, w, h, color = GOLD, size = 7) {
-  g.fillStyle(color, 1);
-  g.fillRect(x, y, size, 1);
-  g.fillRect(x, y, 1, size);
-  g.fillRect(x + w - size, y, size, 1);
-  g.fillRect(x + w - 1, y, 1, size);
-  g.fillRect(x, y + h - 1, size, 1);
-  g.fillRect(x, y + h - size, 1, size);
-  g.fillRect(x + w - size, y + h - 1, size, 1);
-  g.fillRect(x + w - 1, y + h - size, 1, size);
-
-  g.fillStyle(GOLD_DARK, 1);
-  g.fillRect(x + 1, y + 1, 2, 2);
-  g.fillRect(x + w - 3, y + 1, 2, 2);
-  g.fillRect(x + 1, y + h - 3, 2, 2);
-  g.fillRect(x + w - 3, y + h - 3, 2, 2);
-}
-
 function drawTourPanel(g, x, y, w, h, opts = {}) {
   const border = opts.border ?? BLUE_EDGE;
   const inner = opts.inner ?? BLUE_MID;
   const bottom = opts.bottom ?? BLUE_DEEP;
   const corner = opts.corner ?? GOLD_DARK;
 
-  g.fillStyle(INK, 0.78);
+  g.fillStyle(INK, 0.52);
   g.fillRect(x + 3, y + 4, w, h);
-  g.fillStyle(INK, 1);
-  g.fillRect(x, y, w, h);
   g.fillStyle(border, 1);
-  g.fillRect(x + 1, y + 1, w - 2, h - 2);
-  g.fillStyle(0x081522, 1);
-  g.fillRect(x + 2, y + 2, w - 4, h - 4);
+  g.fillRect(x, y, w, h);
   g.fillGradientStyle(inner, inner, bottom, bottom, opts.alpha ?? 1);
-  g.fillRect(x + 4, y + 4, w - 8, h - 8);
+  g.fillRect(x + 1, y + 1, w - 2, h - 2);
 
   g.fillStyle(shade(inner, 34), 0.78);
-  g.fillRect(x + 4, y + 4, w - 8, 1);
-  g.fillRect(x + 4, y + 4, 1, h - 8);
+  g.fillRect(x + 1, y + 1, w - 2, 1);
   g.fillStyle(INK, 0.68);
-  g.fillRect(x + 4, y + h - 5, w - 8, 1);
-  g.fillRect(x + w - 5, y + 4, 1, h - 8);
-
-  // Sparse horizontal weave gives the large fields the textured fabric finish
-  // of the reference without softening the deliberately hard pixel edges.
-  g.fillStyle(0x6d93ae, 0.055);
-  for (let row = y + 8; row < y + h - 5; row += 5) {
-    g.fillRect(x + 6, row, w - 12, 1);
-  }
-  drawCornerBrackets(g, x + 1, y + 1, w - 2, h - 2, corner, opts.cornerSize ?? 7);
+  g.fillRect(x + 1, y + h - 2, w - 2, 1);
+  g.fillStyle(corner, 1);
+  g.fillRect(x, y, 2, h);
   return g;
 }
 
@@ -154,37 +118,25 @@ function drawTourButton(g, w, h, fill, state, opts = {}) {
   const face = disabled ? 0x162634 : fill;
 
   g.clear();
-  if (!pressed) {
-    g.fillStyle(INK, 0.88);
-    g.fillRect(-w / 2 + 3, -h / 2 + 4, w, h);
-  }
+  if (!pressed) g.fillStyle(INK, 0.58).fillRect(-w / 2 + 3, -h / 2 + 4, w, h);
   if (selected) {
-    g.fillStyle(GOLD, 0.18);
+    g.fillStyle(GOLD, 0.12);
     g.fillRect(-w / 2 - 2, -h / 2 - 2 + y, w + 4, h + 4);
   }
-  g.fillStyle(INK, 1);
-  g.fillRect(-w / 2, -h / 2 + y, w, h);
   g.fillStyle(edge, 1);
-  g.fillRect(-w / 2 + 1, -h / 2 + 1 + y, w - 2, h - 2);
-  g.fillStyle(selected ? GOLD_DARK : 0x0b1723, 1);
-  g.fillRect(-w / 2 + 2, -h / 2 + 2 + y, w - 4, h - 4);
+  g.fillRect(-w / 2, -h / 2 + y, w, h);
   g.fillGradientStyle(shade(face, disabled ? 2 : 24), shade(face, disabled ? 2 : 24), shade(face, -18), shade(face, -18), 1);
-  g.fillRect(-w / 2 + 4, -h / 2 + 4 + y, w - 8, h - 8);
+  g.fillRect(-w / 2 + 1, -h / 2 + 1 + y, w - 2, h - 2);
 
   g.fillStyle(disabled ? 0x294053 : shade(face, 52), disabled ? 0.45 : 0.95);
-  g.fillRect(-w / 2 + 4, -h / 2 + 4 + y, w - 8, 1);
-  g.fillRect(-w / 2 + 4, -h / 2 + 4 + y, 1, h - 8);
+  g.fillRect(-w / 2 + 1, -h / 2 + 1 + y, w - 2, 1);
   g.fillStyle(INK, 0.56);
-  g.fillRect(-w / 2 + 4, h / 2 - 5 + y, w - 8, 1);
-  g.fillRect(w / 2 - 5, -h / 2 + 4 + y, 1, h - 8);
+  g.fillRect(-w / 2 + 1, h / 2 - 2 + y, w - 2, 1);
 
-  if (!disabled) {
-    g.fillStyle(shade(face, 46), 0.11);
-    for (let row = -h / 2 + 8 + y; row < h / 2 - 5 + y; row += 4) {
-      g.fillRect(-w / 2 + 6, row, w - 12, 1);
-    }
+  if (selected) {
+    g.fillStyle(GOLD, 1);
+    g.fillRect(-w / 2 + 2, h / 2 - 3 + y, w - 4, 2);
   }
-  drawCornerBrackets(g, -w / 2 + 1, -h / 2 + 1 + y, w - 2, h - 2, selected ? GOLD_HI : shade(edge, -16), 5);
 }
 
 function makeTourButton(scene, x, y, w, h, label, onClick, opts = {}) {
@@ -263,17 +215,33 @@ export class LevelSelectScene extends Phaser.Scene {
     this.reducedMotion = Boolean(SaveManager.getSettings().reducedMotion);
     MenuMusic.enterMenu();
     this.backgroundImage = addAspectCoverImage(this, 'stadium-menu').setDepth(0);
-    this.crowdBackdrop = addAspectCoverRegion(
-      this, 'crowd-panorama-v3', GAME_W / 2, 69, TOUR_VIEW_W, 96
-    ).setDepth(0.2);
-    this.pitchBackdrop = addAspectCoverRegion(
-      this, 'pitch-grass-pixel-v3', GAME_W / 2, 209, TOUR_VIEW_W, 222
-    ).setDepth(0.3);
+    this.crowdBackdrop = addCrowdStand(this, {
+      viewWidth: TOUR_VIEW_W,
+      x: TOUR_VIEW_X,
+      top: 5,
+      depthOffset: -0.9,
+      reducedMotion: this.reducedMotion,
+      dressed: false
+    });
+    this.pitchBackdrop = addPitchSurface(this, {
+      x: TOUR_VIEW_X,
+      y: 98,
+      width: TOUR_VIEW_W,
+      height: TOUR_H - 98,
+      horizon: { x: GAME_W / 2, y: 76 },
+      seed: 0x43555035,
+      depth: 0.3,
+      name: 'tour-procedural-pitch'
+    });
+    this.events.once('shutdown', () => {
+      this.crowdBackdrop?.destroy?.();
+      this.crowdBackdrop = null;
+    });
 
     const wash = this.add.graphics().setDepth(1);
-    wash.fillStyle(PAL.ink, 0.48);
+    wash.fillStyle(PAL.ink, 0.32);
     wash.fillRect(TOUR_VIEW_X, 0, TOUR_VIEW_W, TOUR_H);
-    wash.fillGradientStyle(0x071018, 0x071018, 0x03110c, 0x03110c, 0.5, 0.5, 0.2, 0.2);
+    wash.fillGradientStyle(0x071b3b, 0x071b3b, 0x03170f, 0x03170f, 0.34, 0.34, 0.12, 0.12);
     wash.fillRect(TOUR_VIEW_X, 0, TOUR_VIEW_W, TOUR_H);
 
     this.unlocked = SaveManager.unlockedCount(LEVELS.length);
@@ -290,10 +258,6 @@ export class LevelSelectScene extends Phaser.Scene {
     this.renderCupTabs();
     this.renderCupContent();
 
-    const scanlines = this.add.graphics().setDepth(2600);
-    scanlines.fillStyle(PAL.ink, 0.022);
-    for (let y = 1; y < TOUR_H; y += 4) scanlines.fillRect(TOUR_VIEW_X, y, TOUR_VIEW_W, 1);
-    scanlines.setBlendMode('MULTIPLY');
     if (!this.reducedMotion) sceneIntro(this);
 
     // Choosing a level is the last quiet moment before kick-off. Warm the match
@@ -307,16 +271,16 @@ export class LevelSelectScene extends Phaser.Scene {
   drawHeader() {
     const chrome = this.add.graphics().setDepth(100);
     drawTourPanel(chrome, 16, 7, 450, 32, {
-      border: 0x294860,
-      inner: 0x142c42,
-      bottom: 0x0a1a29,
-      corner: GOLD_DARK,
+      border: 0x3478b8,
+      inner: 0x123b70,
+      bottom: 0x071a38,
+      corner: 0x35bdf6,
       cornerSize: 7
     });
 
     makeTourButton(this, 34, 23, 25, 23, '', () => this.scene.start('Menu'), {
-      color: 0x1d3e58,
-      border: 0x426884,
+      color: 0x164379,
+      border: 0x35bdf6,
       icon: 'icon-back',
       iconScale: 1.02,
       iconX: 12.5,
@@ -337,10 +301,10 @@ export class LevelSelectScene extends Phaser.Scene {
       ?? LEVELS.reduce((sum, level, index) => sum + SaveManager.getStars(stableId(level, index)), 0);
     const chip = this.add.graphics();
     drawTourPanel(chip, -44, -11.5, 88, 23, {
-      border: GOLD_DARK,
-      inner: 0x102439,
-      bottom: 0x071725,
-      corner: GOLD_DARK,
+      border: 0x3478b8,
+      inner: 0x123b70,
+      bottom: 0x071a38,
+      corner: GOLD,
       cornerSize: 5
     });
     const star = this.add.image(-29, 0, 'icon-star').setScale(1.25);
@@ -356,16 +320,16 @@ export class LevelSelectScene extends Phaser.Scene {
   drawPanels() {
     const panels = this.add.graphics().setDepth(80);
     drawTourPanel(panels, 16, 82, 279, 219, {
-      border: 0x44637a,
-      inner: 0x15324a,
-      bottom: 0x071c2e,
-      corner: GOLD_DARK,
+      border: 0x3478b8,
+      inner: 0x123b70,
+      bottom: 0x071a38,
+      corner: 0x35bdf6,
       cornerSize: 7
     });
     drawTourPanel(panels, 301, 82, 164, 219, {
-      border: GOLD_DARK,
-      inner: 0x15324a,
-      bottom: 0x071c2e,
+      border: 0x3478b8,
+      inner: 0x123b70,
+      bottom: 0x071a38,
       corner: GOLD,
       cornerSize: 7
     });
@@ -392,8 +356,8 @@ export class LevelSelectScene extends Phaser.Scene {
         this.renderCupTabs();
         this.renderCupContent();
       }, {
-        color: selected ? cup.color : 0x173148,
-        border: selected ? GOLD_HI : 0x365873,
+        color: selected ? cup.color : 0x123b70,
+        border: selected ? GOLD_HI : 0x3478b8,
         selected,
         disabled: !available,
         icon: available ? 'icon-cup' : 'icon-cup-locked',

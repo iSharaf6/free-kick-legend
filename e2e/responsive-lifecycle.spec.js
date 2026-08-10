@@ -32,7 +32,7 @@ test('touch-sized match menu pauses gameplay and TAB still opens the same menu',
   await page.waitForFunction(() => window.__fkl?.state === 'PAUSED');
 });
 
-test('active match recomputes compact HUD without restarting its session', async ({ page }) => {
+test('active match recomputes compact state without shrinking HUD or restarting its session', async ({ page }) => {
   const game = new GamePage(page);
   await game.open({ width: 1280, height: 720 });
   await game.startCareer();
@@ -48,7 +48,7 @@ test('active match recomputes compact HUD without restarting its session', async
   }));
   expect(before).toMatchObject({
     compact: false,
-    fontSize: '4px',
+    fontSize: '7px',
     mode: 'career',
     levelIndex: 0,
     attempt: 1
@@ -56,7 +56,7 @@ test('active match recomputes compact HUD without restarting its session', async
 
   await page.setViewportSize({ width: 844, height: 390 });
   await page.waitForFunction(() => (
-    window.__fkl?.compactHud === true && window.__fkl.matchHudText?.style?.fontSize === '5px'
+    window.__fkl?.compactHud === true && window.__fkl.matchHudText?.style?.fontSize === '9px'
   ));
   const compact = await page.evaluate(() => ({
     styleX: window.__fkl.careerStyleHud.text.x,
@@ -66,7 +66,7 @@ test('active match recomputes compact HUD without restarting its session', async
     attempt: window.__fkl.attempt,
     state: window.__fkl.state
   }));
-  expect(compact.styleX).toBeGreaterThan(before.styleX);
+  expect(compact.styleX).toBe(before.styleX);
   expect(compact).toMatchObject({
     sessionToken: before.sessionToken,
     mode: before.mode,
@@ -77,7 +77,7 @@ test('active match recomputes compact HUD without restarting its session', async
 
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.waitForFunction(() => (
-    window.__fkl?.compactHud === false && window.__fkl.matchHudText?.style?.fontSize === '4px'
+    window.__fkl?.compactHud === false && window.__fkl.matchHudText?.style?.fontSize === '7px'
   ));
   expect(await page.evaluate(() => window.__fkl.sessionToken)).toBe(before.sessionToken);
 });

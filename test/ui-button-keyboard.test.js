@@ -179,6 +179,21 @@ test('shared buttons expose focus, spatial navigation, activation, and skip unav
     keyboard.emit('keydown-TAB', keyEvent({ shiftKey: true }));
     assert.equal(left.buttonFocused, true);
 
+    keyboard.emit('keydown-TAB', keyEvent());
+    assert.equal(right.buttonFocused, true);
+    const replayedReverseTab = keyEvent({
+      shiftKey: true,
+      type: 'keydown',
+      code: 'Tab',
+      timeStamp: 1234
+    });
+    keyboard.emit('keydown-TAB', replayedReverseTab);
+    replayedReverseTab.cancelled = 0;
+    keyboard.emit('keydown-TAB', replayedReverseTab);
+    replayedReverseTab.cancelled = 0;
+    keyboard.emit('keydown-TAB', replayedReverseTab);
+    assert.equal(left.buttonFocused, true, 'one replayed Shift+Tab event advances only once');
+
     keyboard.emit('keydown-RIGHT', keyEvent());
     assert.equal(right.buttonFocused, true);
     keyboard.emit('keydown-DOWN', keyEvent());

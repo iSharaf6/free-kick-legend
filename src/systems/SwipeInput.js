@@ -74,6 +74,58 @@ function smooth(points) {
   });
 }
 
+function normalisePointTimes(rawPoints) {
+  if (!Array.isArray(rawPoints)) return [];
+  const output = [];
+  let previousTime = -Infinity;
+  for (const point of rawPoints) {
+    if (!Number.isFinite(point?.x) || !Number.isFinite(point?.y) || !Number.isFinite(point?.t)) continue;
+    const time = Math.max(point.t, previousTime);
+    output.push({ x: point.x, y: point.y, t: time });
+    previousTime = time;
+  }
+  return output;
+}
+
+// Estimate intent at release over a bounded trailing time window. This is
+// sampled from the smoothed path, so coalesced pointer noise cannot turn one
+// bad final event into a full-power rocket. Linear sparse and dense gestures
+// produce the same estimate because partial segments are interpolated.
+function trailingPathSpeed(points, duration) {
+  if (points.length < 2) return 0;
+  const end = points[points.length - 1];
+  const windowMs = Math.min(duration, clamp(duration * 0.38, 45, 90));
+  const targetTime = end.t - windowMs;
+  let distance = 0;
+  let startTime = end.t;
+
+  for (let index = points.length - 1; index > 0; index--) {
+    const a = points[index - 1];
+    const b = points[index];
+    const segmentDuration = b.t - a.t;
+    const segmentDistance = Math.hypot(b.x - a.x, b.y - a.y);
+    if (segmentDuration <= 0) continue;
+
+    if (a.t <= targetTime) {
+      const usedDuration = b.t - targetTime;
+      distance += segmentDistance * clamp(usedDuration / segmentDuration, 0, 1);
+      startTime = targetTime;
+      break;
+    }
+    distance += segmentDistance;
+    startTime = a.t;
+  }
+  // `duration` has a 40ms floor in the canonical shot mapping. Honour the
+  // same floor here: browsers can batch a pointerdown/pointerup pair into a
+  // 1-10ms timestamp burst, and dividing the trailing distance by that burst
+  // used to turn a minimum-length gesture into an accidental full-power shot.
+  const measuredWindow = Math.max(
+    end.t - startTime,
+    Math.min(windowMs, duration)
+  );
+  return distance / Math.max(measuredWindow, 1);
+}
+
 // The single canonical gesture-to-shot mapping. Everything that describes a
 // shot to the player (live meters, trajectory previews, tutorials) and
 // everything that executes one (release physics, scoring) must go through
@@ -82,9 +134,7 @@ function smooth(points) {
 // the length/direction minimums are skipped so a partial in-progress gesture
 // still reports the exact shot it would produce if released right now.
 export function computeShotFromPath(rawPoints, { preview = false } = {}) {
-  const points = (rawPoints || []).filter((point) => (
-    Number.isFinite(point?.x) && Number.isFinite(point?.y) && Number.isFinite(point?.t)
-  ));
+  const points = normalisePointTimes(rawPoints);
   if (points.length < 2) return { invalid: 'not-enough-points' };
 
   const a = points[0];
@@ -101,12 +151,20 @@ export function computeShotFromPath(rawPoints, { preview = false } = {}) {
   const sampled = smooth(resample(points, SHOT.resampleCount));
   const duration = Math.max(b.t - a.t, 40);
   const distance = Math.max(pathLength(sampled), chord);
-  const pxPerMs = distance / duration;
-  const power = clamp(
-    (pxPerMs - SHOT.minSpeedPxMs) / (SHOT.maxSpeedPxMs - SHOT.minSpeedPxMs),
+  const averageSpeed = distance / duration;
+  const releaseSpeed = trailingPathSpeed(sampled, duration);
+  // Most authority still comes from the whole gesture, preserving deliberate
+  // long swipes. The final 28% makes a decisive follow-through feel stronger
+  // than a drag that arrives at the same endpoint and pauses before release.
+  const inputSpeed = averageSpeed * 0.72 + releaseSpeed * 0.28;
+  const linearPower = clamp(
+    (inputSpeed - SHOT.minSpeedPxMs) / (SHOT.maxSpeedPxMs - SHOT.minSpeedPxMs),
     0,
     1
   );
+  // Smoothstep creates a broad controllable middle band while retaining true
+  // zero and maximum power at the authored endpoints.
+  const power = linearPower * linearPower * (3 - 2 * linearPower);
 
   // Aggregate signed deviation across the whole gesture. Smoothing plus a
   // weighted mean rejects single noisy/coalesced pointer samples.
@@ -141,7 +199,7 @@ export function computeShotFromPath(rawPoints, { preview = false } = {}) {
       vz: SHOT.minVz + power * (SHOT.maxVz - SHOT.minVz),
       spin,
       power,
-      gesture: { duration, distance, curve }
+      gesture: { duration, distance, curve, averageSpeed, releaseSpeed, inputSpeed }
     }
   };
 }
@@ -237,14 +295,17 @@ export class SwipeInput {
       ? this.samples[this.samples.length - 1].t + (endpoint ? 1 : 0)
       : this.scene.time?.now ?? 0;
     const logical = logicalPoint(pointer);
+    const last = this.samples[this.samples.length - 1];
+    const pointerTime = eventTime(pointer, fallbackTime);
     const sample = {
       x: logical.x,
       y: logical.y,
-      t: eventTime(pointer, fallbackTime)
+      // Some mobile browsers occasionally deliver a coalesced event with an
+      // older timestamp. Preserve capture order and monotonic shot timing.
+      t: last ? Math.max(pointerTime, last.t) : pointerTime
     };
     if (!Number.isFinite(sample.x) || !Number.isFinite(sample.y)) return;
 
-    const last = this.samples[this.samples.length - 1];
     if (last && last.x === sample.x && last.y === sample.y) {
       if (endpoint || sample.t > last.t) last.t = Math.max(last.t, sample.t);
       return;

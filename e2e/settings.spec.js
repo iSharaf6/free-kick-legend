@@ -2,6 +2,10 @@ import { test, expect } from '@playwright/test';
 import { GamePage } from './game-page.js';
 
 test('menu and pause expose persistent, keyboard-accessible settings', async ({ page }) => {
+  // This scenario deliberately traverses the native settings dialog, a scene
+  // load, the paused canvas menu, and focus restoration. Headed GPU CI can
+  // exceed the suite's generic 30s budget without any individual wait failing.
+  test.setTimeout(60_000);
   const game = new GamePage(page);
   await game.open({ width: 1280, height: 720 });
 
@@ -54,8 +58,16 @@ test('menu and pause expose persistent, keyboard-accessible settings', async ({ 
     return button?.buttonLabel?.text || null;
   });
 
+  // Enter the documented canvas keyboard boundary explicitly. Settings
+  // restores this focus in browsers, but making the boundary visible here
+  // keeps the control test independent of engine-specific focus timing.
+  await game.canvas.focus();
   await page.keyboard.press('Tab');
-  await page.waitForFunction(() => window.__fkl?.state === 'PAUSED');
+  // Phaser applies keyboard input on its next game frame. The live-region
+  // announcement is the rendered accessibility contract and remains
+  // observable even while the Scene clock itself is paused.
+  await expect(page.locator('#game-status')).toContainText('Match paused');
+  expect(await page.evaluate(() => window.__fkl?.state)).toBe('PAUSED');
   expect(await page.evaluate(() => ({
     menuVisible: window.__fkl.menuButton.visible,
     menuEnabled: window.__fkl.menuButton.buttonEnabled,
@@ -70,11 +82,11 @@ test('menu and pause expose persistent, keyboard-accessible settings', async ({ 
   expect(await focusedPauseButton()).toBeNull();
 
   await page.keyboard.press('Tab');
-  expect(await focusedPauseButton()).toBe('RESUME');
   await expect(page.locator('#game-status')).toHaveText('RESUME button');
+  expect(await focusedPauseButton()).toBe('RESUME');
   await page.keyboard.press('Tab');
-  expect(await focusedPauseButton()).toBe('SETTINGS');
   await expect(page.locator('#game-status')).toHaveText('SETTINGS button');
+  expect(await focusedPauseButton()).toBe('SETTINGS');
   await page.keyboard.press('Enter');
   await expect(panel).toBeVisible();
   await expect(page.getByLabel('AIM ASSIST')).toHaveValue('reduced');
@@ -89,8 +101,10 @@ test('menu and pause expose persistent, keyboard-accessible settings', async ({ 
   await page.keyboard.press('Escape');
   await expect(panel).toBeHidden();
   await page.keyboard.press('Tab');
+  await expect(page.locator('#game-status')).toHaveText('RESTART button');
   expect(await focusedPauseButton()).toBe('RESTART');
   await page.keyboard.press('Shift+Tab');
+  await expect(page.locator('#game-status')).toHaveText('SETTINGS button');
   expect(await focusedPauseButton()).toBe('SETTINGS');
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => window.__fkl?.state === 'AIMING');
@@ -111,7 +125,7 @@ test('shared canvas buttons support sequential and spatial keyboard navigation',
   const game = new GamePage(page);
   await game.open({ width: 1280, height: 720 });
 
-  const canvas = page.locator('#app canvas');
+  const canvas = page.locator('#app canvas.three-pixel-source');
   await expect(canvas).toHaveAttribute('tabindex', '0');
   await expect(canvas).toHaveAttribute('role', 'application');
   await expect(canvas).toHaveAttribute('aria-label', /Press Tab to enter game controls/);
@@ -139,27 +153,35 @@ test('shared canvas buttons support sequential and spatial keyboard navigation',
   expect(await focusedButton()).toBeNull();
 
   await page.keyboard.press('Tab');
-  expect(await focusedButton()).toEqual({ label: '', icon: 'icon-back' });
   await expect(page.locator('#game-status')).toHaveText('Back button');
+  expect(await focusedButton()).toEqual({ label: '', icon: 'icon-back' });
   await page.keyboard.press('Tab');
-  expect(await focusedButton()).toEqual({ label: 'PLAYERS', icon: 'kicker-hd-kit-home-idle' });
   await expect(page.locator('#game-status')).toHaveText('PLAYERS button');
+  expect(await focusedButton()).toEqual({ label: 'PLAYERS', icon: 'kicker-hd-kit-home-idle' });
   await page.keyboard.press('Shift+Tab');
+  await expect(page.locator('#game-status')).toHaveText('Back button');
   expect(await focusedButton()).toEqual({ label: '', icon: 'icon-back' });
 
   await page.keyboard.press('ArrowDown');
+  await expect(page.locator('#game-status')).toHaveText('PLAYERS button');
   expect(await focusedButton()).toEqual({ label: 'PLAYERS', icon: 'kicker-hd-kit-home-idle' });
   await page.keyboard.press('ArrowRight');
+  await expect(page.locator('#game-status')).toHaveText('KITS button');
   expect(await focusedButton()).toEqual({ label: 'KITS', icon: 'icon-kit' });
   await page.keyboard.press('ArrowLeft');
+  await expect(page.locator('#game-status')).toHaveText('PLAYERS button');
   expect(await focusedButton()).toEqual({ label: 'PLAYERS', icon: 'kicker-hd-kit-home-idle' });
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => window.__game.scene.getScene('Locker').category === 'character');
 
   await page.keyboard.press('Tab');
+  await expect(page.locator('#game-status')).toHaveText('Back button');
   await page.keyboard.press('ArrowDown');
+  await expect(page.locator('#game-status')).toHaveText('PLAYERS button');
   await page.keyboard.press('ArrowRight');
+  await expect(page.locator('#game-status')).toHaveText('KITS button');
   await page.keyboard.press('ArrowRight');
+  await expect(page.locator('#game-status')).toHaveText('BALLS button');
   expect(await focusedButton()).toEqual({ label: 'BALLS', icon: 'ball-classic' });
   await page.keyboard.press('Space');
   await page.waitForFunction(() => window.__game.scene.getScene('Locker').category === 'ball');
@@ -239,7 +261,7 @@ test('compact landscape promotes critical HUD text and results reach the live re
     const scene = window.__fkl;
     const match = scene.children.list.find((child) => child?.text === 'MATCH 01');
     return { compact: scene.compactHud, fontSize: match?.style?.fontSize };
-  })).toEqual({ compact: true, fontSize: '5px' });
+  })).toEqual({ compact: true, fontSize: '9px' });
 
   await page.evaluate(() => window.__fkl.showShotReadout('WALL', { x: 0, y: 1 }, { points: 0 }));
   await expect(page.locator('#game-status')).toContainText('wall', { ignoreCase: true });

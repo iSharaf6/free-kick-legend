@@ -1,44 +1,44 @@
-// Night Match '98 art bible. Every map is baked once during BootScene and then
-// rendered with nearest-neighbour filtering. The palette is intentionally small
-// so menus, characters and the stadium feel authored as one fictional league.
+// Shared matchday colours for procedural icons and interface chrome. Character,
+// keeper and crowd PNGs keep their own much richer material ramps; this palette
+// only provides a clean navy/cobalt/cyan/gold frame around that authored art.
 
 export const PAL = {
   // environment
-  ink: 0x071018,
-  night: 0x0b1624,
-  nightHi: 0x213a52,
-  sky: 0x173047,
-  skyHi: 0x2f6075,
-  flood: 0xffedbd,
+  ink: 0x030714,
+  night: 0x07132c,
+  nightHi: 0x163b70,
+  sky: 0x0b2147,
+  skyHi: 0x246799,
+  flood: 0xf7fbff,
   grass: 0x2d874b,
   grassDark: 0x185b38,
   grassDither: 0x5caf5c,
   grassShadow: 0x10472e,
-  line: 0xf3e7c3,
+  line: 0xf7fbff,
 
   // interface
-  panel: 0x13263a,
-  panelHi: 0x213a52,
-  panelMuted: 0x182531,
-  border: 0x667b88,
-  borderDark: 0x30465b,
-  cream: 0xf3e7c3,
-  muted: 0xa8b0ae,
-  gold: 0xf3c449,
-  goldDark: 0x9a7540,
-  red: 0xd75a3a,
-  orange: 0xc96832,
-  green: 0x2d874b,
-  greenHi: 0x49a760,
-  blue: 0x2d74b9,
-  blueHi: 0x4a98cf,
-  cyan: 0x66b7bf
+  panel: 0x0b2147,
+  panelHi: 0x163b70,
+  panelMuted: 0x091a35,
+  border: 0x3478b8,
+  borderDark: 0x17385f,
+  cream: 0xf7fbff,
+  muted: 0x9ccce8,
+  gold: 0xffc928,
+  goldDark: 0xe09b13,
+  red: 0xff5b4d,
+  orange: 0xff8a32,
+  green: 0x16a768,
+  greenHi: 0x36d886,
+  blue: 0x1769d2,
+  blueHi: 0x35bdf6,
+  cyan: 0x38d3e8
 };
 
 export const INK = {
-  W: 0xf8f2df, // warm white
+  W: 0xf7fbff, // clean stadium white
   K: PAL.ink,
-  G: 0xa8b0ae, // cool light shade
+  G: 0x9ccce8, // cool light shade
   N: 0x0a1118, // boots / deepest outline
   H: 0x261a16, // hair
   S: 0xb8734d, // skin mid
@@ -48,7 +48,7 @@ export const INK = {
   D: 0x8c342b, // coral shade
   Y: PAL.gold,
   O: 0xc47a24,
-  E: 0xf3e7c3,
+  E: 0xfff1c7,
   B: PAL.blue,
   C: PAL.blueHi,
   R: 0x7d2630,

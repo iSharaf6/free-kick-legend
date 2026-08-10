@@ -2,7 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { CAM, GOAL_H, GOAL_W, project } from '../src/config.js';
-import { GoalCelebration, goalPyroLayout } from '../src/systems/GoalCelebration.js';
+import {
+  GOAL_CELEBRATION_TIMING,
+  GoalCelebration,
+  goalFlareLayout,
+  goalPyroLayout
+} from '../src/systems/GoalCelebration.js';
 import { ordinal, outcomeBannerStyle, scorerCardCopy } from '../src/systems/OutcomePresentation.js';
 
 function closeTo(actual, expected, epsilon = 1e-9) {
@@ -46,9 +51,84 @@ test('every outcome receives the same outlined display system and a safe font si
   ];
   const styles = labels.map((label) => outcomeBannerStyle(label));
   assert.ok(styles.every((style) => style.text && style.fill.length === 3));
-  assert.ok(styles.every((style) => style.fontSize >= 18 && style.fontSize <= 44));
+  assert.ok(styles.every((style) => style.fontSize >= 18 && style.fontSize <= 24));
+  assert.ok(styles.filter((style) => style.stadiumCelebration).every((style) => style.fontSize >= 22));
   assert.ok(styles.find((style) => style.text === 'GOAL!').fontSize >
     styles.find((style) => style.text === 'WALL FLATTENED!').fontSize);
+  assert.ok(styles.find((style) => style.text === 'GOAL!').holdMs >= 1100);
+});
+
+test('celebration pacing keeps the scorer card readable and reduced motion settled', () => {
+  assert.ok(GOAL_CELEBRATION_TIMING.fullMs >= 1400 && GOAL_CELEBRATION_TIMING.fullMs <= 1800);
+  assert.ok(GOAL_CELEBRATION_TIMING.reducedMs >= 1000);
+  assert.ok(GOAL_CELEBRATION_TIMING.cardFadeDelayMs >= 1300);
+  assert.ok(GOAL_CELEBRATION_TIMING.cardFadeDelayMs + GOAL_CELEBRATION_TIMING.cardFadeMs <
+    GOAL_CELEBRATION_TIMING.fullMs);
+  assert.equal(GOAL_CELEBRATION_TIMING.cardFadeMs, 220);
+});
+
+test('play schedules the authored full and reduced celebration lifetimes', () => {
+  const scheduleFor = (reducedMotion) => {
+    const delays = [];
+    const scene = {
+      settings: { reducedMotion },
+      time: {
+        delayedCall(delay) {
+          delays.push(delay);
+          return { remove() {} };
+        }
+      },
+      tweens: { killTweensOf() {} }
+    };
+    const celebration = new GoalCelebration(scene);
+    celebration.showCelebrationStand = () => {};
+    celebration.showPitchPyro = () => {};
+    celebration.showScorerCard = () => {};
+    celebration.play({ kicker: { celebrate() {} } });
+    return delays;
+  };
+
+  assert.deepEqual(scheduleFor(false), [55, 70, GOAL_CELEBRATION_TIMING.fullMs]);
+  assert.deepEqual(scheduleFor(true), [0, 70, GOAL_CELEBRATION_TIMING.reducedMs]);
+});
+
+test('stand flares preserve the authored 128x192 aspect ratio with one uniform scale', () => {
+  const flare = goalFlareLayout();
+  assert.equal(flare.sourceWidth, 128);
+  assert.equal(flare.sourceHeight, 192);
+  closeTo(flare.scale, 40 / 192);
+  closeTo(flare.displayWidth / flare.displayHeight, 128 / 192);
+  closeTo(flare.displayHeight, 40);
+});
+
+test('the stand renderer applies the same source-derived scale to both flare axes', () => {
+  const sprites = [];
+  const scene = {
+    textures: { exists: (key) => key === 'goal-flare-v3' },
+    add: {
+      sprite(x, y, texture) {
+        const sprite = {
+          x, y, texture, active: true,
+          setOrigin() { return this; },
+          setScale(value) { this.scaleX = value; this.scaleY = value; return this; },
+          setFlipX() { return this; },
+          setDepth() { return this; },
+          setAlpha() { return this; },
+          setFrame() { return this; },
+          destroy() { this.active = false; }
+        };
+        sprites.push(sprite);
+        return sprite;
+      }
+    }
+  };
+  const celebration = new GoalCelebration(scene);
+  celebration.showCelebrationStand(true);
+  const expected = goalFlareLayout().scale;
+
+  assert.equal(sprites.length, 2);
+  assert.ok(sprites.every((sprite) => sprite.scaleX === expected && sprite.scaleY === expected));
+  celebration.stop();
 });
 
 test('goal fountains are grounded beside the posts and layered behind play at every goal width', () => {
@@ -70,6 +150,20 @@ test('goal fountains are grounded beside the posts and layered behind play at ev
     assert.ok(normal.every((fountain) => fountain.depth < frameDepth && fountain.depth > 2));
     assert.ok(normal.every((fountain) => Math.abs(fountain.y - project(0, 0, zGoal + 0.25).y) < 1e-9));
     assert.ok(normal.every((fountain) => fountain.scale * 192 <= (goalBase.y - goalTop.y) * 1.08));
+    assert.ok(normal.every((fountain) => fountain.sparkLayers.length === 3));
+    assert.ok(normal.every((fountain) => {
+      const core = fountain.sparkLayers.find((layer) => layer.role === 'core');
+      const left = Math.min(...fountain.sparkLayers.map((layer) => layer.x - 64 * layer.scaleX));
+      const right = Math.max(...fountain.sparkLayers.map((layer) => layer.x + 64 * layer.scaleX));
+      return core.scaleX / core.scaleY >= 1.45 &&
+        (right - left) / (128 * fountain.scale) >= 1.45;
+    }), 'spark fans are materially wider than the original single sprite');
+    assert.ok(normal.every((fountain) => (
+      fountain.smoke.scaleX / fountain.smoke.scaleY > 1.75 &&
+      fountain.smoke.depth < fountain.depth
+    )), 'broad smoke sits behind the spark fan');
+    assert.ok(normal.flatMap((fountain) => fountain.sparkLayers)
+      .every((layer) => layer.depth < frameDepth));
     assert.notEqual(normal[0].scale, normal[1].scale, 'left/right fountains need different silhouettes');
     assert.deepEqual(normal.map((fountain) => fountain.delay), [0, 0]);
     assert.ok(smaller[1].x - smaller[0].x < normal[1].x - normal[0].x);
@@ -92,7 +186,12 @@ test('goal fountains play all eight authored frames and are fully removed by sto
         const sprite = {
           x, y, texture: { key: texture }, active: true,
           setOrigin() { return this; },
-          setScale(value) { this.scale = value; return this; },
+          setScale(xScale, yScale = xScale) {
+            this.scale = xScale;
+            this.scaleX = xScale;
+            this.scaleY = yScale;
+            return this;
+          },
           setDepth(value) { this.depth = value; return this; },
           setFlipX(value) { this.flipX = value; return this; },
           setAlpha(value) { this.alpha = value; return this; },
@@ -124,11 +223,20 @@ test('goal fountains play all eight authored frames and are fully removed by sto
 
   const celebration = new GoalCelebration(scene);
   celebration.showPitchPyro(false);
-  assert.equal(sprites.length, 2);
+  const sparks = sprites.filter((sprite) => sprite.texture.key === 'goal-spark-fountain-v3');
+  const smoke = sprites.filter((sprite) => sprite.texture.key === 'goal-flare-v3');
+  assert.equal(sprites.length, 8);
+  assert.equal(sparks.length, 6);
+  assert.equal(smoke.length, 2);
   assert.equal(celebration.timers.size, 0);
-  assert.ok(sprites.every((sprite) => sprite.animation === 'goal-spark-fountain-burst-v3'));
+  assert.ok(sparks.every((sprite) => sprite.animation === 'goal-spark-fountain-burst-v3'));
+  assert.ok(smoke.every((sprite) => sprite.animation === 'goal-flare-billow-v3'));
   assert.equal(clips.get('goal-spark-fountain-burst-v3').frames.length, 8);
+  assert.equal(clips.get('goal-flare-billow-v3').frames.length, 8);
   assert.equal(clips.get('goal-spark-fountain-burst-v3').repeat, -1);
+  assert.ok(sparks.some((sprite) => sprite.scaleX > sprite.scaleY));
+  assert.ok(smoke.every((sprite) => sprite.scaleX > sprite.scaleY * 1.75));
+  assert.ok(smoke.every((sprite) => sprite.depth < Math.min(...sparks.map((sprite) => sprite.depth))));
 
   celebration.stop();
   assert.equal(celebration.objects.size, 0);
@@ -137,8 +245,9 @@ test('goal fountains play all eight authored frames and are fully removed by sto
   assert.deepEqual(timers, []);
 
   celebration.showPitchPyro(true);
-  const reduced = sprites.slice(2);
-  assert.ok(reduced.every((sprite) => sprite.alpha === 0.96));
+  const reduced = sprites.slice(8);
+  assert.equal(reduced.length, 8);
+  assert.ok(reduced.every((sprite) => sprite.alpha > 0 && sprite.alpha < 0.9));
   assert.ok(reduced.every((sprite) => sprite.frame === 3 && !sprite.animation));
   assert.equal(celebration.timers.size, 0, 'reduced motion needs no policy timers');
   celebration.stop();
@@ -170,7 +279,7 @@ test('an active celebration is rebuilt coherently when reduced motion changes li
     ['stand', true],
     ['pyro', true],
     ['card', options],
-    ['cleanup', 650]
+    ['cleanup', GOAL_CELEBRATION_TIMING.reducedMs]
   ]);
   assert.equal(celebration.setReducedMotion(true), false, 'same policy does not restart the result');
 });
