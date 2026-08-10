@@ -9,7 +9,7 @@ import { AUDIO_SAMPLES, Audio } from '../systems/AudioSynth.js';
 import { MenuMusic } from '../systems/MenuMusic.js';
 import { applyDocumentSettings } from '../systems/SettingsPanel.js';
 import { makePuppetTextures } from '../art/PuppetTextures.js';
-import { CROWD_ANIMATION } from '../data/crowdAnimation.js';
+import { CROWD_STAND } from '../data/crowdStand.js';
 import { paintPitchSurface } from '../art/PitchSurface.js';
 
 const KICKER_POSES = {
@@ -46,10 +46,7 @@ export class BootScene extends Phaser.Scene {
   // first paint and roughly a tenth of it.
   preload() {
     const base = import.meta.env.BASE_URL;
-    this.load.spritesheet(CROWD_ANIMATION.textureKey, `${base}${CROWD_ANIMATION.assetPath}`, {
-      frameWidth: CROWD_ANIMATION.frameWidth,
-      frameHeight: CROWD_ANIMATION.frameHeight
-    });
+    this.load.image(CROWD_STAND.textureKey, `${base}${CROWD_STAND.assetPath}`);
     this.load.image('calynx-logo-pixel', `${base}assets/hd/calynx-logo-pixel.png`);
 
     // The menu hero wears exactly one striker. Reading the save this early is

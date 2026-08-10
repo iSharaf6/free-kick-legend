@@ -63,12 +63,10 @@ const TIERS = Object.freeze([
     top: 20,
     bottom: 45,
     depth: 1.12,
-    // Neutral grey tints change exposure only. The old cool blue-grey tints
-    // replaced the panorama's navy, gold, burgundy and skin-tone ramps.
-    tint: 0xcdcdcd,
+    tint: 0x44566a,
     alpha: 1,
     bobScale: 0.4,       // distant supporters barely register individual movement
-    tintJitter: 5,       // subtle exposure wobble, never a hue shift
+    tintJitter: 9,       // per-slice brightness wobble in 0-255 channel steps
     seed: 0x51f3a7
   }),
   Object.freeze({
@@ -77,10 +75,10 @@ const TIERS = Object.freeze([
     top: 42,
     bottom: 66,
     depth: 1.22,
-    tint: 0xe6e6e6,
+    tint: 0x6d8195,
     alpha: 1,
     bobScale: 0.72,
-    tintJitter: 5,
+    tintJitter: 12,
     seed: 0x2c9b41
   }),
   Object.freeze({
@@ -89,19 +87,19 @@ const TIERS = Object.freeze([
     top: 62,
     bottom: 88,
     depth: 1.3,
-    // The closest bank is effectively native artwork, with only tiny seeded
-    // exposure variation to stop neighbouring slices reading as a tiled strip.
-    tint: 0xffffff,
+    tint: 0x93a3b0,
     alpha: 1,
     bobScale: 1,
-    tintJitter: 3,
+    tintJitter: 14,
     seed: 0x7ad25e
   })
 ]);
 
 export const CROWD_STAND = Object.freeze({
-  // Geometry remains shared with StandDressing; supporter pixels now come
-  // exclusively from crowdAnimation.js and its generated v3 pose atlas.
+  // Unchanged from the old stand: LevelSelectScene hardcodes this string, and
+  // the panorama PNG is byte-for-byte the same file.
+  textureKey: 'crowd-panorama-v3',
+  assetPath: 'assets/hd/crowd-panorama-v3-clean.png',
   sourceWidth: SOURCE_WIDTH,
   sourceHeight: SOURCE_HEIGHT,
   cutColumns: CUT_COLUMNS,
