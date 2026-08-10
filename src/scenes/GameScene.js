@@ -488,6 +488,14 @@ export class GameScene extends Phaser.Scene {
     this.baseTarget = this.level.target ? { ...this.level.target } : null;
     this.activeTarget = this.baseTarget ? { ...this.baseTarget } : null;
 
+    const savedLoadout = SaveManager.getEquippedCosmetics?.() || SaveManager.load?.().equipped || {};
+    this.loadout = {
+      character: savedLoadout.character || 'character-mica',
+      kit: savedLoadout.kit || 'kit-home',
+      ball: savedLoadout.ball || 'ball-classic',
+      trail: savedLoadout.trail || 'trail-none'
+    };
+
     this.crowdImage = this.add.image(GAME_W / 2, 0, 'crowd').setOrigin(0.5, 0).setDepth(0);
     this.crowdGlow = this.add.rectangle(GAME_W / 2, STADIUM_Y / 2, GAME_W, STADIUM_Y, PAL.gold, 0)
       .setDepth(1)
@@ -504,13 +512,6 @@ export class GameScene extends Phaser.Scene {
     this.drawRings();
     this.buildHazardVisuals();
 
-    const savedLoadout = SaveManager.getEquippedCosmetics?.() || SaveManager.load?.().equipped || {};
-    this.loadout = {
-      character: savedLoadout.character || 'character-mica',
-      kit: savedLoadout.kit || 'kit-home',
-      ball: savedLoadout.ball || 'ball-classic',
-      trail: savedLoadout.trail || 'trail-none'
-    };
     this.loadoutGameplay = resolveLoadoutGameplay(this.loadout);
     this.ball = new Ball({
       physics: this.loadoutGameplay.ballPhysics,
@@ -1153,7 +1154,9 @@ export class GameScene extends Phaser.Scene {
     this.crowdTiers?.destroy?.();
     this.crowdTiers = addCrowdStand(this, {
       viewWidth: GAME_W,
-      reducedMotion: Boolean(this.settings.reducedMotion)
+      reducedMotion: Boolean(this.settings.reducedMotion),
+      kitId: this.loadout?.kit || 'kit-home',
+      palette: getCosmetic(this.loadout?.kit || 'kit-home')?.palette
     });
     this.nearCrowd = this.crowdTiers.tiles;
   }

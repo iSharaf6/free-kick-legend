@@ -1,199 +1,120 @@
 import {
   CROWD_ANIMATION,
-  crowdAmbientPose,
-  crowdCheerFramesForCohort,
-  crowdCohortFrameName,
-  crowdCohortFrames,
-  crowdCohortLayout,
-  crowdGoalFramesForCohort,
+  crowdDisplayScale,
+  crowdFrameName,
+  crowdFrames,
+  crowdGoalSequence,
   crowdPanelLayout,
-  crowdPoseFrames,
-  crowdStaticFrameName,
-  crowdStaticFrames
+  crowdSource,
+  crowdWatchingFrame
 } from '../data/crowdAnimation.js';
-import { addStandDressing } from './StandDressing.js';
+import { ensureCrowdPaletteTextures } from './CrowdPalette.js';
 
-// Stadium architecture and supporter motion are separate layers. Two distinct
-// full-panel plates remain unchanged for the scene's lifetime; six smaller
-// supporter cohorts crossfade above them. The cohort windows stop at the atlas'
-// stair/vomitory lanes and short of its roof/front rail, so those hard lines can
-// never pop between generated poses.
-
-/** Add every named runtime crop to the generated 2x3 atlas. */
 export function registerCrowdAnimationFrames(scene) {
-  const texture = scene.textures.get(CROWD_ANIMATION.textureKey);
-  if (!texture || texture.key === '__MISSING') return false;
-
-  const frames = [
-    ...crowdPoseFrames(),
-    ...crowdStaticFrames(),
-    ...crowdCohortFrames()
-  ];
-  for (const frame of frames) {
-    if (!texture.has(frame.name)) {
-      texture.add(frame.name, 0, frame.x, frame.y, frame.width, frame.height);
+  let complete = true;
+  for (const kind of ['watch', 'goal']) {
+    const source = crowdSource(kind);
+    const texture = scene.textures.get(source.activeTextureKey);
+    if (!texture || texture.key === '__MISSING') {
+      complete = false;
+      continue;
     }
+    for (const frame of crowdFrames(kind)) {
+      if (!texture.has(frame.name)) {
+        texture.add(frame.name, 0, frame.x, frame.y, frame.width, frame.height);
+      }
+    }
+    complete &&= crowdFrames(kind).every((frame) => texture.has(frame.name));
   }
-  return frames.every((frame) => texture.has(frame.name));
+  return complete;
 }
 
-// Compatibility alias retained for scenes/tests from the retired slice stand.
+// Compatibility alias retained for diagnostics that used the old slice stand.
 export const registerCrowdSliceFrames = registerCrowdAnimationFrames;
 
-function timerNow(scene) {
+function now(scene) {
   return Number.isFinite(scene.time?.now) ? scene.time.now : 0;
 }
 
-// The sole construction scale site. Width and height are never assigned
-// independently, preserving every generated pixel's authored aspect ratio.
-function addScaledCrowdImage(scene, x, y, frame, scale, depth, alpha = 1) {
-  return scene.add
-    .image(x, y, CROWD_ANIMATION.textureKey, frame)
-    .setOrigin(0, 0)
-    .setScale(scale)
-    .setAlpha(alpha)
-    .setDepth(depth);
-}
-
 class CrowdStand {
-  constructor(scene, baseSprites, cohorts, dressing, {
+  constructor(scene, panels, {
+    viewWidth,
     reducedMotion = false,
     phaseOffset = 0
-  } = {}) {
+  }) {
     this.scene = scene;
-    this.baseSprites = baseSprites.filter(Boolean);
-    this.cohorts = cohorts.filter(Boolean);
-    this.sprites = this.cohorts.flatMap((cohort) => cohort.layers).filter(Boolean);
-    this.sprite = this.baseSprites[0] || this.sprites[0] || null;
-    // Existing scene code keeps this compatibility collection as `nearCrowd`.
-    // It now points at one active handle per independent supporter cohort.
-    this.tiles = this.cohorts.map((cohort) => cohort.layers[cohort.activeLayer]);
-    this.dressing = dressing;
+    this.panels = panels;
+    this.viewWidth = viewWidth;
     this.reducedMotion = Boolean(reducedMotion);
-    const cycle = CROWD_ANIMATION.cohortAmbientPatterns[0].length;
-    this.phase = Math.abs(Math.trunc(phaseOffset)) % cycle;
-    this.sequenceUntil = 0;
-    this.goalUntil = 0;
+    this.phase = Math.abs(Math.trunc(phaseOffset)) % CROWD_ANIMATION.frameCount;
     this.timer = null;
     this.scheduled = [];
+    this.sequenceUntil = 0;
+    this.goalUntil = 0;
     this.destroyed = false;
-    this.currentPose = CROWD_ANIMATION.states.idle;
-    this.currentPoses = this.cohorts.map(() => null);
-    this.setPose(CROWD_ANIMATION.states.idle, { instant: true, force: true });
+    this.currentKind = 'watch';
+    this.currentFrames = panels.map(() => 0);
+    this.tiles = panels.map((panel) => panel.layers[panel.activeLayer]);
+    this.sprites = panels.flatMap((panel) => panel.layers);
+    this.sprite = this.tiles[0] || null;
+    this.applyWatching({ instant: true, force: true });
   }
 
   isRenderable() {
-    return Boolean(!this.destroyed && this.cohorts.some((cohort) => (
-      cohort.layers.some((sprite) => sprite?.active !== false)
-    )));
+    return !this.destroyed && this.panels.some((panel) => panel.layers.some((sprite) => sprite?.active !== false));
   }
 
-  killCohortTransitions() {
-    this.cohorts.forEach((cohort) => {
-      this.scene.tweens?.killTweensOf?.(cohort.layers);
-    });
-    return this;
-  }
-
-  /**
-   * Crossfade one supporter region using a two-sprite buffer.
-   *
-   * The persistent architecture plate is never touched here. A transition can
-   * therefore reveal that same plate between poses rather than replacing a
-   * stairwell, tunnel or fascia on a single animation tick.
-   */
-  setCohortPose(cohortIndex, frame, {
+  setPanelFrame(panelIndex, kind, frame, {
     instant = false,
     force = false,
-    transitionMs = CROWD_ANIMATION.ambientTransitionMs
+    transitionMs = CROWD_ANIMATION.watchingTransitionMs
   } = {}) {
-    const cohort = this.cohorts[cohortIndex];
-    if (!cohort || this.destroyed) return this;
-    if (!force && this.currentPoses[cohortIndex] === frame) return this;
+    const panel = this.panels[panelIndex];
+    if (!panel || this.destroyed) return this;
+    if (!force && this.currentKind === kind && this.currentFrames[panelIndex] === frame) return this;
 
-    this.scene.tweens?.killTweensOf?.(cohort.layers);
-    const current = cohort.layers[cohort.activeLayer];
-    const nextIndex = 1 - cohort.activeLayer;
-    const next = cohort.layers[nextIndex];
-    next.setFrame(crowdCohortFrameName(cohortIndex, frame));
+    this.scene.tweens?.killTweensOf?.(panel.layers);
+    const current = panel.layers[panel.activeLayer];
+    const nextIndex = 1 - panel.activeLayer;
+    const next = panel.layers[nextIndex];
+    next.setTexture(crowdSource(kind).activeTextureKey, crowdFrameName(kind, frame));
+    next.setScale(crowdDisplayScale(kind, this.viewWidth));
 
-    const shouldCut = instant
-      || this.reducedMotion
-      || !(transitionMs > 0)
-      || typeof this.scene.tweens?.add !== 'function';
-    if (shouldCut) {
+    const cut = instant || this.reducedMotion || !(transitionMs > 0) || !this.scene.tweens?.add;
+    if (cut) {
       current.setAlpha(0);
       next.setAlpha(1);
     } else {
       current.setAlpha(1);
       next.setAlpha(0);
-      this.scene.tweens.add({
-        targets: current,
-        alpha: 0,
-        duration: transitionMs,
-        ease: 'Sine.easeInOut'
-      });
-      this.scene.tweens.add({
-        targets: next,
-        alpha: 1,
-        duration: transitionMs,
-        ease: 'Sine.easeInOut'
-      });
+      this.scene.tweens.add({ targets: current, alpha: 0, duration: transitionMs, ease: 'Sine.easeInOut' });
+      this.scene.tweens.add({ targets: next, alpha: 1, duration: transitionMs, ease: 'Sine.easeInOut' });
     }
-
-    cohort.activeLayer = nextIndex;
-    this.tiles[cohortIndex] = next;
-    this.currentPoses[cohortIndex] = frame;
-    if (cohortIndex === 0) this.currentPose = frame;
+    panel.activeLayer = nextIndex;
+    this.tiles[panelIndex] = next;
+    this.currentFrames[panelIndex] = frame;
+    this.currentKind = kind;
     return this;
   }
 
-  // Compatibility method: a "panel" now means the three cohorts on that half.
-  setPanelPose(panelIndex, frame, options) {
-    const first = panelIndex * CROWD_ANIMATION.cohortsPerPanel;
-    for (let offset = 0; offset < CROWD_ANIMATION.cohortsPerPanel; offset++) {
-      this.setCohortPose(first + offset, frame, options);
-    }
-    return this;
-  }
-
-  setPose(frame, options) {
-    this.cohorts.forEach((_, cohortIndex) => {
-      this.setCohortPose(cohortIndex, frame, options);
+  applyWatching(options = {}) {
+    this.panels.forEach((_, panelIndex) => {
+      this.setPanelFrame(panelIndex, 'watch', crowdWatchingFrame(panelIndex, this.phase), options);
     });
-    this.currentPose = frame;
+    this.currentKind = 'watch';
     return this;
   }
 
   startAmbient() {
     if (this.destroyed || this.reducedMotion || this.timer || !this.isRenderable()) return this;
-    // Establish the six different deterministic poses immediately; the first
-    // live interval should never expose two repeated half-panels.
-    this.applyAmbient({ instant: true });
     this.timer = this.scene.time.addEvent({
-      delay: CROWD_ANIMATION.ambientFrameMs,
+      delay: CROWD_ANIMATION.watchingFrameMs,
       loop: true,
       callback: () => {
-        if (timerNow(this.scene) < this.sequenceUntil) return;
-        const cycle = CROWD_ANIMATION.cohortAmbientPatterns[0].length;
-        this.phase = (this.phase + 1) % cycle;
-        this.applyAmbient();
+        if (now(this.scene) < this.sequenceUntil) return;
+        this.phase = (this.phase + 1) % CROWD_ANIMATION.frameCount;
+        this.applyWatching();
       }
-    });
-    return this;
-  }
-
-  /** Independently phase each of the six deterministic supporter regions. */
-  applyAmbient(options = {}) {
-    if (this.reducedMotion) {
-      return this.setPose(CROWD_ANIMATION.states.idle, { instant: true });
-    }
-    this.cohorts.forEach((_, cohortIndex) => {
-      this.setCohortPose(
-        cohortIndex,
-        crowdAmbientPose(cohortIndex, this.phase),
-        { transitionMs: CROWD_ANIMATION.ambientTransitionMs, ...options }
-      );
     });
     return this;
   }
@@ -203,119 +124,89 @@ class CrowdStand {
     this.scheduled.length = 0;
     this.sequenceUntil = 0;
     this.goalUntil = 0;
-    this.killCohortTransitions();
     return this;
   }
 
-  scheduleFrame(after, delay, callback) {
-    const timer = after(delay, () => {
-      if (!this.destroyed) callback();
-    });
+  schedule(delay, callback, schedule = null) {
+    const timer = schedule
+      ? schedule(delay, callback)
+      : this.scene.time.delayedCall(delay, callback);
     if (timer) this.scheduled.push(timer);
     return timer;
   }
 
-  runCohortSequences(sequenceFor, frameMs, transitionMs, schedule, delays) {
+  playGoal(schedule = null) {
     if (!this.isRenderable()) return this;
     this.cancelSequence();
+    if (this.reducedMotion) {
+      this.panels.forEach((_, panelIndex) => this.setPanelFrame(panelIndex, 'goal', 5, { instant: true }));
+      this.sequenceUntil = now(this.scene) + CROWD_ANIMATION.reducedGoalHoldMs;
+      this.goalUntil = this.sequenceUntil;
+      this.schedule(CROWD_ANIMATION.reducedGoalHoldMs, () => {
+        this.sequenceUntil = 0;
+        this.goalUntil = 0;
+        this.applyWatching({ instant: true });
+      }, schedule);
+      return this;
+    }
 
-    const after = schedule
-      || ((delay, callback) => this.scene.time.delayedCall(delay, callback));
-    const sequences = this.cohorts.map((_, index) => sequenceFor(index));
-    const cohortDelays = this.cohorts.map((_, index) => Math.max(0, delays[index] || 0));
-    const duration = Math.max(...sequences.map((frames, index) => (
-      frames.length * frameMs + cohortDelays[index]
-    )));
-    this.sequenceUntil = timerNow(this.scene) + duration;
+    const frames = crowdGoalSequence();
+    const panelDelay = 34;
+    const duration = frames.length * CROWD_ANIMATION.goalFrameMs + panelDelay;
+    this.sequenceUntil = now(this.scene) + duration;
     this.goalUntil = this.sequenceUntil;
-
-    sequences.forEach((frames, cohortIndex) => {
-      frames.forEach((frame, frameIndex) => {
-        const delay = cohortDelays[cohortIndex] + frameIndex * frameMs;
-        const show = () => this.setCohortPose(cohortIndex, frame, { transitionMs });
+    frames.forEach((frame, frameIndex) => {
+      this.panels.forEach((_, panelIndex) => {
+        const delay = frameIndex * CROWD_ANIMATION.goalFrameMs + panelIndex * panelDelay;
+        const show = () => this.setPanelFrame(panelIndex, 'goal', frame, {
+          transitionMs: CROWD_ANIMATION.goalTransitionMs
+        });
         if (delay === 0) show();
-        else this.scheduleFrame(after, delay, show);
+        else this.schedule(delay, show, schedule);
       });
     });
-    this.scheduleFrame(after, duration, () => {
+    this.schedule(duration, () => {
       this.sequenceUntil = 0;
       this.goalUntil = 0;
       this.phase = 0;
-      this.applyAmbient();
-    });
+      this.applyWatching();
+    }, schedule);
     return this;
   }
 
-  runReducedPoses(poses, holdMs, schedule = null) {
+  playCheer(schedule = null) {
     if (!this.isRenderable()) return this;
     this.cancelSequence();
-    const after = schedule
-      || ((delay, callback) => this.scene.time.delayedCall(delay, callback));
-    this.sequenceUntil = timerNow(this.scene) + holdMs;
-    this.goalUntil = this.sequenceUntil;
-    this.cohorts.forEach((_, cohortIndex) => {
-      this.setCohortPose(cohortIndex, poses[cohortIndex % poses.length], { instant: true });
+    const frames = this.reducedMotion ? [4] : [2, 3, 4, 9];
+    const duration = this.reducedMotion
+      ? CROWD_ANIMATION.reducedCheerHoldMs
+      : frames.length * CROWD_ANIMATION.cheerFrameMs;
+    this.sequenceUntil = now(this.scene) + duration;
+    frames.forEach((frame, index) => {
+      const show = () => this.panels.forEach((_, panelIndex) => this.setPanelFrame(
+        panelIndex,
+        'watch',
+        (frame + CROWD_ANIMATION.panelPhaseOffsets[panelIndex]) % CROWD_ANIMATION.frameCount,
+        { instant: this.reducedMotion, transitionMs: CROWD_ANIMATION.cheerTransitionMs }
+      ));
+      if (index === 0) show();
+      else this.schedule(index * CROWD_ANIMATION.cheerFrameMs, show, schedule);
     });
-    this.scheduleFrame(after, holdMs, () => {
+    this.schedule(duration, () => {
       this.sequenceUntil = 0;
-      this.goalUntil = 0;
-      this.setPose(CROWD_ANIMATION.states.idle, { instant: true });
-    });
+      this.applyWatching({ instant: this.reducedMotion });
+    }, schedule);
     return this;
-  }
-
-  /** A short save/near-miss response with adjacent cohorts on different beats. */
-  playCheer(schedule = null) {
-    if (this.reducedMotion) {
-      return this.runReducedPoses(
-        [CROWD_ANIMATION.states.arms, CROWD_ANIMATION.states.chant],
-        CROWD_ANIMATION.reducedCheerHoldMs,
-        schedule
-      );
-    }
-    return this.runCohortSequences(
-      crowdCheerFramesForCohort,
-      CROWD_ANIMATION.cheerFrameMs,
-      CROWD_ANIMATION.cheerTransitionMs,
-      schedule,
-      CROWD_ANIMATION.cheerCohortDelaysMs
-    );
   }
 
   cheer(schedule = null) {
     return this.playCheer(schedule);
   }
 
-  /** Goal surge: left cohorts unfurl the tifo while right cohorts raise flags. */
-  playGoal(schedule = null) {
-    this.dressing?.celebrate?.();
-    if (this.reducedMotion) {
-      return this.runReducedPoses(
-        [
-          CROWD_ANIMATION.states.tifo,
-          CROWD_ANIMATION.states.tifo,
-          CROWD_ANIMATION.states.tifo,
-          CROWD_ANIMATION.states.flags,
-          CROWD_ANIMATION.states.flags,
-          CROWD_ANIMATION.states.flags
-        ],
-        CROWD_ANIMATION.reducedGoalHoldMs,
-        schedule
-      );
-    }
-    return this.runCohortSequences(
-      crowdGoalFramesForCohort,
-      CROWD_ANIMATION.goalFrameMs,
-      CROWD_ANIMATION.goalTransitionMs,
-      schedule,
-      CROWD_ANIMATION.goalCohortDelaysMs
-    );
-  }
-
   reset() {
     this.cancelSequence();
     this.phase = 0;
-    return this.setPose(CROWD_ANIMATION.states.idle, { instant: true });
+    return this.applyWatching({ instant: true, force: true });
   }
 
   setReducedMotion(reduced) {
@@ -323,8 +214,6 @@ class CrowdStand {
     if (next === this.reducedMotion) return this;
     this.reducedMotion = next;
     this.cancelSequence();
-    this.dressing?.setReducedMotion?.(next);
-
     if (next) {
       this.timer?.remove?.(false);
       this.timer = null;
@@ -339,19 +228,14 @@ class CrowdStand {
     this.timer = null;
     this.cancelSequence();
     this.destroyed = true;
-    this.dressing?.destroy?.();
-    this.dressing = null;
-    this.baseSprites.forEach((sprite) => sprite?.destroy?.());
     this.sprites.forEach((sprite) => sprite?.destroy?.());
-    this.baseSprites = [];
-    this.cohorts = [];
+    this.panels = [];
+    this.tiles = [];
     this.sprites = [];
     this.sprite = null;
-    this.tiles = [];
   }
 }
 
-/** Build two static architecture plates and six independent supporter cohorts. */
 export function addCrowdStand(scene, {
   viewWidth = CROWD_ANIMATION.displayWidth,
   x = 0,
@@ -359,79 +243,46 @@ export function addCrowdStand(scene, {
   reducedMotion = false,
   phaseOffset = 0,
   depthOffset = 0,
-  dressed = true,
-  autoStart = true
+  autoStart = true,
+  kitId = 'kit-home',
+  palette = null
 } = {}) {
-  const baseSprites = [];
-  const cohorts = [];
-
+  ensureCrowdPaletteTextures(scene, kitId, palette);
+  const panels = [];
   if (registerCrowdAnimationFrames(scene)) {
-    for (const panel of crowdPanelLayout(viewWidth, x)) {
-      const sprite = addScaledCrowdImage(
-        scene,
-        panel.x,
-        top,
-        crowdStaticFrameName(panel.index),
-        panel.scale,
-        CROWD_ANIMATION.depth - 0.002 + depthOffset
-      );
-      sprite.fklBaselineY = top;
-      sprite.fklPanelIndex = panel.index;
-      sprite.fklLayerRole = 'static-architecture';
-      baseSprites.push(sprite);
-    }
-
-    for (const layout of crowdCohortLayout(viewWidth, x, top)) {
-      const layers = [0, 1].map((bufferIndex) => {
-        const sprite = addScaledCrowdImage(
-          scene,
-          layout.x,
-          layout.y,
-          crowdCohortFrameName(layout.index, CROWD_ANIMATION.states.idle),
-          layout.scale,
-          CROWD_ANIMATION.depth + bufferIndex * 0.0005 + depthOffset,
-          bufferIndex === 0 ? 1 : 0
-        );
-        sprite.fklBaselineY = layout.y;
-        sprite.fklCohortIndex = layout.index;
-        sprite.fklLayerRole = 'supporter-cohort';
-        return sprite;
+    for (const layout of crowdPanelLayout('watch', viewWidth, x)) {
+      const layers = [0, 1].map((bufferIndex) => scene.add
+        .image(layout.x, top, crowdSource('watch').activeTextureKey, crowdFrameName('watch', 0))
+        .setOrigin(0, 0)
+        .setScale(layout.scale)
+        .setAlpha(bufferIndex === 0 ? 1 : 0)
+        .setDepth(CROWD_ANIMATION.depth + bufferIndex * 0.0005 + depthOffset));
+      layers.forEach((sprite) => {
+        sprite.fklPanelIndex = layout.index;
+        sprite.fklBaselineY = top;
       });
-      cohorts.push({
-        index: layout.index,
-        panelIndex: layout.panelIndex,
-        goalRole: layout.goalRole,
-        layers,
-        activeLayer: 0
-      });
+      panels.push({ index: layout.index, layers, activeLayer: 0 });
     }
   }
-
-  const dressing = dressed
-    ? addStandDressing(scene, { viewWidth, reducedMotion, depthOffset })
-    : null;
-
-  const controller = new CrowdStand(scene, baseSprites, cohorts, dressing, {
-    reducedMotion,
-    phaseOffset
-  });
+  const controller = new CrowdStand(scene, panels, { viewWidth, reducedMotion, phaseOffset });
   if (autoStart) controller.startAmbient();
   return controller;
 }
 
-/** Menu variant, rebased so the static stadium plate starts at `depth`. */
 export function addMenuCrowd(scene, {
   depth = 2,
   viewWidth = CROWD_ANIMATION.displayWidth,
   top = CROWD_ANIMATION.top,
   reducedMotion = false,
-  dressed = true
+  kitId = 'kit-home',
+  palette = null
 } = {}) {
   return addCrowdStand(scene, {
     viewWidth,
     top,
     reducedMotion,
-    dressed,
+    kitId,
+    palette,
     depthOffset: depth - CROWD_ANIMATION.depth
   });
 }

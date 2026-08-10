@@ -448,11 +448,16 @@ export class MenuScene extends Phaser.Scene {
     });
     const settings = SaveManager.getSettings?.() || {};
     this.reducedMotion = Boolean(settings.reducedMotion);
+    const equippedKit = SaveManager.getEquippedCosmetic?.('kit') ?? 'kit-home';
+    const equippedCharacter = SaveManager.getEquippedCosmetic?.('character') ?? 'character-mica';
+    const equippedKitPalette = getCosmetic(equippedKit)?.palette;
     // Kept on the scene so its ambient timer is torn down explicitly rather
     // than being left for Phaser's shutdown to collect.
     this.crowdStand = addMenuCrowd(this, {
       depth: 2,
-      reducedMotion: this.reducedMotion
+      reducedMotion: this.reducedMotion,
+      kitId: equippedKit,
+      palette: equippedKitPalette
     });
     this.events.once('shutdown', () => {
       this.crowdStand?.destroy?.();
@@ -473,8 +478,6 @@ export class MenuScene extends Phaser.Scene {
     const coins = SaveManager.getCoins?.() ?? 0;
     const lastPlayed = SaveManager.getLastPlayed?.();
     const continueIndex = this.resolveContinueIndex(lastPlayed, unlocked);
-    const equippedKit = SaveManager.getEquippedCosmetic?.('kit') ?? 'kit-home';
-    const equippedCharacter = SaveManager.getEquippedCosmetic?.('character') ?? 'character-mica';
     const today = utcDateKey();
     const daily = SaveManager.ensureDaily(today);
     const readyClaims = [
