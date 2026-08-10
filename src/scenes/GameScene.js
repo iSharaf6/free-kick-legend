@@ -78,7 +78,8 @@ const SECURITY_GUARD_MOTION = Object.freeze([
 // texture rather than a stadium. Every board carries the CALYNX mark; what
 // varies is the colourway and the width, which is how a real ground looks when
 // an anchor sponsor has bought the whole run.
-const BOARD_TOP_Y = 83;
+// 21 logical pixels of hoarding, measured up from the seam its foot stands on.
+const BOARD_TOP_Y = STADIUM_Y - 21;
 // Hoarding height in world metres, derived from where the boards are painted:
 // their top edge is BOARD_TOP_Y and their foot is on the stadium/turf seam.
 const BOARD_HEIGHT = CAM.height -
@@ -97,12 +98,16 @@ const SPONSOR_BOARDS = Object.freeze([
 // handful of small silhouettes stops the crowd/board/pitch transition reading
 // as three flat stacked bands. Heights are chosen so heads and equipment clear
 // the top of the advertising boards at y=83; anything shorter is invisible.
+// Feet are given as offsets from the stadium/turf seam, not as absolute rows.
+// The pit stands on that seam, so anchoring it anywhere else means a change to
+// STADIUM_Y leaves the photographers floating above the touchline or buried in
+// the advertising.
 const TRACKSIDE_LAYOUT = Object.freeze([
-  Object.freeze({ texture: 'trackside-photographer', x: 52, y: 96, w: 18, h: 27, flip: false, flash: 2600 }),
-  Object.freeze({ texture: 'trackside-camera', x: 97, y: 100, w: 17, h: 40 }),
-  Object.freeze({ texture: 'trackside-photographer', x: 288, y: 96, w: 18, h: 27, flip: true, flash: 4100 }),
-  Object.freeze({ texture: 'trackside-photographer', x: 372, y: 96, w: 18, h: 27, flip: true, flash: 3300 }),
-  Object.freeze({ texture: 'trackside-camera', x: 441, y: 100, w: 17, h: 40 })
+  Object.freeze({ texture: 'trackside-photographer', x: 52, y: STADIUM_Y - 8, w: 18, h: 27, flip: false, flash: 2600 }),
+  Object.freeze({ texture: 'trackside-camera', x: 97, y: STADIUM_Y - 4, w: 17, h: 40 }),
+  Object.freeze({ texture: 'trackside-photographer', x: 288, y: STADIUM_Y - 8, w: 18, h: 27, flip: true, flash: 4100 }),
+  Object.freeze({ texture: 'trackside-photographer', x: 372, y: STADIUM_Y - 8, w: 18, h: 27, flip: true, flash: 3300 }),
+  Object.freeze({ texture: 'trackside-camera', x: 441, y: STADIUM_Y - 4, w: 17, h: 40 })
 ]);
 
 // What each hazard actually does to the shot, in the player's language. Without
@@ -934,9 +939,9 @@ export class GameScene extends Phaser.Scene {
       this.crowdImage.setTint(atmosphereTint ? mixColor(atmosphereTint, 0x4a5a6b, 0.72) : 0x64748a);
     }
 
-    // Three tiers of shuffled panorama slices, back to front, plus the
-    // structure, lighting and props that turn them into a stand. The controller
-    // owns all of it, including the vomitories this method used to draw itself.
+    // One authored, non-repeating panoramic plate plus the independent stand
+    // structure, lighting and props. The controller owns the whole composition,
+    // including the vomitories this method used to draw itself.
     this.crowdTiers?.destroy?.();
     this.crowdTiers = addCrowdStand(this, {
       viewWidth: GAME_W,
@@ -954,7 +959,7 @@ export class GameScene extends Phaser.Scene {
     // stand. Their lower bodies sit behind the LED boards at the next depth.
     SECURITY_GUARD_LAYOUT.forEach((x, index) => {
       const frame = (index + this.levelIndex) % 6;
-      const guard = this.add.image(x, 99, 'security-guards-hd', frame)
+      const guard = this.add.image(x, STADIUM_Y - 5, 'security-guards-hd', frame)
         .setOrigin(0.5, 1)
         .setDisplaySize(14, 32)
         .setDepth(1.4);
@@ -1106,6 +1111,10 @@ export class GameScene extends Phaser.Scene {
     this.crowdTiers?.playGoal((delay, callback) => this.schedule(delay, callback));
   }
 
+  playCrowdOut() {
+    this.crowdTiers?.playOut((delay, callback) => this.schedule(delay, callback));
+  }
+
   // A short punch on whichever score/progress readout this mode owns, so the
   // reward lands somewhere the eye is already looking.
   popScoreReadout() {
@@ -1142,7 +1151,32 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * Flat colour behind everything, extending past all four edges.
+   *
+   * The goal celebration shakes the camera, and a camera shake is a render-time
+   * translation: nothing clamps it to the world, so for those few frames the
+   * viewport samples outside the authored 480x270 and the frame picks up a bar
+   * of empty black down one side. Two rectangles of the right colour, drawn
+   * wider than the world, mean the worst case is a couple of pixels of plain
+   * turf or night sky at the edge - which nobody can see at 90ms.
+   *
+   * Deliberately not solved by stretching the pitch texture instead: its mowing
+   * is authored to converge on the camera's own vanishing line, and widening it
+   * would pull the lanes off that line for a two-pixel gain.
+   */
+  drawShakeBleed() {
+    const bleed = 16;
+    this.add.rectangle(GAME_W / 2, (STADIUM_Y - bleed) / 2,
+      GAME_W + bleed * 2, STADIUM_Y + bleed, PAL.night)
+      .setDepth(-2);
+    this.add.rectangle(GAME_W / 2, STADIUM_Y + (GAME_H + bleed - STADIUM_Y) / 2,
+      GAME_W + bleed * 2, GAME_H + bleed - STADIUM_Y, PAL.grassShadow)
+      .setDepth(-2);
+  }
+
   drawPitch() {
+    this.drawShakeBleed();
     if (this.textures.exists('pitch-grass-pixel-v3')) {
       this.pitchImage = this.add.image(0, STADIUM_Y, 'pitch-grass-pixel-v3')
         .setOrigin(0, 0)
@@ -3274,6 +3308,7 @@ export class GameScene extends Phaser.Scene {
       default:
         this.showBanner('OFF TARGET', '#b0bec5');
         Audio.groan();
+        this.playCrowdOut();
     }
 
     this.showShotReadout(outcome, pt, shotRating);

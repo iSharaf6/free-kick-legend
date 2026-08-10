@@ -1,5 +1,8 @@
 # Crowd animation V1
 
+> Historical six-frame experiment. It is not loaded by the game. The current
+> 30-frame production contract is in `crowd-v3/CROWD-ANIMATION-V3-PROMPTS.md`.
+
 Generated with the built-in image-generation workflow using the current game
 screenshot as a strict style reference. The original chroma-key board and the
 cleaned alpha board are kept beside this prompt. `scripts/build_crowd_sprites.py`

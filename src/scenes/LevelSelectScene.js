@@ -6,6 +6,7 @@ import { MenuMusic } from '../systems/MenuMusic.js';
 import { Audio } from '../systems/AudioSynth.js';
 import { LEVELS, CUPS as CUP_DATA } from '../data/levels.js';
 import { prefetchMatchPack } from '../data/matchAssets.js';
+import { CROWD_ANIMATION } from '../data/crowdAnimation.js';
 import { PAL } from '../pixelart.js';
 
 const LEVELS_PER_CUP = 10;
@@ -68,8 +69,8 @@ function addAspectCoverImage(scene, key, width = TOUR_VIEW_W, height = TOUR_H) {
   return image;
 }
 
-function addAspectCoverRegion(scene, key, x, y, width, height) {
-  const image = scene.add.image(x, y, key).setOrigin(0.5);
+function addAspectCoverRegion(scene, key, x, y, width, height, frame) {
+  const image = scene.add.image(x, y, key, frame).setOrigin(0.5);
   const sourceWidth = Math.max(1, Number(image.width) || width);
   const sourceHeight = Math.max(1, Number(image.height) || height);
   image.setScale(Math.max(width / sourceWidth, height / sourceHeight));
@@ -263,7 +264,13 @@ export class LevelSelectScene extends Phaser.Scene {
     MenuMusic.enterMenu();
     this.backgroundImage = addAspectCoverImage(this, 'stadium-menu').setDepth(0);
     this.crowdBackdrop = addAspectCoverRegion(
-      this, 'crowd-panorama-v3', GAME_W / 2, 69, TOUR_VIEW_W, 96
+      this,
+      CROWD_ANIMATION.states.moving.textureKey,
+      GAME_W / 2,
+      69,
+      TOUR_VIEW_W,
+      96,
+      0
     ).setDepth(0.2);
     this.pitchBackdrop = addAspectCoverRegion(
       this, 'pitch-grass-pixel-v3', GAME_W / 2, 209, TOUR_VIEW_W, 222

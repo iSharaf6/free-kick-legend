@@ -228,7 +228,7 @@ export function addStandDressing(scene, {
     .setTint(PAL.flood)
     // Floodlight spill has to stay under the threshold where it starts washing
     // faces out; the crowd must never compete with the ball and the goal.
-    .setAlpha(0.05)
+    .setAlpha(0.085)
     .setDepth(at(1.303))
     .setBlendMode(Phaser.BlendModes.ADD)));
 

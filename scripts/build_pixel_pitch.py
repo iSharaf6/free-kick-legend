@@ -20,7 +20,10 @@ VANISH_X = WIDTH // 2
 # y=104 to y=270, so one source pixel is 166/350 logical pixels, and the camera
 # vanishing line sits at logical y=76. That puts the vanishing point at source
 # row (76 - 104) / (166 / 350) = -59.
-PITCH_TOP_LOGICAL = 104
+# Mirrors STADIUM_Y in src/config.js. If the two disagree the painted mowing
+# converges somewhere other than the camera's vanishing line, and the turf stops
+# agreeing with the projected penalty-box markings drawn over it.
+PITCH_TOP_LOGICAL = 98
 PITCH_BOTTOM_LOGICAL = 270
 CAMERA_HORIZON_LOGICAL = 76
 LOGICAL_PER_SOURCE_PX = (PITCH_BOTTOM_LOGICAL - PITCH_TOP_LOGICAL) / HEIGHT

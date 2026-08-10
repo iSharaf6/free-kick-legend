@@ -1,5 +1,6 @@
 import { KEEPER_SHEETS, queueKeeperSheets } from './keeperAssets.js';
 import { assetUrl } from './assetBase.js';
+import { CROWD_ANIMATION } from './crowdAnimation.js';
 
 // Sprites that only ever appear once a match is on the pitch. They used to boot
 // with the title screen, which put roughly 4.3 MB of goalkeeper and defender
@@ -20,15 +21,33 @@ const MATCH_SPRITES = Object.freeze([
     frameWidth: 88,
     frameHeight: 204
   }),
+  ...['goal', 'out'].map((state) => {
+    const clip = CROWD_ANIMATION.states[state];
+    return Object.freeze({
+      key: clip.textureKey,
+      path: clip.assetPath.replace(/^assets\//, ''),
+      frameWidth: CROWD_ANIMATION.frameWidth,
+      frameHeight: CROWD_ANIMATION.frameHeight
+    });
+  }),
+  // A permanent stage unit, ten frames of additive gerb plume and twelve of
+  // shell burst, all authored by scripts/build_goal_pyro.py. Hardware is kept
+  // out of the plume sheet so it remains intact and visible while switched off.
   Object.freeze({
-    key: 'goal-celebration-stand-v1',
-    path: 'fx/goal-celebration-stand-v1.png'
+    key: 'goal-pyro-unit-v1',
+    path: 'fx/goal-pyro-unit-v1.png'
   }),
   Object.freeze({
-    key: 'goal-pyro-fountain-v1',
-    path: 'fx/goal-pyro-fountain-strip-v1.png',
+    key: 'goal-pyro-fountain-v2',
+    path: 'fx/goal-pyro-fountain-strip-v2.png',
     frameWidth: 96,
     frameHeight: 256
+  }),
+  Object.freeze({
+    key: 'goal-firework-shell-v1',
+    path: 'fx/goal-firework-shell-v1.png',
+    frameWidth: 128,
+    frameHeight: 128
   })
 ]);
 

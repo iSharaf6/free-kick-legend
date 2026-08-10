@@ -92,12 +92,15 @@ test('the match pack carries initial keepers, defenders and authored goal celebr
 
   const keys = scene.requested.map((file) => file.key);
   const initialSheets = KEEPER_SHEETS.filter((sheet) => sheet.initial);
-  assert.equal(queued, initialSheets.length + 5);
+  assert.equal(queued, initialSheets.length + 8);
   for (const sheet of initialSheets) assert.ok(keys.includes(sheet.key), `missing ${sheet.key}`);
   for (const key of ['defender-hd', 'defender-collapse-hd', 'security-guards-hd']) {
     assert.ok(keys.includes(key), `missing ${key}`);
   }
-  for (const key of ['goal-celebration-stand-v1', 'goal-pyro-fountain-v1']) {
+  for (const key of ['goal-pyro-unit-v1', 'goal-pyro-fountain-v2', 'goal-firework-shell-v1']) {
+    assert.ok(keys.includes(key), `missing ${key}`);
+  }
+  for (const key of ['crowd-goal-v3', 'crowd-out-v3']) {
     assert.ok(keys.includes(key), `missing ${key}`);
   }
   // Specialist sheets still wait for gameplay to ask for them.

@@ -238,7 +238,7 @@ test('live swipe copy clears the gesture and feedback lanes', async ({ page }) =
   expect(lanes.readoutY - lanes.hintY).toBeGreaterThan(30);
 });
 
-test('goal celebration layers authored stand art, fountain sprites, useful scorer data, and fitted typography', async ({ page }) => {
+test('goal celebration keeps planted gerbs intact around the transient plume, layers shell bursts, and presents scorer data', async ({ page }) => {
   const game = new GamePage(page);
   await game.open({ width: 1280, height: 720 });
   await page.evaluate(() => {
@@ -247,7 +247,60 @@ test('goal celebration layers authored stand art, fountain sprites, useful score
   });
   await page.waitForFunction(() => window.__fkl?.state === 'AIMING');
 
+  const idlePyro = await page.evaluate(() => {
+    const scene = window.__fkl;
+    const celebration = scene.goalCelebration;
+    return {
+      transientCount: celebration.objects.size,
+      goalZ: scene.zGoal,
+      boardsZ: scene.zBoards,
+      halfWidth: scene.goalWidth / 2,
+      anchors: celebration.pyroAnchors,
+      units: celebration.pyroUnits.map((unit) => ({
+        name: unit.name,
+        texture: unit.texture?.key,
+        x: unit.x,
+        y: unit.y,
+        depth: unit.depth,
+        active: unit.active,
+        visible: unit.visible,
+        blendMode: unit.blendMode
+      }))
+    };
+  });
+
+  expect(idlePyro.transientCount).toBe(0);
+  expect(idlePyro.units).toHaveLength(2);
+  expect(idlePyro.units.map((unit) => unit.name)).toEqual([
+    'goal-pyro-unit-left',
+    'goal-pyro-unit-right'
+  ]);
+  for (const [index, unit] of idlePyro.units.entries()) {
+    const anchor = idlePyro.anchors[index];
+    expect(unit.texture).toBe('goal-pyro-unit-v1');
+    expect(unit.active).toBe(true);
+    expect(unit.visible).toBe(true);
+    expect(unit.depth).toBeGreaterThan(1.5);
+    expect(unit.depth).toBeLessThan(2);
+    expect(unit.x).toBeCloseTo(anchor.x, 8);
+    expect(unit.y).toBeCloseTo(anchor.y, 8);
+    expect(anchor.z).toBeGreaterThan(idlePyro.goalZ);
+    expect(anchor.z).toBeLessThan(idlePyro.boardsZ);
+    expect(Math.abs(anchor.worldX)).toBeGreaterThan(idlePyro.halfWidth);
+  }
+
   await page.evaluate(() => {
+    // Record every shake the celebration asks for. Sampling isRunning instead
+    // races the effect's own 90ms window, and what actually needs asserting is
+    // that a goal requests a bounded shake at all - not whether the sample
+    // happened to land inside one.
+    window.__shakes = [];
+    const camera = window.__fkl.cameras.main;
+    const shake = camera.shake.bind(camera);
+    camera.shake = (duration, intensity, force) => {
+      window.__shakes.push({ duration, intensity });
+      return shake(duration, intensity, force);
+    };
     Object.assign(window.__fkl, {
       lastShot: { power: 0.94, spin: 0.22, vx: 0, vy: 7.5, vz: 24 },
       activeTarget: null
@@ -256,9 +309,17 @@ test('goal celebration layers authored stand art, fountain sprites, useful score
   });
   await page.waitForFunction(() => [...(window.__fkl?.goalCelebration?.objects ?? [])]
     .some((object) => object.type === 'Container'));
+  // The first shell breaks 165ms after the goal, once its launch streak has
+  // climbed out of the stand. Waiting for it means the assertions below cover
+  // the firework sheet too, instead of sampling before the display starts.
+  await page.waitForFunction(() => [...(window.__fkl?.goalCelebration?.objects ?? [])]
+    .some((object) => object.texture?.key === 'goal-firework-shell-v1'));
 
   const goal = await page.evaluate(() => {
     const scene = window.__fkl;
+    const celebration = scene.goalCelebration;
+    const objects = [...celebration.objects];
+    const units = celebration.pyroUnits;
     const text = scene.children.list
       .flatMap((child) => child?.list ?? [child])
       .map((child) => child?.text)
@@ -267,12 +328,25 @@ test('goal celebration layers authored stand art, fountain sprites, useful score
     return {
       banner: scene.banner.text,
       bounds: { left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom },
-      layers: [...scene.goalCelebration.objects].map((object) => object.depth).sort((a, b) => a - b),
-      textures: [...scene.goalCelebration.objects]
+      layers: [...objects, ...units].map((object) => object.depth).sort((a, b) => a - b),
+      textures: [...objects, ...units]
         .map((object) => object.texture?.key)
         .filter(Boolean),
+      units: units.map((unit) => ({
+        name: unit.name,
+        x: unit.x,
+        y: unit.y,
+        depth: unit.depth,
+        active: unit.active,
+        visible: unit.visible,
+        blendMode: unit.blendMode
+      })),
+      plumes: objects
+        .filter((object) => object.texture?.key === 'goal-pyro-fountain-v2')
+        .map((plume) => ({ x: plume.x, y: plume.y, depth: plume.depth, blendMode: plume.blendMode }))
+        .sort((a, b) => a.x - b.x),
       scorer: text.filter((line) => line.startsWith('+') || line.includes('MICA VALE') || line.includes('COMBO')),
-      shaking: scene.cameras.main.shakeEffect.isRunning,
+      shakes: window.__shakes,
       resetDelay: scene.resultResetDelay('GOAL', 1150)
     };
   });
@@ -280,18 +354,66 @@ test('goal celebration layers authored stand art, fountain sprites, useful score
   expect(goal.banner).toBe('GOAL!');
   expect(goal.bounds.left).toBeGreaterThan(8);
   expect(goal.bounds.right).toBeLessThan(472);
-  expect(goal.layers).toEqual(expect.arrayContaining([1.34, 1880, 2220]));
+  // 1.34 is the shell burst over the stand; the permanent unit and its plume
+  // sit just above the complete hoarding (1.50) and behind the net (2).
+  expect(goal.layers).toEqual(expect.arrayContaining([1.34, 1.51, 1.515, 2220]));
   expect(goal.textures).toEqual(expect.arrayContaining([
-    'goal-celebration-stand-v1',
-    'goal-pyro-fountain-v1'
+    'goal-pyro-unit-v1',
+    'goal-pyro-fountain-v2',
+    'goal-firework-shell-v1'
   ]));
+  expect(goal.units).toEqual(idlePyro.units.map((unit) => ({
+    name: unit.name,
+    x: unit.x,
+    y: unit.y,
+    depth: unit.depth,
+    active: unit.active,
+    visible: unit.visible,
+    blendMode: unit.blendMode
+  })));
+  expect(goal.plumes).toHaveLength(2);
+  for (const [index, plume] of goal.plumes.entries()) {
+    expect(plume.x).toBeCloseTo(idlePyro.units[index].x, 8);
+    expect(plume.y).toBeCloseTo(idlePyro.units[index].y, 8);
+    expect(plume.depth).toBeGreaterThan(idlePyro.units[index].depth);
+    expect(plume.blendMode).not.toBe(idlePyro.units[index].blendMode);
+  }
   expect(goal.scorer).toEqual([
     expect.stringMatching(/^\+\d+ · /),
     '#17  MICA VALE',
     '1 GOAL · X1 COMBO · 60 SEC'
   ]);
-  expect(goal.shaking).toBe(false);
+  // A goal punches the camera twice: a hard short jolt, then a softer swell.
+  // Both are bounded well under three logical pixels of throw - Phaser's
+  // intensity is a fraction of the 1920px backing canvas, so 3/1920 is the
+  // ceiling past which the 4x pixel grid visibly smears.
+  expect(goal.shakes).toHaveLength(2);
+  expect(goal.shakes[0].duration).toBeLessThanOrEqual(120);
+  for (const shake of goal.shakes) {
+    expect(shake.intensity.x).toBeGreaterThan(0);
+    expect(shake.intensity.x).toBeLessThanOrEqual(3 / 1920);
+    expect(shake.intensity.y).toBeLessThanOrEqual(3 / 1080);
+  }
   expect(goal.resetDelay).toBe(1150);
+
+  const stoppedPyro = await page.evaluate(() => {
+    const celebration = window.__fkl.goalCelebration;
+    celebration.stop();
+    return {
+      transientCount: celebration.objects.size,
+      units: celebration.pyroUnits.map((unit) => ({
+        name: unit.name,
+        x: unit.x,
+        y: unit.y,
+        depth: unit.depth,
+        active: unit.active,
+        visible: unit.visible,
+        blendMode: unit.blendMode
+      }))
+    };
+  });
+  expect(stoppedPyro.transientCount).toBe(0);
+  expect(stoppedPyro.units).toEqual(goal.units);
 
   const labels = ['SAVED!', 'OFF TARGET', 'OFF THE POST!', 'BLOCKED!', 'WALL FLATTENED!'];
   const fits = await page.evaluate((outcomes) => outcomes.map((label) => {
@@ -316,6 +438,88 @@ test('goal celebration layers authored stand art, fountain sprites, useful score
     key: 'audio-post-impact',
     duration: 0.82
   });
+});
+
+test('crowd uses fixed-camera moving, goal, and ball-out clips without transform drift', async ({ page }) => {
+  const game = new GamePage(page);
+  await game.open({ width: 1280, height: 720 });
+  await page.evaluate(() => {
+    const menu = window.__game.scene.getScene('Menu');
+    menu.scene.start('Game', { mode: 'arcade' });
+  });
+  await page.waitForFunction(() => window.__fkl?.state === 'AIMING');
+
+  const snapshot = () => page.evaluate(() => {
+    const crowd = window.__fkl.crowdTiers;
+    const sprite = crowd.sprite;
+    return {
+      state: crowd.currentState,
+      texture: sprite.texture.key,
+      frame: sprite.frame.name,
+      x: sprite.x,
+      y: sprite.y,
+      scaleX: sprite.scaleX,
+      scaleY: sprite.scaleY,
+      displayWidth: sprite.displayWidth,
+      displayHeight: sprite.displayHeight,
+      originX: sprite.originX,
+      originY: sprite.originY
+    };
+  });
+
+  const moving = await snapshot();
+  expect(moving).toMatchObject({
+    state: 'moving',
+    texture: 'crowd-moving-v3',
+    x: 0,
+    y: 0,
+    scaleX: 0.5,
+    scaleY: 0.5,
+    displayWidth: 480,
+    displayHeight: 98,
+    originX: 0,
+    originY: 0
+  });
+  await page.waitForFunction((firstFrame) => (
+    window.__fkl?.crowdTiers?.sprite?.frame?.name !== firstFrame
+  ), moving.frame);
+
+  await page.evaluate(() => window.__fkl.playCrowdGoal());
+  await page.waitForFunction(() => (
+    window.__fkl?.crowdTiers?.currentState === 'goal' &&
+    window.__fkl?.crowdTiers?.sprite?.texture?.key === 'crowd-goal-v3'
+  ));
+  const goal = await snapshot();
+
+  await page.evaluate(() => {
+    const scene = window.__fkl;
+    scene.lastShot = { power: 0.82, spin: 0, vx: -1, vy: 7.2, vz: 21 };
+    scene.activeTarget = null;
+    scene.resolve('MISS', { x: -5, y: 1 });
+  });
+  await page.waitForFunction(() => (
+    window.__fkl?.crowdTiers?.currentState === 'out' &&
+    window.__fkl?.crowdTiers?.sprite?.texture?.key === 'crowd-out-v3'
+  ));
+  const out = await snapshot();
+
+  const transform = ({ x, y, scaleX, scaleY, displayWidth, displayHeight, originX, originY }) => ({
+    x, y, scaleX, scaleY, displayWidth, displayHeight, originX, originY
+  });
+  expect(goal.state).toBe('goal');
+  expect(goal.texture).toBe('crowd-goal-v3');
+  expect(transform(goal)).toEqual(transform(moving));
+  expect(out.state).toBe('out');
+  expect(out.texture).toBe('crowd-out-v3');
+  expect(transform(out)).toEqual(transform(moving));
+  expect(await page.evaluate(() => window.__fkl.banner.text)).toBe('OFF TARGET');
+
+  await page.waitForFunction(() => (
+    window.__fkl?.state === 'AIMING' &&
+    window.__fkl?.crowdTiers?.currentState === 'moving' &&
+    window.__fkl?.crowdTiers?.sprite?.texture?.key === 'crowd-moving-v3'
+  ));
+  expect(transform(await snapshot())).toEqual(transform(moving));
 });
 
 test('Time Attack ends on the dedicated results card with working rematch actions', async ({ page }) => {

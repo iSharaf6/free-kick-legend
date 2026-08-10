@@ -14,7 +14,19 @@ export const RENDER_H = GAME_H * RENDER_SCALE;
 // vanishing line. Keeping those two values separate lets the goal, wall and
 // striker sit high in the cinematic frame while the crowd and advertising
 // boards still occupy a substantial upper tier.
-export const STADIUM_Y = 104;
+//
+// This value is also what decides how much daylight there is behind the goal.
+// The ground between the goal line and the hoardings projects into the band
+// between the goal's foot and this seam, so at 104 that band was under four
+// logical pixels on a long-range level and the goal frame appeared to be
+// bolted to the advertising. Raising the seam pushes the boards back - they
+// stand at the depth that projects the ground to this line, so they move from
+// roughly 26m to 33m - and roughly triples the visible turf behind the net.
+//
+// Everything anchored to the seam (hoardings, stewards, photographers' pit,
+// the stand tiers) is expressed as an offset from it rather than as its own
+// literal, so the whole trackside moves together and cannot drift apart.
+export const STADIUM_Y = 98;
 
 // Pseudo-3D camera: x = lateral, y = up, z = depth away from camera.
 export const CAM = {

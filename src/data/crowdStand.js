@@ -50,6 +50,12 @@ export const CROWD_BANDS = Object.freeze({
  * row behind it, and the overlap makes it structurally impossible for the empty
  * stand behind to show through, including while a tier is lifted mid-bob.
  *
+ * The whole stand sits above the hoardings, whose top edge is 21 logical pixels
+ * above the stadium/turf seam (GameScene BOARD_TOP_Y). It was rebased when that
+ * seam moved from 104 to 98 to open up the ground behind the goal, and grew
+ * four rows taller in the process: the tiers now span 12..84 rather than 20..88,
+ * so the supporters occupy more of the frame than the reduced seam took away.
+ *
  * Every slice in a tier is drawn at one uniform scale derived from its height
  * and its band height, so a supporter cannot be stretched on a single axis.
  * The old stand measured that risk with an aspect-error assertion over
@@ -60,10 +66,15 @@ const TIERS = Object.freeze([
   Object.freeze({
     id: 'back',
     band: 'back',
-    top: 20,
-    bottom: 45,
+    top: 12,
+    bottom: 40,
     depth: 1.12,
-    tint: 0x44566a,
+    // Tints are a multiply over authored artwork that is already full of club
+    // colour, so a cool grey-blue does not read as "distant", it reads as
+    // "drained" - it cancels every red and gold jacket in the plate. The ramp
+    // now keeps the back rows cool and dim for aerial perspective and warms
+    // towards the front, where the floodlights actually reach the supporters.
+    tint: 0x5b6478,
     alpha: 1,
     bobScale: 0.4,       // distant supporters barely register individual movement
     tintJitter: 9,       // per-slice brightness wobble in 0-255 channel steps
@@ -72,10 +83,10 @@ const TIERS = Object.freeze([
   Object.freeze({
     id: 'mid',
     band: 'mid',
-    top: 42,
-    bottom: 66,
+    top: 36,
+    bottom: 62,
     depth: 1.22,
-    tint: 0x6d8195,
+    tint: 0x98917f,
     alpha: 1,
     bobScale: 0.72,
     tintJitter: 12,
@@ -84,10 +95,10 @@ const TIERS = Object.freeze([
   Object.freeze({
     id: 'front',
     band: 'front',
-    top: 62,
-    bottom: 88,
+    top: 58,
+    bottom: 84,
     depth: 1.3,
-    tint: 0x93a3b0,
+    tint: 0xc4b49b,
     alpha: 1,
     bobScale: 1,
     tintJitter: 14,
