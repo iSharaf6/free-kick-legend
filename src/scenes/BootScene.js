@@ -46,8 +46,9 @@ export class BootScene extends Phaser.Scene {
   // first paint and roughly a tenth of it.
   preload() {
     const base = import.meta.env.BASE_URL;
-    Object.values(CROWD_ANIMATION.sources).forEach((source) => {
-      this.load.image(source.textureKey, `${base}${source.assetPath}`);
+    this.load.spritesheet(CROWD_ANIMATION.textureKey, `${base}${CROWD_ANIMATION.assetPath}`, {
+      frameWidth: CROWD_ANIMATION.frameWidth,
+      frameHeight: CROWD_ANIMATION.frameHeight
     });
     this.load.image('calynx-logo-pixel', `${base}assets/hd/calynx-logo-pixel.png`);
 
