@@ -102,3 +102,86 @@ test('authored UI and frame clips use short SFX-bus markers', () => {
     globalThis.window = previousWindow;
   }
 });
+
+// Records what a sound is built from without needing an AudioContext.
+function recordingSynth() {
+  const synth = new Synth();
+  const tones = [];
+  const noises = [];
+  synth._tone = (options) => tones.push(options);
+  synth._noise = (options) => noises.push(options);
+  synth.cheer = () => {};
+  return { synth, tones, noises };
+}
+
+const FANFARE_ROOT = [523, 659, 784, 1047];
+const fanfareOf = (tones) => tones.filter((tone) => tone.type === 'triangle').map((tone) => tone.freq);
+
+test('a goal with no streak plays the fanfare exactly as authored', () => {
+  for (const streak of [undefined, 0, -3, NaN, 'x']) {
+    const { synth, tones } = recordingSynth();
+    synth.goal(streak);
+    assert.deepEqual(fanfareOf(tones), FANFARE_ROOT, `streak ${String(streak)} must not transpose`);
+  }
+});
+
+test('a goal streak lifts the fanfare a semitone per goal and stops at a fifth', () => {
+  const semitone = Math.pow(2, 1 / 12);
+  let previous = null;
+  for (let streak = 0; streak <= 7; streak++) {
+    const { synth, tones } = recordingSynth();
+    synth.goal(streak);
+    const root = fanfareOf(tones)[0];
+    assert.ok(Math.abs(root - 523 * Math.pow(semitone, streak)) < 1e-6);
+    if (previous !== null) assert.ok(root > previous, 'every goal in a run must sound higher than the last');
+    previous = root;
+  }
+
+  // Capped: a 40-goal run must not climb into a whistle.
+  const capped = recordingSynth();
+  capped.synth.goal(40);
+  const seventh = recordingSynth();
+  seventh.synth.goal(7);
+  assert.deepEqual(fanfareOf(capped.tones), fanfareOf(seventh.tones));
+
+  // The whole chord moves together, so it stays a major arpeggio at any height.
+  const lifted = fanfareOf(seventh.tones);
+  FANFARE_ROOT.forEach((freq, index) => {
+    assert.ok(Math.abs(lifted[index] / lifted[0] - freq / FANFARE_ROOT[0]) < 1e-9);
+  });
+});
+
+test('the impact under a goal is identical at any streak: only the melody climbs', () => {
+  const low = (tones) => tones.find((tone) => tone.type === 'sine' && tone.freq < 200);
+  const a = recordingSynth(); a.synth.goal(0);
+  const b = recordingSynth(); b.synth.goal(7);
+  assert.deepEqual(low(a.tones), low(b.tones));
+  assert.deepEqual(a.noises, b.noises);
+});
+
+test('every kind of stop has a low body under it instead of one shared hiss', () => {
+  const signatures = new Map();
+  for (const kind of ['parry', 'catch', 'wall']) {
+    const { synth, tones, noises } = recordingSynth();
+    synth.save(kind);
+    const thump = tones.find((tone) => tone.type === 'sine' && tone.freq <= 130 && tone.end < tone.freq);
+    assert.ok(thump, `${kind} needs a falling low thump`);
+    assert.ok(noises.length >= 1, `${kind} needs a contact transient`);
+    // Bounded: a stop must never be louder than the goal it denies (0.4).
+    for (const layer of [...tones, ...noises]) assert.ok(layer.vol > 0 && layer.vol <= 0.3, `${kind} layer vol ${layer.vol}`);
+    signatures.set(kind, JSON.stringify({ tones, noises }));
+  }
+  assert.equal(new Set(signatures.values()).size, 3, 'parry, catch and wall must be three different sounds');
+
+  // The glove slap is the brightest, fastest transient of the three.
+  const parry = recordingSynth(); parry.synth.save('parry');
+  const catchIt = recordingSynth(); catchIt.synth.save('catch');
+  const brightest = (noises) => Math.max(...noises.map((noise) => noise.freq));
+  assert.ok(brightest(parry.noises) > brightest(catchIt.noises));
+});
+
+test('save() with no argument still makes a sound for existing callers', () => {
+  const { synth, tones, noises } = recordingSynth();
+  synth.save();
+  assert.ok(tones.length + noises.length > 0);
+});

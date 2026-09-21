@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { GAME_W, RENDER_W, RENDER_H } from '../config.js';
-import { crispText, sceneIntro, PIXEL_TEXT_WEIGHT } from '../ui.js';
+import { crispText, sceneIntro, PIXEL_TEXT_WEIGHT, UI, PRIMARY_BUTTON } from '../ui.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { MenuMusic } from '../systems/MenuMusic.js';
 import { Audio } from '../systems/AudioSynth.js';
@@ -19,7 +19,7 @@ const CREAM = '#f7fbff';
 const GOLD = 0xffc928;
 const GOLD_HI = 0xffe56c;
 const GOLD_DARK = 0xffc928;
-const BLUE_EDGE = 0x3478b8;
+const BLUE_EDGE = UI.edge;
 const BLUE_MID = 0x164379;
 const BLUE_DEEP = 0x071a38;
 const INK = 0x030714;
@@ -91,10 +91,12 @@ function drawTourPanel(g, x, y, w, h, opts = {}) {
   const border = opts.border ?? BLUE_EDGE;
   const inner = opts.inner ?? BLUE_MID;
   const bottom = opts.bottom ?? BLUE_DEEP;
-  const corner = opts.corner ?? GOLD_DARK;
+  // Rail is opt-in (see ui.js drawPanel): gold marks the selected match card,
+  // it is no longer stamped on every surface.
+  const corner = opts.corner;
 
-  g.fillStyle(INK, 0.52);
-  g.fillRect(x + 3, y + 4, w, h);
+  g.fillStyle(INK, 0.62);
+  g.fillRect(x, y + UI.shadowDrop, w, h);
   g.fillStyle(border, 1);
   g.fillRect(x, y, w, h);
   g.fillGradientStyle(inner, inner, bottom, bottom, opts.alpha ?? 1);
@@ -104,8 +106,10 @@ function drawTourPanel(g, x, y, w, h, opts = {}) {
   g.fillRect(x + 1, y + 1, w - 2, 1);
   g.fillStyle(INK, 0.68);
   g.fillRect(x + 1, y + h - 2, w - 2, 1);
-  g.fillStyle(corner, 1);
-  g.fillRect(x, y, 2, h);
+  if (corner !== undefined && corner !== null) {
+    g.fillStyle(corner, 1);
+    g.fillRect(x, y, 2, h);
+  }
   return g;
 }
 
@@ -118,7 +122,7 @@ function drawTourButton(g, w, h, fill, state, opts = {}) {
   const face = disabled ? 0x162634 : fill;
 
   g.clear();
-  if (!pressed) g.fillStyle(INK, 0.58).fillRect(-w / 2 + 3, -h / 2 + 4, w, h);
+  if (!pressed) g.fillStyle(INK, 0.7).fillRect(-w / 2, -h / 2 + UI.shadowDrop, w, h);
   if (selected) {
     g.fillStyle(GOLD, 0.12);
     g.fillRect(-w / 2 - 2, -h / 2 - 2 + y, w + 4, h + 4);
@@ -148,6 +152,7 @@ function makeTourButton(scene, x, y, w, h, label, onClick, opts = {}) {
     fontSize: opts.fontSize ?? '10px',
     color: opts.textColor ?? CREAM,
     strokeThickness: opts.strokeThickness ?? 1,
+    shadow: opts.textShadow,
     letterSpacing: opts.letterSpacing ?? 0.1
   });
   const children = [bg];
@@ -271,16 +276,14 @@ export class LevelSelectScene extends Phaser.Scene {
   drawHeader() {
     const chrome = this.add.graphics().setDepth(100);
     drawTourPanel(chrome, 16, 7, 450, 32, {
-      border: 0x3478b8,
       inner: 0x123b70,
       bottom: 0x071a38,
-      corner: 0x35bdf6,
       cornerSize: 7
     });
 
     makeTourButton(this, 34, 23, 25, 23, '', () => this.scene.start('Menu'), {
       color: 0x164379,
-      border: 0x35bdf6,
+      border: UI.edgeHi,
       icon: 'icon-back',
       iconScale: 1.02,
       iconX: 12.5,
@@ -301,7 +304,6 @@ export class LevelSelectScene extends Phaser.Scene {
       ?? LEVELS.reduce((sum, level, index) => sum + SaveManager.getStars(stableId(level, index)), 0);
     const chip = this.add.graphics();
     drawTourPanel(chip, -44, -11.5, 88, 23, {
-      border: 0x3478b8,
       inner: 0x123b70,
       bottom: 0x071a38,
       corner: GOLD,
@@ -320,14 +322,11 @@ export class LevelSelectScene extends Phaser.Scene {
   drawPanels() {
     const panels = this.add.graphics().setDepth(80);
     drawTourPanel(panels, 16, 82, 279, 219, {
-      border: 0x3478b8,
       inner: 0x123b70,
       bottom: 0x071a38,
-      corner: 0x35bdf6,
       cornerSize: 7
     });
     drawTourPanel(panels, 301, 82, 164, 219, {
-      border: 0x3478b8,
       inner: 0x123b70,
       bottom: 0x071a38,
       corner: GOLD,
@@ -357,7 +356,7 @@ export class LevelSelectScene extends Phaser.Scene {
         this.renderCupContent();
       }, {
         color: selected ? cup.color : 0x123b70,
-        border: selected ? GOLD_HI : 0x3478b8,
+        border: selected ? GOLD_HI : UI.edge,
         selected,
         disabled: !available,
         icon: available ? 'icon-cup' : 'icon-cup-locked',
@@ -552,17 +551,23 @@ export class LevelSelectScene extends Phaser.Scene {
       SaveManager.setLastPlayed?.({ mode: 'career', levelId: stableId(level, index) });
       this.scene.start('Game', { mode: 'career', levelIndex: index });
     }, {
-      color: cup.color,
-      border: GOLD_HI,
-      selected: unlocked,
+      // The screen's one primary action: the same gold key as the menu's
+      // Continue, rather than a face that changed colour with every cup. Ink
+      // lettering only while unlocked - the disabled face is dark, where ink
+      // text would disappear.
+      color: PRIMARY_BUTTON.color,
+      border: 0xffe08a,
+      textColor: unlocked ? PRIMARY_BUTTON.textColor : CREAM,
+      strokeThickness: unlocked ? 0 : 2,
+      textShadow: !unlocked,
       icon: unlocked ? 'icon-play' : 'icon-lock',
       iconScale: 1.25,
       iconX: 20,
       fontSize: '13px',
-      strokeThickness: 2,
       disabled: !unlocked,
       hitHeight: 41
     });
+    if (unlocked) play.buttonIcon?.setTint(0x1b1303);
 
     this.contentLayer.add([label, name, rating, play]);
   }

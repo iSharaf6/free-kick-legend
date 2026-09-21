@@ -19,6 +19,9 @@ test('OS reduced motion reaches menu, Level Select, progress, locker, and match 
       fadeRunning: scene.cameras.main.fadeEffect.isRunning
     };
   });
+  // An empty stand would satisfy "every pose is 0" vacuously, so prove there
+  // are supporters to be still before asserting that they are.
+  expect(menuBefore.crowdPoses.length).toBeGreaterThan(0);
   expect(menuBefore).toMatchObject({
     reducedMotion: true,
     crowdReduced: true,

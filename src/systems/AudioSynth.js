@@ -254,20 +254,51 @@ export class Synth {
     }
   }
 
-  goal() {
+  /**
+   * `streak` is how many goals in a row came before this one. Each lifts the
+   * fanfare a semitone, capped at a fifth, so a run audibly climbs and a miss
+   * audibly drops it back to the root. The player hears the streak they are
+   * protecting, which is the pull to take one more shot. A streak of 0 plays
+   * the fanfare exactly as it was.
+   */
+  goal(streak = 0) {
     // A goal opens on impact, not on melody. The low hit lands first and the
     // fanfare arrives on top of it, so scoring reads as a thump the stadium
     // answers rather than as four polite chimes.
     this._tone({ freq: 132, end: 48, time: 0.34, type: 'sine', vol: 0.4 });
     this._noise({ time: 0.16, vol: 0.1, freq: 320, rampUp: 0.008 });
+    const steps = Math.max(0, Math.min(7, Math.floor(Number(streak) || 0)));
+    const lift = Math.pow(2, steps / 12);
     [523, 659, 784, 1047].forEach((f, i) =>
-      this._tone({ freq: f, time: 0.22, type: 'triangle', vol: 0.18, when: 0.05 + i * 0.09 }));
+      this._tone({ freq: f * lift, time: 0.22, type: 'triangle', vol: 0.18, when: 0.05 + i * 0.09 }));
     this.cheer();
-    this._tone({ freq: 1760, end: 2240, time: 0.28, type: 'sine', vol: 0.06, when: 0.27 });
+    this._tone({ freq: 1760 * lift, end: 2240 * lift, time: 0.28, type: 'sine', vol: 0.06, when: 0.27 });
   }
 
-  save() {
-    this._noise({ time: 0.12, vol: 0.2, freq: 700 });
+  /**
+   * The ball being stopped. This was one 120ms band of noise shared by a
+   * parry, a catch and a wall block, so the three most dramatic defensive
+   * moments in the game all landed as the same soft hiss. Each now has a body:
+   * a low thump for the mass behind the contact, under a transient that says
+   * what was hit.
+   */
+  save(kind = 'parry') {
+    if (kind === 'catch') {
+      // Ball into the chest: dull and short, no slap.
+      this._tone({ freq: 100, end: 50, time: 0.11, type: 'sine', vol: 0.2 });
+      this._noise({ time: 0.09, vol: 0.12, freq: 500, rampUp: 0.006 });
+      return;
+    }
+    if (kind === 'wall') {
+      // A body in the way: a heavier thud, more mid than a glove.
+      this._tone({ freq: 110, end: 46, time: 0.12, type: 'sine', vol: 0.24 });
+      this._noise({ time: 0.1, vol: 0.18, freq: 800, rampUp: 0.005 });
+      return;
+    }
+    // Parry: the glove slap is a fast, bright transient over the thump.
+    this._tone({ freq: 120, end: 48, time: 0.13, type: 'sine', vol: 0.26 });
+    this._noise({ time: 0.06, vol: 0.2, freq: 1400, rampUp: 0.004 });
+    this._noise({ time: 0.12, vol: 0.16, freq: 700 });
   }
 
   cheer() {

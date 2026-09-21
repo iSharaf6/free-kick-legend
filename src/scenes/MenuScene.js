@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { GAME_W, GAME_H, STADIUM_Y } from '../config.js';
 import {
-  sceneIntro, formatCompact, configureHdCamera, crispText, PIXEL_TEXT_WEIGHT
+  sceneIntro, formatCompact, configureHdCamera, crispText, PIXEL_TEXT_WEIGHT, UI
 } from '../ui.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
@@ -25,11 +25,15 @@ const NUMBER_FONT = '"Pixelify Sans", monospace';
 const INK = 0x030714;
 const NAVY = 0x07132c;
 const PANEL = 0x0b2147;
-const EDGE = 0x3478b8;
 const CREAM = '#f7fbff';
 const GOLD = 0xffc928;
 const GOLD_HI = 0xffe56c;
 const GOLD_DARK = 0xb77900;
+// Menu action faces. Secondary rows share one raised navy so the stack reads as
+// a single list; only the primary action owns a saturated face.
+const PRIMARY_FACE = 0xf2b91c;
+const SECONDARY_FACE = 0x112b52;
+const SECONDARY_SUBTITLE = '#9ccce8';
 const MENU_SHADOW_COLORS = Object.freeze({
   edge: 0x0b352c,
   body: 0x082a27,
@@ -180,25 +184,28 @@ function menuText(scene, x, y, value, opts = {}) {
   return text;
 }
 
+// Same surface language as ui.js drawPanel: one calm navy face, a soft edge and
+// a hard shadow cast straight down. The previous bright outline, cyan rail and
+// partial top stroke on every panel made the header read as boxes inside boxes.
 function drawPremiumPanel(g, x, y, w, h, opts = {}) {
-  const border = opts.border ?? EDGE;
+  const border = opts.border ?? UI.edge;
   const fill = opts.fill ?? PANEL;
-  const bottom = opts.bottom ?? NAVY;
-  g.fillStyle(INK, 0.52);
-  g.fillRect(x + 4, y + 4, w, h);
-  g.fillStyle(INK, 1);
-  g.fillRect(x, y, w, h);
+  const bottom = opts.bottom ?? shade(fill, -14);
+  g.fillStyle(INK, 0.62);
+  g.fillRect(x, y + UI.shadowDrop, w, h);
   g.fillStyle(border, 1);
+  g.fillRect(x, y, w, h);
+  g.fillGradientStyle(shade(fill, 10), shade(fill, 10), bottom, bottom, opts.alpha ?? 1);
   g.fillRect(x + 1, y + 1, w - 2, h - 2);
-  g.fillGradientStyle(shade(fill, 18), shade(fill, 10), bottom, bottom, opts.alpha ?? 1);
-  g.fillRect(x + 2, y + 2, w - 4, h - 4);
-  g.fillStyle(shade(fill, 58), 0.75);
-  g.fillRect(x + 2, y + 2, w - 4, 2);
-  g.fillStyle(INK, 0.46);
-  g.fillRect(x + 2, y + h - 4, w - 4, 2);
-  g.fillStyle(opts.corner ?? border, 1);
-  g.fillRect(x + 1, y + 1, 3, h - 2);
-  g.fillRect(x + 4, y + 1, Math.min(w - 5, Math.max(18, Math.floor(w * 0.26))), 1);
+  g.fillStyle(UI.edgeHi, 0.5);
+  g.fillRect(x + 1, y + 1, w - 2, 1);
+  g.fillStyle(INK, 0.4);
+  g.fillRect(x + 1, y + h - 2, w - 2, 1);
+  // A rail is opt-in and reserved for meaning (gold = something to claim).
+  if (opts.rail !== undefined && opts.rail !== null) {
+    g.fillStyle(opts.rail, 1);
+    g.fillRect(x, y, 2, h);
+  }
   return g;
 }
 
@@ -235,40 +242,40 @@ function wireButton(container, render, onClick, enabled = true) {
   return container;
 }
 
+// One primary action, four quiet ones. Every mode used to own a fully saturated
+// face (green, blue, amber, red, purple), so five buttons competed and nothing
+// led. Now only the featured action carries colour; the rest share the navy
+// surface and keep their identity through a tinted icon. Hover also lightens
+// the face: the old painter ignored the 'hover' state entirely, so the front
+// menu gave a mouse user no feedback at all.
 function drawActionFace(g, w, h, color, accent, state, featured = false) {
   const pressed = state === 'pressed';
   const disabled = state === 'disabled';
+  const hover = state === 'hover';
   const y = pressed ? 2 : 0;
-  const face = disabled ? 0x172532 : color;
+  const base = disabled ? 0x172532 : color;
+  const face = hover ? shade(base, featured ? 14 : 20) : base;
   g.clear();
 
-  if (featured && !disabled && !pressed) {
-    g.fillStyle(accent, 0.16);
-    g.fillRect(-w / 2 - 3, -h / 2 - 3, w + 6, h + 6);
-  }
   if (!pressed) {
-    g.fillStyle(INK, 0.64);
-    g.fillRect(-w / 2 + 4, -h / 2 + 5, w, h);
+    g.fillStyle(INK, 0.7);
+    g.fillRect(-w / 2, -h / 2 + UI.shadowDrop, w, h);
   }
-  g.fillStyle(INK, 1);
+  g.fillStyle(disabled ? 0x324653 : (featured ? shade(face, 52) : (hover ? accent : UI.edge)), 1);
   g.fillRect(-w / 2, -h / 2 + y, w, h);
-  g.fillStyle(disabled ? 0x324653 : accent, 1);
+  g.fillGradientStyle(shade(face, 12), shade(face, 12), shade(face, -12), shade(face, -12), 1);
   g.fillRect(-w / 2 + 1, -h / 2 + 1 + y, w - 2, h - 2);
-  g.fillGradientStyle(shade(face, 28), shade(face, 14), shade(face, -4), shade(face, -18), 1);
-  g.fillRect(-w / 2 + 2, -h / 2 + 2 + y, w - 4, h - 4);
 
   const iconCellW = featured ? 42 : 39;
-  g.fillStyle(INK, disabled ? 0.2 : 0.3);
-  g.fillRect(-w / 2 + 3, -h / 2 + 3 + y, iconCellW - 3, h - 6);
-  g.fillStyle(accent, disabled ? 0.3 : 0.92);
-  g.fillRect(-w / 2 + iconCellW, -h / 2 + 2 + y, 2, h - 4);
-  g.fillStyle(shade(face, 68), disabled ? 0.18 : 0.62);
-  g.fillRect(-w / 2 + 2, -h / 2 + 2 + y, w - 4, 2);
-  g.fillStyle(accent, disabled ? 0.15 : 0.75);
-  g.fillRect(-w / 2 + 2, h / 2 - 4 + y, w - 4, 2);
+  g.fillStyle(INK, featured ? 0.14 : 0.3);
+  g.fillRect(-w / 2 + 1, -h / 2 + 1 + y, iconCellW - 1, h - 2);
+  g.fillStyle(shade(face, 64), disabled ? 0.18 : 0.55);
+  g.fillRect(-w / 2 + 1, -h / 2 + 1 + y, w - 2, 1);
+  g.fillStyle(shade(face, -44), disabled ? 0.3 : 0.9);
+  g.fillRect(-w / 2 + 1, h / 2 - 3 + y, w - 2, 2);
 }
 
-function makeActionIcon(scene, type, color) {
+function makeActionIcon(scene, type, color, gloss = true) {
   if (type === 'career') return scene.add.image(0, 0, 'icon-cup').setScale(1.35);
   const g = scene.add.graphics();
   const dark = shade(color, -80);
@@ -278,8 +285,12 @@ function makeActionIcon(scene, type, color) {
   if (type === 'play') {
     g.fillStyle(color, 1);
     g.fillTriangle(-6, -9, -6, 9, 8, 0);
-    g.fillStyle(0xffffff, 0.35);
-    g.fillTriangle(-4, -6, -4, 0, 2, -2);
+    // The white gloss suits a bright glyph on a dark face; on the gold primary
+    // the glyph is ink, where a highlight would read as a printing fault.
+    if (gloss) {
+      g.fillStyle(0xffffff, 0.35);
+      g.fillTriangle(-4, -6, -4, 0, 2, -2);
+    }
   } else if (type === 'daily') {
     g.fillRect(-8, -7, 16, 15);
     g.strokeRect(-8, -7, 16, 15);
@@ -327,21 +338,27 @@ function makeActionIcon(scene, type, color) {
 
 function makeMenuAction(scene, x, y, w, h, spec, onClick) {
   const bg = scene.add.graphics();
-  const icon = makeActionIcon(scene, spec.iconType, spec.subtitleColorValue ?? spec.accent)
+  // Dark ink on the gold primary needs no outline or drop shadow; cream on the
+  // navy secondaries keeps the 1px stroke that holds it off the gradient.
+  const onLightFace = spec.featured === true;
+  const icon = makeActionIcon(scene, spec.iconType, spec.iconColor ?? spec.accent, !onLightFace)
     .setPosition(-w / 2 + (spec.featured ? 21 : 20), 0);
   const labelX = -w / 2 + (spec.featured ? 51 : 48);
   const label = menuText(scene, labelX, spec.featured ? -6 : -5, spec.label, {
     fontFamily: DISPLAY_FONT,
     fontSize: spec.featured ? '16px' : '14px',
-    color: CREAM,
-    strokeThickness: 1,
+    color: spec.labelColor ?? CREAM,
+    stroke: onLightFace ? '#ffe9a0' : undefined,
+    strokeThickness: onLightFace ? 0 : 1,
+    shadow: !onLightFace,
     letterSpacing: 0.25
   });
   const subtitle = menuText(scene, labelX + 1, spec.featured ? 9 : 8, spec.subtitle, {
     fontFamily: PIXEL_FONT,
     fontSize: spec.featured ? '10px' : '9px',
     color: spec.subtitleColor,
-    strokeThickness: 1,
+    strokeThickness: onLightFace ? 0 : 1,
+    shadow: !onLightFace,
     letterSpacing: 0.65
   });
   const chevron = scene.add.graphics().setPosition(w / 2 - 14, 0);
@@ -355,7 +372,12 @@ function makeMenuAction(scene, x, y, w, h, spec, onClick) {
     label.setY((spec.featured ? -6 : -5) + offset).setAlpha(alpha);
     subtitle.setY((spec.featured ? 9 : 8) + offset).setAlpha(alpha);
     chevron.clear().setY(offset).setAlpha(alpha);
-    chevron.lineStyle(spec.featured ? 3 : 2, spec.subtitleColorValue ?? spec.accent, 1);
+    // The chevron brightens to the mode's accent on hover so the whole row
+    // answers the pointer, not just the face.
+    const chevronColor = spec.featured
+      ? (spec.iconColor ?? INK)
+      : (state === 'hover' ? spec.accent : 0x5d83ad);
+    chevron.lineStyle(spec.featured ? 3 : 2, chevronColor, 1);
     chevron.beginPath().moveTo(-3, -6).lineTo(3, 0).lineTo(-3, 6).strokePath();
   };
   wireButton(container, render, onClick, spec.disabled !== true);
@@ -396,9 +418,8 @@ function makeHeaderControl(scene, x, y, w, h, opts, onClick) {
     drawPremiumPanel(bg, -w / 2, -h / 2 + (pressed ? 2 : 0), w, h, {
       fill,
       bottom: shade(fill, -20),
-      border: opts.border ?? EDGE,
-      corner: opts.corner ?? GOLD_DARK,
-      cornerSize: 4
+      border: opts.border ?? UI.edge,
+      rail: opts.rail
     });
     if (gear) {
       const oy = pressed ? 2 : 0;
@@ -486,7 +507,7 @@ export class MenuScene extends Phaser.Scene {
     ].filter((state) => state.completed && !state.claimed).length;
 
     this.makeHeader(totalStars, coins, muted, readyClaims);
-    this.makeHero(equippedKit, equippedCharacter, totalStars);
+    this.makeHero(equippedKit, equippedCharacter);
     this.makeActions(continueIndex, daily, today);
 
     if (!this.reducedMotion) sceneIntro(this);
@@ -560,14 +581,13 @@ export class MenuScene extends Phaser.Scene {
   }
 
   makeHeader(totalStars, coins, muted, readyClaims) {
+    // A soft scrim instead of a bordered bar. Wrapping five already-bordered
+    // controls in a sixth box was the busiest part of the screen; letting the
+    // wordmark and chips float over a fade keeps them legible against the
+    // crowd while giving the stadium its full width back.
     const bar = this.add.graphics().setDepth(200);
-    drawPremiumPanel(bar, 5, 4, GAME_W - 10, 37, {
-      fill: 0x0b244a,
-      bottom: 0x06142d,
-      border: 0x3478b8,
-      corner: 0x27b8f4,
-      cornerSize: 8
-    });
+    bar.fillGradientStyle(INK, INK, INK, INK, 0.82, 0.82, 0, 0);
+    bar.fillRect(0, 0, GAME_W, 52);
 
     menuText(this, 15, 16, 'KICK DISTRICT', {
       fontFamily: DISPLAY_FONT,
@@ -598,9 +618,7 @@ export class MenuScene extends Phaser.Scene {
     this.soundButton = makeHeaderControl(this, 188, 22, 19, 23, {
       icon: muted ? 'icon-mute' : 'icon-sound',
       iconScale: 0.78,
-      color: 0x13365f,
-      border: 0x3478b8,
-      corner: 0x27b8f4
+      color: 0x13365f
     }, () => this.toggleSound()).setDepth(206);
 
     this.settingsButton = makeHeaderControl(this, 230, 22, 62, 23, {
@@ -609,9 +627,7 @@ export class MenuScene extends Phaser.Scene {
       labelX: -5.5,
       letterSpacing: 0,
       fontSize: '6px',
-      color: 0x13365f,
-      border: 0x3478b8,
-      corner: 0x27b8f4
+      color: 0x13365f
     }, () => {
       SettingsPanel.open({
         onChange: (nextSettings) => {
@@ -623,9 +639,9 @@ export class MenuScene extends Phaser.Scene {
     makeHeaderControl(this, 280, 22, 30, 23, {
       icon: 'icon-cup',
       iconScale: 1.05,
-      color: readyClaims ? 0x087b4c : 0x13365f,
-      border: readyClaims ? GOLD : GOLD_DARK,
-      corner: readyClaims ? GOLD : GOLD_DARK
+      color: 0x13365f,
+      border: readyClaims ? GOLD : undefined,
+      rail: readyClaims ? GOLD : undefined
     }, () => this.scene.start('Progress')).setDepth(206);
 
     this.headerStatPanels = [
@@ -652,10 +668,7 @@ export class MenuScene extends Phaser.Scene {
     const panel = this.add.graphics();
     drawPremiumPanel(panel, -w / 2, -11.5, w, 23, {
       fill,
-      bottom: 0x06142d,
-      border: 0x3478b8,
-      corner: 0x27b8f4,
-      cornerSize: 4
+      bottom: 0x06142d
     });
     const icon = this.add.image(-w / 2 + 15, 0, iconKey).setScale(1.05);
     const label = menuText(this, -w / 2 + 28, 0, String(value), {
@@ -678,23 +691,18 @@ export class MenuScene extends Phaser.Scene {
     this.soundButton.buttonIcon?.setTexture(muted ? 'icon-mute' : 'icon-sound');
   }
 
-  makeHero(equippedKit, equippedCharacter, totalStars) {
+  makeHero(equippedKit, equippedCharacter) {
     const player = getCosmetic(equippedCharacter) || getCosmetic('character-mica');
     const card = this.add.graphics().setDepth(150);
     drawPremiumPanel(card, 28, 202, 192, 65, {
       fill: 0x0b244a,
-      bottom: 0x06142d,
-      border: 0x3478b8,
-      corner: 0x27b8f4,
-      cornerSize: 7
+      bottom: 0x06142d
     });
 
     drawPremiumPanel(card, 37, 207, 31, 30, {
       fill: 0x163d7a,
       bottom: 0x0a2454,
-      border: 0x4ebeff,
-      corner: GOLD,
-      cornerSize: 4
+      border: GOLD_DARK
     });
     menuText(this, 52.5, 222, String(player.number), {
       originX: 0.5,
@@ -709,57 +717,35 @@ export class MenuScene extends Phaser.Scene {
       color: CREAM,
       letterSpacing: 0.35
     }).setDepth(154);
-    if (this.compactMenu) {
-      menuText(this, 75, 229, player.archetype.toUpperCase(), {
-        fontFamily: DISPLAY_FONT,
-        fontSize: '8px',
-        color: '#f3c449',
-        letterSpacing: 0.18
-      }).setDepth(154);
-    } else {
-      menuText(this, 75, 228, 'CUP RUN', {
+    // Identity first, then what the striker actually does. The card used to
+    // stack ROLE / SIGNATURE / SHOT rows at 5px - under 14 CSS px at 720p and
+    // unreadable on a phone - beside a career bar that repeated the header's
+    // star chip. Nothing here is now smaller than 7px, and the technique reads
+    // as a sentence instead of a spec sheet.
+    menuText(this, 75, 226, player.archetype.toUpperCase(), {
+      fontFamily: DISPLAY_FONT,
+      fontSize: '8px',
+      color: '#f3c449',
+      letterSpacing: 0.3
+    }).setDepth(154);
+    card.fillStyle(UI.edgeHi, 0.35);
+    card.fillRect(37, 240, 174, 1);
+    menuText(this, 38, 247, player.gameplay.ability, {
+      fontFamily: DISPLAY_FONT,
+      fontSize: '8px',
+      color: '#6ee1df',
+      letterSpacing: 0.2
+    }).setDepth(154);
+    if (!this.compactMenu) {
+      menuText(this, 38, 252, player.gameplay.summary, {
+        originY: 0,
         fontFamily: PIXEL_FONT,
-        fontSize: '6px',
+        fontSize: '7px',
         color: '#c5d2dc',
-        letterSpacing: 0.4
+        letterSpacing: 0.1,
+        lineSpacing: 1,
+        wordWrap: { width: 174 }
       }).setDepth(154);
-      menuText(this, 108, 228, `${totalStars} STARS`, {
-        fontFamily: PIXEL_FONT,
-        fontSize: '6px',
-        color: '#6ee1df',
-        letterSpacing: 0.35
-      }).setDepth(154);
-
-      const progress = Phaser.Math.Clamp(totalStars / Math.max(LEVELS.length * 3, 1), 0, 1);
-      card.fillStyle(INK, 1);
-      card.fillRect(164, 224, 46, 6);
-      card.fillStyle(0x2e4b62, 1);
-      card.fillRect(165, 225, 44, 4);
-      card.fillStyle(GOLD, 1);
-      card.fillRect(165, 225, Math.floor(44 * progress), 4);
-      card.fillStyle(0x43657c, 0.65);
-      card.fillRect(36, 236, 176, 1);
-
-      const rows = [
-        ['ROLE', player.archetype.toUpperCase(), 0xf3c449],
-        ['SIGNATURE', player.gameplay.ability.toUpperCase(), 0x6ee1df],
-        ['SHOT', player.gameplay.summary.toUpperCase(), 0xc5d2dc]
-      ];
-      rows.forEach(([label, value, color], index) => {
-        const y = 243 + index * 8;
-        menuText(this, 38, y, label, {
-          fontFamily: PIXEL_FONT,
-          fontSize: '5px',
-        color: '#86b6d4',
-          letterSpacing: 0.2
-        }).setDepth(154);
-        menuText(this, 76, y, String(value), {
-          fontFamily: PIXEL_FONT,
-          fontSize: index === 2 ? '5px' : '5.5px',
-          color: `#${color.toString(16).padStart(6, '0')}`,
-          letterSpacing: index === 2 ? 0 : 0.12
-        }).setDepth(154);
-      });
     }
 
     this.kicker = new Kicker(this, 116, 198, {
@@ -820,11 +806,14 @@ export class MenuScene extends Phaser.Scene {
     continueButton = makeMenuAction(this, actionX, 65, actionW, 37, {
       label: 'CONTINUE',
       subtitle: `LEVEL ${String(continueIndex + 1).padStart(2, '0')}`,
-      subtitleColor: '#7dffb0',
-      color: 0x08703e,
-      accent: 0x39df83,
+      // The one primary action. Gold reads against both the navy chrome and
+      // the green pitch, where the old green face sank into the turf.
+      labelColor: '#1b1303',
+      subtitleColor: '#6b4e00',
+      color: PRIMARY_FACE,
+      accent: GOLD_HI,
       iconType: 'play',
-      subtitleColorValue: 0x7dffb0,
+      iconColor: 0x1b1303,
       featured: true
     }, () => {
       if (continuePending) return;
@@ -847,11 +836,10 @@ export class MenuScene extends Phaser.Scene {
     this.menuActionButtons.push(makeMenuAction(this, actionX, 107, actionW, 35, {
       label: 'CAREER',
       subtitle: 'FIVE CUP TOUR',
-      subtitleColor: '#7ad5ff',
-      color: 0x0b4f9c,
-      accent: 0x38adff,
-      iconType: 'career',
-      subtitleColorValue: 0x58c6ff
+      subtitleColor: SECONDARY_SUBTITLE,
+      color: SECONDARY_FACE,
+      accent: 0x58c6ff,
+      iconType: 'career'
     }, () => this.scene.start('LevelSelect')).setDepth(230));
 
     const dailySubtitle = daily.completed
@@ -862,11 +850,10 @@ export class MenuScene extends Phaser.Scene {
     this.menuActionButtons.push(makeMenuAction(this, actionX, 147, actionW, 35, {
       label: 'DAILY KICK',
       subtitle: dailySubtitle,
-      subtitleColor: '#ffe06a',
-      color: 0x855b00,
-      accent: 0xffc928,
-      iconType: 'daily',
-      subtitleColorValue: 0xf5c94b
+      subtitleColor: SECONDARY_SUBTITLE,
+      color: SECONDARY_FACE,
+      accent: 0xf5c94b,
+      iconType: 'daily'
     }, () => {
       SaveManager.setLastPlayed?.({ mode: 'daily', levelId: LEVELS[continueIndex]?.id });
       this.scene.start('Game', { mode: 'daily', dailyDate: today });
@@ -875,11 +862,10 @@ export class MenuScene extends Phaser.Scene {
     this.menuActionButtons.push(makeMenuAction(this, actionX, 187, actionW, 35, {
       label: 'TIME ATTACK',
       subtitle: '60 SEC',
-      subtitleColor: '#ff9b9d',
-      color: 0x942c36,
-      accent: 0xff5e68,
-      iconType: 'time',
-      subtitleColorValue: 0xff8551
+      subtitleColor: SECONDARY_SUBTITLE,
+      color: SECONDARY_FACE,
+      accent: 0xff8551,
+      iconType: 'time'
     }, () => {
       SaveManager.setLastPlayed?.({ mode: 'arcade', levelId: null });
       this.scene.start('Game', { mode: 'arcade' });
@@ -888,11 +874,10 @@ export class MenuScene extends Phaser.Scene {
     this.menuActionButtons.push(makeMenuAction(this, actionX, 227, actionW, 35, {
       label: 'LOCKER',
       subtitle: 'MAKE IT YOURS',
-      subtitleColor: '#d1b2ff',
-      color: 0x5630a0,
-      accent: 0xa976ff,
-      iconType: 'locker',
-      subtitleColorValue: 0xda83ff
+      subtitleColor: SECONDARY_SUBTITLE,
+      color: SECONDARY_FACE,
+      accent: 0xc79bff,
+      iconType: 'locker'
     }, () => this.scene.start('Locker')).setDepth(230));
   }
 

@@ -50,7 +50,7 @@ import {
 import {
   makeButton, makeIconButton, makeStatChip, titleText, bodyText,
   drawPanel, drawBroadcastFrame, configureHdCamera, crispText, canvasHasKeyboardFocus,
-  setCanvasButtonNavigationBlocked, FONT, PIXEL_TEXT_WEIGHT
+  setCanvasButtonNavigationBlocked, FONT, PIXEL_TEXT_WEIGHT, UI, PRIMARY_BUTTON
 } from '../ui.js';
 import { PAL } from '../pixelart.js';
 import { addCrowdStand } from '../art/CrowdStand.js';
@@ -136,18 +136,39 @@ const HOOP_SEGMENTS = 52;
 // challenge, it is a lockout - this is the last bit of give.
 const RING_FORGIVENESS = 0.22;
 
-// Freeze on boot-to-ball contact, scaled by shot power. A scuffed shot holds
-// for ~40ms and a maximum-power strike for ~70ms: below 40 the hold reads as a
-// dropped frame, above 70 it reads as a stutter.
-const HIT_STOP_SECONDS = 0.07;
-const HIT_STOP_MIN_SCALE = 0.57;
+// Freeze on boot-to-ball contact, scaled by shot power: ~50ms for a scuffed
+// shot, ~100ms at full power. The earlier 70ms ceiling was set when a longer
+// hold read as a stutter - but that was with a shake too small to see. The
+// camera keeps rattling through the freeze (updateCameraShake runs on wall
+// clock, ahead of the hit-stop gate), so with a visible shake a longer hold
+// reads as weight, not as a dropped frame.
+const HIT_STOP_SECONDS = 0.1;
+const HIT_STOP_MIN_SCALE = 0.5;
+
+// Freezes for everything the ball hits after it leaves the boot. Only the kick
+// used to hold; woodwork, a parry, the wall and the net all passed without a
+// single frozen frame, which is most of why shots felt weightless. Ordered by
+// how much the moment should hurt. No single hold exceeds IMPACT_HOLD_MAX.
+const IMPACT_HOLD = Object.freeze({
+  crossbar: 0.12,
+  post: 0.1,
+  parry: 0.09,
+  wall: 0.075,
+  catch: 0.05,
+  board: 0.05,
+  netBase: 0.035,   // + netForce * netScale, so a rocket bulges the net harder
+  netScale: 0.05
+});
+const IMPACT_HOLD_MAX = 0.13;
 
 // Impact shake. Trauma is spent linearly over SHAKE_DECAY_SECONDS while screen
 // offset follows its square, so a full-strength hit rattles hard for ~120ms and
 // has visually settled well before the trauma budget actually runs out.
 const SHAKE_TRAUMA_PER_STRENGTH = 0.62;
 const SHAKE_DECAY_SECONDS = 0.42;
-const SHAKE_MAX_PX = 2.3;        // logical pixels at peak trauma
+// Amplitude is trauma squared, so at 2.3 a typical strike moved the frame by
+// well under one logical pixel - present in the code, invisible on screen.
+const SHAKE_MAX_PX = 4.2;        // logical pixels at peak trauma
 const SHAKE_KICK_RECOVERY = 12;  // exponential settle rate for the directional lurch
 
 // Bullet time. The dip arms when the ball is this far (in flight seconds) from
@@ -230,13 +251,24 @@ function mixColor(a, b, t) {
   );
 }
 
-function drawTrophyResultsFrame(g, { x, y, w, h, fill = 0x0d2236 }) {
+// Every card (pause, clear, fail, daily, time attack) leads with the single
+// gold primary action and gives the rest one shared navy face. Each card used
+// to invent its own colours - orange, steel, two different blues, blue-grey,
+// green - so no two outcomes looked like the same game, and on the pause card
+// the only gold button was Restart.
+const SECONDARY_BUTTON = Object.freeze({ color: PAL.panelHi, hover: 0x24508a, pressed: 0x0f2747 });
+function cardButtonStyle(index) {
+  return index === 0 ? PRIMARY_BUTTON : SECONDARY_BUTTON;
+}
+
+function drawTrophyResultsFrame(g, { x, y, w, h, fill = 0x0d2236, railInsetLeft }) {
   drawBroadcastFrame(g, x, y, w, h, {
     fill,
     border: PAL.goldDark,
     corner: PAL.gold,
     highlight: 0x31506a,
-    railY: 12
+    railY: 12,
+    railInsetLeft
   });
 
   const insetX = x + 6;
@@ -468,6 +500,7 @@ export class GameScene extends Phaser.Scene {
     this.simTime = 0;
     this.slowmoUsed = false;
     this.hitStopT = 0;
+    this.resultImpactHold = 0;
     this.shakeTrauma = 0;
     this.shakeT = 0;
     this.shakeKickX = 0;
@@ -911,7 +944,9 @@ export class GameScene extends Phaser.Scene {
     );
     const panel = this.add.graphics().setDepth(3500);
     drawBroadcastFrame(panel, 70, 42, 340, 186, {
-      fill: 0x0d2236, border: PAL.goldDark, corner: PAL.gold, railY: 15
+      fill: 0x0d2236, border: PAL.goldDark, corner: PAL.gold, railY: 15,
+      // Logo spans x 81-121; start the rule clear of it.
+      railInsetLeft: 57
     });
     objects.push(panel);
     objects.push(this.add.image(101, 59, 'calynx-logo-pixel')
@@ -929,11 +964,9 @@ export class GameScene extends Phaser.Scene {
     objects.push(assistText);
 
     const actions = [
-      { label: 'RESUME', color: PAL.blue, hover: PAL.blueHi, cb: () => this.closePauseMenu() },
+      { label: 'RESUME', cb: () => this.closePauseMenu() },
       {
         label: 'SETTINGS',
-        color: PAL.panelHi,
-        hover: PAL.border,
         cb: () => {
           SettingsPanel.open({
             onChange: (nextSettings) => {
@@ -943,14 +976,14 @@ export class GameScene extends Phaser.Scene {
           });
         }
       },
-      { label: 'RESTART', color: PAL.goldDark, hover: PAL.gold, cb: () => this.restartCurrentLevel() },
-      { label: 'EXIT MATCH', color: PAL.panelHi, hover: PAL.border, cb: () => this.startScene('Menu') }
+      { label: 'RESTART', cb: () => this.restartCurrentLevel() },
+      { label: 'EXIT MATCH', cb: () => this.startScene('Menu') }
     ];
     // Four buttons across the 300px panel: 68 wide on a 72px pitch, centred.
     const first = GAME_W / 2 - ((actions.length - 1) * 72) / 2;
     actions.forEach((action, index) => {
       objects.push(makeButton(this, first + index * 72, 166, 68, 27, action.label, action.cb, {
-        color: action.color, hover: action.hover, border: index === 0 ? PAL.goldDark : PAL.borderDark,
+        ...cardButtonStyle(index),
         fontSize: action.label.length > 7 ? '6px' : '7px', hitHeight: 32
       }).setDepth(3501));
     });
@@ -1401,10 +1434,40 @@ export class GameScene extends Phaser.Scene {
    * being tuned into the same shake.
    */
   playImpactShake(strength = 0.75, { kickX = 0, kickY = 0 } = {}) {
-    if (this.settings.screenShake === false || this.settings.reducedMotion) return;
+    // Optional chaining on purpose: this runs inside collision resolution, and
+    // a cosmetic effect must never be able to throw there.
+    if (this.settings?.screenShake === false || this.settings?.reducedMotion) return;
     this.shakeTrauma = Math.min(1, this.shakeTrauma + Math.max(0, strength) * SHAKE_TRAUMA_PER_STRENGTH);
     this.shakeKickX += kickX;
     this.shakeKickY += kickY;
+  }
+
+  /**
+   * Hold the world for `seconds` on an impact. Never shortens a hold already
+   * running, and is skipped entirely under reduced motion.
+   *
+   * resolve() drops any running hold so a result is never left waiting behind
+   * one. A collision that *is* the result - a parry, a catch, the wall - sets
+   * its hold immediately before calling resolve(), so it passes
+   * `survivesResult` and resolve() lets that one bounded hold through.
+   */
+  playHitStop(seconds, { survivesResult = false } = {}) {
+    if (this.settings?.reducedMotion) return;
+    const hold = Math.min(IMPACT_HOLD_MAX, Math.max(0, Number(seconds) || 0));
+    this.hitStopT = Math.max(this.hitStopT || 0, hold);
+    if (survivesResult) this.resultImpactHold = hold;
+  }
+
+  /**
+   * The one hold allowed to outlive resolve(). Returns the hold banked by the
+   * collision that caused the result, bounded, and spends it - so it can never
+   * leak into the next attempt. A hold that was not banked (the kick's own, or
+   * woodwork earlier in the flight) yields 0 and is dropped as before.
+   */
+  consumeResultImpactHold() {
+    const hold = Math.min(IMPACT_HOLD_MAX, Math.max(0, Number(this.resultImpactHold) || 0));
+    this.resultImpactHold = 0;
+    return hold;
   }
 
   updateCameraShake(dt) {
@@ -2515,7 +2578,9 @@ export class GameScene extends Phaser.Scene {
     // and objective strip clear.
     this.menuButton = makeButton(this, 43, GAME_H - 22, 78, 24, 'II  MATCH MENU',
       () => this.togglePauseMenu(), {
-        color: PAL.panelHi, hover: PAL.blue, border: PAL.goldDark,
+        // A persistent utility control, not the screen's primary action, so it
+        // takes the quiet derived edge rather than a gold one.
+        color: PAL.panelHi, hover: PAL.blue,
         fontSize: '7px', hitWidth: 78, hitHeight: 44, letterSpacing: 0.12
       }).setDepth(2102);
     this.menuHint = this.trackResponsiveHudText(bodyText(this, 87, GAME_H - 22, 'TAB', {
@@ -3436,7 +3501,8 @@ export class GameScene extends Phaser.Scene {
 
     const screen = project(point.x, point.y, this.zBoards);
     this.impact.explode(9, screen.x, screen.y);
-    this.playImpactShake(0.6);
+    this.playImpactShake(0.8);
+    this.playHitStop(IMPACT_HOLD.board);
     Audio.post('post');
     this.flashBoard(screen.x, screen.y, this.zBoards);
   }
@@ -3480,7 +3546,8 @@ export class GameScene extends Phaser.Scene {
         radius: 1.1 + force * 0.5
       });
       Audio.net(force);
-      this.playImpactShake(0.3 + force * 0.5, { kickY: 0.3 + force * 0.7 });
+      this.playImpactShake(0.45 + force * 0.6, { kickY: 0.4 + force * 0.9 });
+      this.playHitStop(IMPACT_HOLD.netBase + force * IMPACT_HOLD.netScale);
       return;
     }
 
@@ -3538,8 +3605,9 @@ export class GameScene extends Phaser.Scene {
         });
         const spos = project(pt.x, pt.y, crossing.planeZ);
         this.impact.explode(wallContact.part === 'leg' ? 11 : 8, spos.x, spos.y);
-        this.playImpactShake(0.72);
-        Audio.save();
+        this.playImpactShake(0.95);
+        this.playHitStop(IMPACT_HOLD.wall, { survivesResult: true });
+        Audio.save('wall');
         this.resolve('WALL');
         return;
       }
@@ -3563,7 +3631,10 @@ export class GameScene extends Phaser.Scene {
         keeper.catchBall(pt);
         ball.flying = false;
         this.ballCaught = true;
-        Audio.save();
+        // A catch used to land with no shake and no hold at all.
+        this.playImpactShake(0.45);
+        this.playHitStop(IMPACT_HOLD.catch, { survivesResult: true });
+        Audio.save('catch');
         this.resolve('CAUGHT');
         return;
       }
@@ -3572,8 +3643,9 @@ export class GameScene extends Phaser.Scene {
         resolveKeeperParry(ball, contact, keeper, pt);
         const spos = project(pt.x, pt.y, crossing.planeZ);
         this.impact.explode(12, spos.x, spos.y);
-        this.playImpactShake(0.68);
-        Audio.save();
+        this.playImpactShake(1.0);
+        this.playHitStop(IMPACT_HOLD.parry, { survivesResult: true });
+        Audio.save('parry');
         this.resolve('SAVE');
         return;
       }
@@ -3669,6 +3741,7 @@ export class GameScene extends Phaser.Scene {
       kickY: crossbar ? -1.6 : -0.5,
       kickX: crossbar ? 0 : -Math.sign(point.x || 1) * 1.3
     });
+    this.playHitStop(crossbar ? IMPACT_HOLD.crossbar : IMPACT_HOLD.post);
     Audio.post(contact.frame);
 
     // In off the post. The rebound parks the ball tangent to the frame and
@@ -3697,8 +3770,12 @@ export class GameScene extends Phaser.Scene {
     this.simSpeed = 1;
     this.slowmoT = 0;
     this.slowmoDepth = SLOWMO_NEAR_MISS_SCALE;
-    // A result must never be left waiting behind a hit-stop.
-    this.hitStopT = 0;
+    // A result must never be left waiting behind a hit-stop, so any running
+    // hold is dropped - except the short, bounded freeze of the very collision
+    // that produced this result (see playHitStop), which is the contact the
+    // player is meant to feel. Results are scheduled on the scene clock, not
+    // this update loop, so the hold delays nothing.
+    this.hitStopT = this.consumeResultImpactHold();
     this.swipe.enabled = false;
     this.setResultFocus(outcome);
 
@@ -3747,7 +3824,7 @@ export class GameScene extends Phaser.Scene {
           shotLabel: shotRating.label,
           contextLabel: this.goalCardContext(pt, shotRating)
         });
-        Audio.goal();
+        Audio.goal(this.combo);
         this.playCrowdGoal();
         this.popScoreReadout();
         if (!this.settings.reducedMotion) {
@@ -4097,6 +4174,7 @@ export class GameScene extends Phaser.Scene {
     this.slowmoT = 0;
     this.slowmoDepth = SLOWMO_NEAR_MISS_SCALE;
     this.hitStopT = 0;
+    this.resultImpactHold = 0;
     this.aimGuideHidden = false;
     this.state = 'AIMING';
     this.swipe.enabled = true;
@@ -4225,23 +4303,13 @@ export class GameScene extends Phaser.Scene {
 
     const retry = makeButton(this, 168, 216, 136, 34, 'RETRY',
       () => this.restartCurrentLevel({ mode: 'arcade' }), {
-        color: 0xb85818,
-        hover: 0xd87828,
-        pressed: 0x81340f,
-        border: PAL.gold,
-        highlight: 0xee9847,
-        lowlight: 0x71300f,
+        ...cardButtonStyle(0),
         fontSize: '11px',
         hitHeight: 40
       }).setDepth(3003);
     const menu = makeButton(this, 312, 216, 136, 34, 'MENU',
       () => this.startScene('Menu'), {
-        color: 0x315f8d,
-        hover: 0x487fae,
-        pressed: 0x234567,
-        border: 0x86a9c9,
-        highlight: 0x6191bd,
-        lowlight: 0x1b3854,
+        ...cardButtonStyle(1),
         fontSize: '11px',
         hitHeight: 40
       }).setDepth(3003);
@@ -4271,21 +4339,21 @@ export class GameScene extends Phaser.Scene {
     const buttons = [];
     if (result.completed && result.firstCompletion && result.reward > 0 && PlatformService.supportsAds()) {
       buttons.push({
-        label: '2X COINS', color: PAL.green, hover: PAL.greenHi,
+        label: '2X COINS',
         cb: () => this.requestDailyBonus(result.reward)
       });
     } else {
       buttons.push({
-        label: 'RETRY', color: PAL.blue, hover: PAL.blueHi,
+        label: 'RETRY',
         cb: () => this.restartCurrentLevel({ mode: 'daily', dailyDate: this.dailyDate })
       });
     }
     buttons.push({
-      label: 'MISSIONS', color: PAL.goldDark, hover: PAL.gold,
+      label: 'MISSIONS',
       cb: () => this.startScene('Progress', { tab: 'daily' })
     });
     buttons.push({
-      label: 'MENU', color: PAL.panelHi, hover: PAL.border,
+      label: 'MENU',
       cb: () => this.startScene('Menu')
     });
 
@@ -4367,7 +4435,8 @@ export class GameScene extends Phaser.Scene {
     const dim = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, PAL.ink, 0.84)
       .setDepth(2999).setInteractive();
     const chrome = this.add.graphics().setDepth(3000);
-    drawTrophyResultsFrame(chrome, { x: 58, y: 24, w: 364, h: 226 });
+    // Logo spans x 75-115 on this card.
+    drawTrophyResultsFrame(chrome, { x: 58, y: 24, w: 364, h: 226, railInsetLeft: 63 });
 
     // Restrained rays and confetti live behind the headline. They sell the
     // reward moment without obscuring the three pieces of actionable data.
@@ -4456,19 +4525,16 @@ export class GameScene extends Phaser.Scene {
     const actions = [];
     if (hasNext) {
       actions.push({
-        label: 'NEXT >', color: 0x2e7d32, hover: 0x43a047, pressed: 0x1b5720,
-        border: PAL.gold, highlight: 0x62b64c, lowlight: 0x173f19,
+        label: 'NEXT >',
         cb: () => this.restartCurrentLevel({ mode: 'career', levelIndex: this.levelIndex + 1 })
       });
     }
     actions.push({
-      label: 'REPLAY', color: 0x1976d2, hover: 0x2196f3, pressed: 0x105298,
-      border: 0x78aade, highlight: 0x4e9bea, lowlight: 0x0c3a70,
+      label: 'REPLAY',
       cb: () => this.restartCurrentLevel({ mode: 'career', levelIndex: this.levelIndex })
     });
     actions.push({
-      label: 'LEVELS', color: 0x37474f, hover: 0x546e7a, pressed: 0x263238,
-      border: 0x78909c, highlight: 0x607d8b, lowlight: 0x1d272c,
+      label: 'LEVELS',
       cb: () => this.startScene('LevelSelect')
     });
 
@@ -4484,12 +4550,7 @@ export class GameScene extends Phaser.Scene {
         action.label,
         action.cb,
         {
-          color: action.color,
-          hover: action.hover,
-          pressed: action.pressed,
-          border: action.border,
-          highlight: action.highlight,
-          lowlight: action.lowlight,
+          ...cardButtonStyle(index),
           fontSize: '9px',
           hitHeight: 39
         }
@@ -4510,10 +4571,10 @@ export class GameScene extends Phaser.Scene {
       'TIP: CHANGE ONE THING — HEIGHT, POWER, OR CURVE'
     ], [
       {
-        label: 'RETRY', color: 0x1976d2, hover: 0x2196f3,
+        label: 'RETRY',
         cb: () => this.restartCurrentLevel({ mode: 'career', levelIndex: this.levelIndex })
       },
-      { label: 'LEVELS', color: 0x37474f, hover: 0x546e7a, cb: () => this.startScene('LevelSelect') }
+      { label: 'LEVELS', cb: () => this.startScene('LevelSelect') }
     ]);
   }
 
@@ -4577,7 +4638,7 @@ export class GameScene extends Phaser.Scene {
       const button = makeButton(this,
         GAME_W / 2 - totalW / 2 + buttonW / 2 + i * (buttonW + gap), buttonY, buttonW, BUTTON_H,
         b.label, b.cb, {
-          color: b.color, hover: b.hover, border: i === 0 ? PAL.goldDark : PAL.borderDark,
+          ...cardButtonStyle(i),
           fontSize: '8px', hitHeight: 30
         }
       ).setDepth(3001);
@@ -4964,8 +5025,13 @@ export class GameScene extends Phaser.Scene {
 
     const meterX = GAME_W / 2 - 48;
     const meterY = GAME_H - 48;
-    this.aimGfx.fillStyle(0x071018, 0.78);
-    this.aimGfx.fillRect(meterX - 36, meterY - 10, 136, 26);
+    // The backing plate spanned x 156-292 while LOFT is right-aligned to 159
+    // and CURL starts at 288, so both labels hung outside a bare rectangle.
+    // Every bar keeps its exact position; the plate is now a shared-language
+    // panel wide enough to hold the labels at the compact 8px size too.
+    drawPanel(this.aimGfx, meterX - 62, meterY - 13, 188, 31, {
+      fill: UI.surfaceMuted, alpha: 0.9
+    });
     // POWER: swipe speed, exactly as the release physics reads it
     this.aimGfx.fillStyle(0x213a52, 1);
     this.aimGfx.fillRect(meterX, meterY, 94, 5);
