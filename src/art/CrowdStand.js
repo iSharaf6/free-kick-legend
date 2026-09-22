@@ -55,6 +55,22 @@ class CrowdStand {
     this.scheduled = [];
   }
 
+  /**
+   * How far each live slice currently sits above its resting baseline, in
+   * logical pixels. 0 means a supporter is at rest, so a settled or
+   * reduced-motion stand reads as all zeroes.
+   *
+   * The release suite asserts exactly that. The earlier per-supporter crowd
+   * exposed this as an array of pose indices; the slice rewrite dropped it
+   * without updating the browser test, which then threw on every run and
+   * blocked the deploy gate. Lift is the slice model's equivalent of a pose.
+   */
+  get currentPoses() {
+    return this.tiles
+      .filter((tile) => tile.active)
+      .map((tile) => tile.fklBaselineY - tile.y);
+  }
+
   startAmbient() {
     if (this.reducedMotion || this.timer) return this;
     this.timer = this.scene.time.addEvent({

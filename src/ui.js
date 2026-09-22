@@ -21,6 +21,37 @@ export const UI_DEPTH = {
   overlay: 3000
 };
 
+// Interface-only surface tokens. PAL.border and PAL.borderDark also paint the
+// stadium stands (StandDressing.js), so the chrome owns its quieter edges here
+// rather than retuning values the art depends on. One calm navy surface, one
+// soft edge and a single gold accent keep every screen in the same world and
+// leave the saturated colour to the sprites and the pitch.
+export const UI = Object.freeze({
+  surface: 0x0b1d3a,
+  surfaceHi: 0x16335a,
+  surfaceMuted: 0x0a1628,
+  edge: 0x27446b,
+  edgeHi: 0x4a6f9e,
+  shadow: PAL.ink,
+  // Hard shadow cast straight down: panels and buttons read as solid objects
+  // resting on the scene instead of outlined boxes floating over it.
+  shadowDrop: 3
+});
+
+// The one call-to-action on a screen. Spread into makeButton's options so every
+// primary action - Continue, Play Match, Next, Resume - is the same gold key
+// with dark ink lettering. Gold holds against both the navy chrome and the
+// green pitch, and reserving it for the primary action stops a destructive
+// control (Restart used to be the only gold button on the pause card) from
+// being the first thing the eye lands on.
+export const PRIMARY_BUTTON = Object.freeze({
+  color: 0xf2b91c,
+  hover: 0xffd24d,
+  pressed: 0xc9960f,
+  textColor: '#1b1303',
+  strokeThickness: 0
+});
+
 const BUTTON_NAVIGATION = Symbol('fkl-button-navigation');
 const CANVAS_FOCUS_BRIDGE = Symbol('fkl-canvas-focus-bridge');
 
@@ -329,42 +360,54 @@ function shade(color, amount) {
 }
 
 export function drawPanel(g, x, y, w, h, opts = {}) {
-  const fill = opts.fill ?? PAL.panel;
-  const border = opts.border ?? PAL.border;
-  const shadow = opts.shadow ?? PAL.ink;
+  const fill = opts.fill ?? UI.surface;
+  const border = opts.border ?? UI.edge;
+  const shadow = opts.shadow ?? UI.shadow;
   const alpha = opts.alpha ?? 0.98;
 
-  g.fillStyle(shadow, 0.54 * alpha);
-  g.fillRect(x + 4, y + 4, w, h);
+  g.fillStyle(shadow, 0.62 * alpha);
+  g.fillRect(x, y + UI.shadowDrop, w, h);
   g.fillStyle(border, alpha);
   g.fillRect(x, y, w, h);
-  g.fillStyle(fill, 0.96 * alpha);
+  g.fillStyle(fill, 0.97 * alpha);
   g.fillRect(x + 1, y + 1, w - 2, h - 2);
 
-  // A clean top light and a saturated team-colour rail mirror the shading on
-  // the native player sprites without introducing faux-aged brass details.
-  g.fillStyle(opts.highlight ?? PAL.panelHi, 0.92 * alpha);
+  // One soft top light and a grounded bottom edge give the surface thickness.
+  g.fillStyle(opts.highlight ?? UI.edgeHi, 0.5 * alpha);
   g.fillRect(x + 1, y + 1, w - 2, 1);
-  g.fillStyle(PAL.ink, 0.52 * alpha);
+  g.fillStyle(PAL.ink, 0.42 * alpha);
   g.fillRect(x + 1, y + h - 2, w - 2, 1);
 
-  const accent = opts.corner ?? opts.accent ?? PAL.blueHi;
-  g.fillStyle(accent, 0.96 * alpha);
-  g.fillRect(x, y, 2, h);
+  // The colour rail is now opt-in. Painting a cyan rail on every panel by
+  // default is what made the chrome read as a template; a rail only appears
+  // where a caller asks for one to carry meaning (gold for a reward or a
+  // selected state).
+  const accent = opts.corner ?? opts.accent;
+  if (accent !== undefined && accent !== null) {
+    g.fillStyle(accent, 0.96 * alpha);
+    g.fillRect(x, y, 2, h);
+  }
   return g;
 }
 
 /** Shared full-screen/menu chrome with clean pixel-sports hierarchy. */
 export function drawBroadcastFrame(g, x, y, w, h, opts = {}) {
   drawPanel(g, x, y, w, h, {
-    fill: opts.fill ?? 0x0d2236,
-    border: opts.border ?? PAL.blue,
-    corner: opts.corner ?? PAL.blueHi,
-    highlight: opts.highlight ?? 0x2b67a1,
+    fill: opts.fill ?? UI.surface,
+    border: opts.border ?? UI.edge,
+    corner: opts.corner,
+    highlight: opts.highlight,
     alpha: opts.alpha
   });
+  // The header divider takes the frame's own accent when it has one, so a gold
+  // results frame gets a gold rule instead of an unrelated cyan one.
   const railY = y + (opts.railY ?? 13);
-  g.fillStyle(PAL.blueHi, 0.78).fillRect(x + 8, railY, w - 16, 1);
+  // `railInsetLeft` starts the rule to the right of a brand mark parked in the
+  // frame's top-left corner. Without it the rule ran straight through the
+  // studio logo on the pause and results cards.
+  const railX = x + (opts.railInsetLeft ?? 8);
+  g.fillStyle(opts.corner ?? UI.edgeHi, opts.corner !== undefined ? 0.55 : 0.4)
+    .fillRect(railX, railY, x + w - 8 - railX, 1);
   return g;
 }
 
@@ -374,25 +417,28 @@ function drawButton(g, w, h, fill, state, opts, focused = false) {
   // Short travel and a clean colour rail keep interaction obvious at every
   // scale while letting the detailed sprite art remain the visual lead.
   const y = pressed ? 2 : 0;
-  const border = opts.border ?? (opts.selected ? PAL.gold : PAL.border);
+  // The edge is derived from the face, so a gold button gets a gold edge and a
+  // navy one a navy edge. A single loud blue outline on every control was the
+  // main thing making unrelated buttons look identical and busy.
+  const border = opts.border ?? (opts.selected ? PAL.gold : shade(fill, 46));
 
   g.clear();
   if (!pressed) {
-    g.fillStyle(PAL.ink, 0.62);
-    g.fillRect(-w / 2 + 3, -h / 2 + 4, w, h);
+    // Straight-down hard shadow, matching drawPanel: the button is a solid key
+    // that visibly travels into its own shadow when pressed.
+    g.fillStyle(UI.shadow, 0.7);
+    g.fillRect(-w / 2, -h / 2 + UI.shadowDrop, w, h);
   }
-  g.fillStyle(disabled ? PAL.borderDark : border, 1);
+  g.fillStyle(disabled ? UI.edge : border, 1);
   g.fillRect(-w / 2, -h / 2 + y, w, h);
-  g.fillStyle(disabled ? PAL.panelMuted : fill, 1);
+  g.fillStyle(disabled ? UI.surfaceMuted : fill, 1);
   g.fillRect(-w / 2 + 1, -h / 2 + 1 + y, w - 2, h - 2);
 
   if (!disabled) {
-    g.fillStyle(opts.highlight ?? shade(fill, 28), 0.9);
+    g.fillStyle(opts.highlight ?? shade(fill, 34), 0.85);
     g.fillRect(-w / 2 + 1, -h / 2 + 1 + y, w - 2, 1);
-    g.fillStyle(opts.lowlight ?? shade(fill, -30), 0.95);
-    g.fillRect(-w / 2 + 1, h / 2 - 2 + y, w - 2, 1);
-    g.fillStyle(border, 1);
-    g.fillRect(-w / 2, -h / 2 + y, 2, h);
+    g.fillStyle(opts.lowlight ?? shade(fill, -34), 0.95);
+    g.fillRect(-w / 2 + 1, h / 2 - 3 + y, w - 2, 2);
   }
 
   if (opts.selected) {

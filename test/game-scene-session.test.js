@@ -850,3 +850,105 @@ test('goal-plane collision checks use the active scaled goal instead of regulati
   assert.equal(runGoalPlaneCheck(5.85, 2.015), 'MISS');
   assert.equal(runGoalPlaneCheck(9, 3.1), 'GOAL');
 });
+
+// ---- Impact hit-stop -------------------------------------------------------
+// Only the kick used to freeze the world. Woodwork, a parry, the wall and the
+// net now hold too, and the rules below are what keep that safe.
+
+function makeHitStopScene(settings = {}) {
+  const scene = Object.create(GameScene.prototype);
+  Object.assign(scene, { settings: { reducedMotion: false, ...settings }, hitStopT: 0, resultImpactHold: 0 });
+  return scene;
+}
+
+test('an impact hold freezes the world and never shortens a hold already running', () => {
+  const scene = makeHitStopScene();
+  scene.playHitStop(0.09);
+  assert.equal(scene.hitStopT, 0.09);
+
+  // A lighter collision a frame later (net after a parry) must not cut the
+  // heavier freeze short.
+  scene.playHitStop(0.04);
+  assert.equal(scene.hitStopT, 0.09);
+
+  scene.playHitStop(0.11);
+  assert.equal(scene.hitStopT, 0.11);
+});
+
+test('no single impact hold can stall the match: holds are bounded and sanitised', () => {
+  const scene = makeHitStopScene();
+  scene.playHitStop(5);
+  assert.ok(scene.hitStopT > 0 && scene.hitStopT <= 0.13, `hold must be capped, got ${scene.hitStopT}`);
+
+  for (const bad of [-1, NaN, undefined, null, 'x']) {
+    const fresh = makeHitStopScene();
+    fresh.playHitStop(bad);
+    assert.equal(fresh.hitStopT, 0, `a ${String(bad)} hold must be inert`);
+  }
+});
+
+test('reduced motion disables every impact hold', () => {
+  const scene = makeHitStopScene({ reducedMotion: true });
+  scene.playHitStop(0.1, { survivesResult: true });
+  assert.equal(scene.hitStopT, 0);
+  assert.equal(scene.resultImpactHold, 0);
+});
+
+test('resolve keeps only the hold of the collision that caused the result', () => {
+  // The kick's own hold (or woodwork earlier in the flight) was not banked, so
+  // a result still drops it - a result is never left waiting behind a hit-stop.
+  const stale = makeHitStopScene();
+  stale.playHitStop(0.1);
+  assert.equal(stale.consumeResultImpactHold(), 0);
+
+  // A parry, catch or wall block banks its hold immediately before resolve().
+  const parry = makeHitStopScene();
+  parry.playHitStop(0.09, { survivesResult: true });
+  assert.equal(parry.consumeResultImpactHold(), 0.09);
+  // Spent exactly once: it cannot leak into the next attempt.
+  assert.equal(parry.resultImpactHold, 0);
+  assert.equal(parry.consumeResultImpactHold(), 0);
+
+  // A corrupted banked value can never become an unbounded freeze.
+  const corrupt = makeHitStopScene();
+  corrupt.resultImpactHold = 99;
+  assert.ok(corrupt.consumeResultImpactHold() <= 0.13);
+  corrupt.resultImpactHold = NaN;
+  assert.equal(corrupt.consumeResultImpactHold(), 0);
+});
+
+test('resolve routes its hit-stop through the banked-hold rule, and result collisions bank theirs', async () => {
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('../src/scenes/GameScene.js', import.meta.url), 'utf8');
+  const resolveBody = source.slice(source.indexOf('  resolve(outcome, pt) {'), source.indexOf('    let shotRating = scoreShot({'));
+  assert.match(resolveBody, /this\.hitStopT = this\.consumeResultImpactHold\(\);/);
+  assert.doesNotMatch(resolveBody, /this\.hitStopT = 0;/, 'resolve must not unconditionally cancel the causing impact');
+
+  // Each collision that ends the shot must bank its hold *before* resolving,
+  // or resolve() silently discards it and the save lands with no weight.
+  for (const [kind, outcome] of [['wall', 'WALL'], ['catch', 'CAUGHT'], ['parry', 'SAVE']]) {
+    const pattern = new RegExp(
+      `playHitStop\\(IMPACT_HOLD\\.${kind}, \\{ survivesResult: true \\}\\);[\\s\\S]{0,80}?this\\.resolve\\('${outcome}'\\)`
+    );
+    assert.match(source, pattern, `${kind} must bank its hold ahead of resolve('${outcome}')`);
+  }
+});
+
+test('impact effects can never throw inside collision resolution', () => {
+  // checkFlight() calls these mid-collision. A scene with no settings object
+  // (or a partial one) must still resolve the save, the block or the goal.
+  for (const settings of [undefined, null, {}]) {
+    const scene = Object.create(GameScene.prototype);
+    Object.assign(scene, { settings, hitStopT: 0, resultImpactHold: 0, shakeTrauma: 0, shakeKickX: 0, shakeKickY: 0 });
+    assert.doesNotThrow(() => scene.playHitStop(0.09, { survivesResult: true }));
+    assert.doesNotThrow(() => scene.playImpactShake(1, { kickX: 1, kickY: -1 }));
+    assert.equal(scene.hitStopT, 0.09);
+    assert.ok(scene.shakeTrauma > 0, 'effects default to on when no setting says otherwise');
+  }
+
+  // An explicit opt-out is still honoured.
+  const off = Object.create(GameScene.prototype);
+  Object.assign(off, { settings: { screenShake: false }, shakeTrauma: 0, shakeKickX: 0, shakeKickY: 0 });
+  off.playImpactShake(1);
+  assert.equal(off.shakeTrauma, 0);
+});

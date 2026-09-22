@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { GAME_W, GAME_H } from '../config.js';
 import {
   makeButton, makeIconButton, makeStatChip, titleText, bodyText,
-  drawPanel, sceneIntro, formatCompact, configureHdCamera, FONT
+  drawPanel, sceneIntro, formatCompact, configureHdCamera, FONT, UI
 } from '../ui.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
@@ -87,14 +87,12 @@ export class LockerScene extends Phaser.Scene {
   drawHeader() {
     const g = this.add.graphics().setDepth(100);
     drawPanel(g, 7, 5, GAME_W - 14, 27, {
-      fill: 0x0b244a,
-      border: 0x3478b8,
-      corner: 0x27b8f4
+      fill: 0x0b244a
     });
     makeIconButton(this, 23, 18, 20, 'icon-back', () => this.scene.start('Menu'), {
       color: 0x14345e,
       hover: 0x1760bd,
-      border: 0x3478b8,
+      border: UI.edge,
       iconScale: 0.78,
       hitWidth: 31,
       hitHeight: 29
@@ -103,7 +101,7 @@ export class LockerScene extends Phaser.Scene {
       .setOrigin(0, 0.5).setDepth(104);
     bodyText(this, 276, 18, 'MATCHDAY CUSTOMISATION', {
       originX: 0.5,
-      fontSize: '5px',
+      fontSize: '7px',
       color: '#9ccce8',
       letterSpacing: 0.26
     }).setDepth(104);
@@ -112,7 +110,7 @@ export class LockerScene extends Phaser.Scene {
     this.coinChip = makeStatChip(this, 425, 18, 80, 'icon-coin', formatCompact(SaveManager.getCoins()), {
       height: 21,
       fill: 0x07152f,
-      border: 0x3478b8,
+      border: UI.edge,
       fontSize: '8px',
       iconScale: 0.8
     }).setDepth(104);
@@ -121,13 +119,10 @@ export class LockerScene extends Phaser.Scene {
   drawPanels() {
     const g = this.add.graphics().setDepth(70);
     drawPanel(g, 9, 72, 190, 188, {
-      fill: 0x0a1c3c,
-      border: 0x3478b8,
-      corner: 0x27b8f4
+      fill: 0x0a1c3c
     });
     drawPanel(g, 207, 72, 264, 188, {
       fill: 0x0b244a,
-      border: 0x3478b8,
       corner: 0xffc928
     });
 
@@ -135,7 +130,7 @@ export class LockerScene extends Phaser.Scene {
     // sprite dominant and the surrounding chrome deliberately restrained.
     g.fillStyle(PAL.ink, 0.58);
     g.fillRect(14, 217, 180, 38);
-    g.lineStyle(2, 0x3478b8, 1);
+    g.lineStyle(2, UI.edgeHi, 1);
     g.lineBetween(24, 89, 184, 89);
     for (let x = 30; x <= 180; x += 30) g.lineBetween(x, 89, x, 96);
     g.fillStyle(0x64d7ff, 0.08);
@@ -167,7 +162,7 @@ export class LockerScene extends Phaser.Scene {
         color: selected ? meta.color : 0x14345e,
         hover: meta.color,
         selected,
-        border: selected ? 0xffc928 : 0x3478b8,
+        border: selected ? 0xffc928 : UI.edge,
         icon: meta.icon,
         iconScale,
         iconX: 14,
@@ -243,7 +238,7 @@ export class LockerScene extends Phaser.Scene {
       const ballShadow = this.add.graphics().setDepth(137);
       ballShadow.fillStyle(PAL.ink, 0.68);
       ballShadow.fillRect(113, 216, 50, 5);
-      ballShadow.fillStyle(0x3478b8, 0.45);
+      ballShadow.fillStyle(UI.edge, 0.45);
       ballShadow.fillRect(119, 213, 38, 3);
       const ball = this.add.image(138, 187, selected.id)
         .setDisplaySize(55, 55)
@@ -373,7 +368,7 @@ export class LockerScene extends Phaser.Scene {
     const action = makeButton(this, 339, 232, 224, 31, label, () => this.handleAction(selected), {
       color: meta.color,
       hover: this.category === 'kit' ? PAL.blueHi : this.category === 'ball' ? 0xe47c3e : 0x836bb5,
-      border: 0x3478b8,
+      border: UI.edge,
       icon,
       iconScale: 0.75,
       iconX: 18,

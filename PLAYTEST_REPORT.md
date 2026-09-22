@@ -1,5 +1,116 @@
 # Free Kick Legend — Release Remediation Report
 
+## Impact and streak feel pass — 21 September 2026
+
+**No score is assigned, and nobody has heard or felt this yet.** Every change
+below was verified for correctness (tests, and live instrumentation of real
+shots in headless Chromium). None of it was judged by a human ear or hand. The
+owner's note was "shots have no punch"; treat the numbers here as a first
+tuning, to be corrected by playing it.
+
+**Diagnosis.** The impact systems were well built and barely switched on.
+Shake amplitude is `trauma squared x SHAKE_MAX_PX`; at 2.3 a typical strike
+moved the frame by under one logical pixel. Hit-stop fired in exactly one
+place, the kick. Woodwork, a parry, a wall block, a catch and the net all
+passed without a single frozen frame, and `save()` was one 120 ms band of
+noise shared by all three defensive outcomes.
+
+**What changed.**
+
+- Hit-stop on every impact (`IMPACT_HOLD` in `GameScene.js`): crossbar 120 ms,
+  post 100, parry 90, wall 75, catch and hoarding 50, net 35-85 by entry
+  speed. The kick's own hold rises from 40-70 ms to 50-100 ms. No hold can
+  exceed 130 ms, none shortens one already running, and reduced motion
+  disables all of them.
+- `resolve()` used to zero any hold, which silently cancelled a freeze set by
+  the collision that caused the result. It now keeps only that one banked,
+  bounded hold (`consumeResultImpactHold`) and still drops stale ones.
+- `SHAKE_MAX_PX` 2.3 to 4.2, with stronger strengths for the wall, a parry and
+  the net, and a first shake for a catch. **Deliberately not pushed further:**
+  nothing overscans the 480x270 frame, so a full 4.2 px offset exposes a dark
+  strip about 11 screen px wide on the trailing edges at 720p.
+- `Audio.save(kind)`: parry, catch and wall are three different sounds, each
+  with a falling low thump under its transient.
+- `Audio.goal(streak)`: in Time Attack and Daily, each consecutive goal lifts
+  the fanfare a semitone, capped at a fifth. A miss drops it back to the root.
+  Career passes 0 and is unchanged.
+- Both effect helpers tolerate a missing `settings` object. They run inside
+  collision resolution; adding a shake to the catch path broke two collision
+  tests that build a bare scene, which is how that was found.
+
+**Verified:** 289 / 289 unit tests (11 new, mutation-checked: three deliberate
+regressions were each caught), production build, 29 / 29 Chromium journeys.
+Live instrumentation over 8 real shots confirmed banked holds survive
+`resolve()` (wall 75 ms, catch 50 ms), no hold was ever shortened, and there
+were zero page or console errors.
+
+**To tune by feel:** `HIT_STOP_SECONDS`, `IMPACT_HOLD`, `SHAKE_MAX_PX` and
+`SHAKE_TRAUMA_PER_STRENGTH` at the top of `src/scenes/GameScene.js`; the
+`save()` and `goal()` layers in `src/systems/AudioSynth.js`.
+
+**Not changed:** physics, swipe mapping, keeper AI, difficulty, the 1.76 s
+goal celebration (the reward moment, and pinned by tests), and the run-up
+delay between releasing a swipe and the ball leaving.
+
+---
+
+## Visual cohesion pass and release packaging — 20 September 2026
+
+**No score is assigned.** The sections below grade this project as high as
+97 / 100, and they were written by the same agents whose work they grade. The
+owner's own verdict at the start of this pass was that the game "feels shit".
+Treat the historical scores as unverified and prefer the measurements here.
+
+**What was actually wrong.** Gameplay, physics, animation and the sprite art
+were sound. The cheap feel came from the interface surface: a loud `#3478b8`
+outline and a cyan rail on every panel, a five-colour menu where nothing led,
+outcome cards that each invented their own button colours, body text as small
+as 5 logical px, and a settings dialog that did not scale with the window.
+
+**What changed.**
+
+- One surface language, defined once in `src/ui.js` (`UI` tokens): calm navy
+  face, soft edge, hard shadow cast straight down. Colour rails are opt-in and
+  carry meaning. The sprite and stadium palette in `pixelart.js` is untouched.
+- Gold is the single primary action on every screen (`PRIMARY_BUTTON`):
+  Continue, Play Match, Next, Resume, Retry. On the pause card the only gold
+  button used to be **Restart**; it is now Resume.
+- Front menu: one gold call-to-action over four unified rows, floating header
+  chips on a scrim, and a legible hero card. Menu buttons also gained a hover
+  state; the old painter ignored `'hover'` entirely.
+- The power meter is a real panel that contains its own LOFT / CURL labels,
+  with every bar left exactly where it was.
+- The brand rule no longer runs through the studio logo on the pause and
+  level-clear cards.
+- Settings dialog scales with the viewport and has a 12px text floor. Borders
+  on real form controls were deliberately kept at `#3478b8`: dimming them
+  would drop their boundary contrast below 3:1.
+- Publishing: `og:image`, `twitter:card`, `og:url`, an Apple touch icon and a
+  1280x720 share card (`public/share-card.png`).
+
+**A broken gate, found and fixed.** `e2e/reduced-motion.spec.js` was throwing
+on every run: a crowd rewrite dropped `crowdStand.currentPoses` and the test
+was never updated, so the GitHub Pages deploy gate could not pass despite the
+"31 / 31" claim below. `currentPoses` is restored as a getter (slice lift,
+0 = at rest) and the test now also rejects a vacuous pass on an empty stand.
+
+**Verified on 20 September 2026:** 278 / 278 unit tests, production build, and
+29 / 29 Chromium journeys. JavaScript is 2,108 kB raw / 571 kB gzip; the
+1,603 kB figure below is stale, not a regression from this pass.
+
+**Known open issue (pre-existing).** `e2e/settings.spec.js:4` is flaky: after
+Escape closes Settings from the pause menu, the next Tab is sometimes ignored.
+Measured at n = 8 per arm with recording off, the original dialog failed 7 / 8
+and the scaled dialog 2 / 8, so the scaling did not cause it. CI's
+`retries: 1` masks it. The root cause is not yet proven and may be a genuine
+double-handling of the Escape key.
+
+**Still unverified by anyone:** audio mix on real speakers and headphones,
+touch feel on physical iOS and Android hardware, and a human playthrough of
+all 50 career matches.
+
+---
+
 ## Final gameplay, animation, and release-polish audit — 9 August 2026
 
 **Release verdict:** release candidate. All reproducible code-side critical and
