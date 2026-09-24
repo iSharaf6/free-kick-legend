@@ -21,7 +21,7 @@ export function scorerCardCopy({
   const points = Math.max(0, Math.round(Number(scoreDelta) || 0));
   const result = String(shotLabel || 'GOAL SCORED').trim().toUpperCase();
   return Object.freeze({
-    heading: points ? `+${points} · ${result}` : `${result}!`,
+    heading: points ? `+${points}  ${result}` : `${result}!`,
     player: `#${number}  ${name}`,
     detail: String(contextLabel || `${ordinal(goalNumber)} GOAL OF THE MATCH`).trim().toUpperCase()
   });

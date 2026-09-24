@@ -509,11 +509,11 @@ export function evaluateAdvancedObjective(input = {}) {
   };
 
   if (!checks.scored) {
-    return objectiveFailure('SCORE THE GOAL TO COMPLETE THE OBJECTIVE', checks);
+    return objectiveFailure('It has to go in to count.', checks);
   }
   if (!curveOk) {
     const reason = curveDirectionOk
-      ? 'MORE BEND NEEDED — ARC THE END OF YOUR SWIPE'
+      ? 'Goal, but it needed more bend.'
       : `CURVE THE OTHER WAY — ${String(objective.curveDirection).toUpperCase()}`;
     return objectiveFailure(reason, checks);
   }
@@ -526,7 +526,7 @@ export function evaluateAdvancedObjective(input = {}) {
     const frame = frameRequirementMet(objective.requiredContact, input);
     checks.frame = frame;
     qualifies = frame;
-    reason = frame ? null : 'THE GOAL MUST GO IN OFF THE POST OR CROSSBAR';
+    reason = frame ? null : 'Goal, but it has to go in off the post or crossbar.';
   } else if (type === 'corner-only') {
     const zone = input.goalZone ?? classifyGoalZone(input.point, input.goalDimensions);
     const allowed = Array.isArray(objective.allowedZones) && objective.allowedZones.length
@@ -535,7 +535,7 @@ export function evaluateAdvancedObjective(input = {}) {
     checks.zone = allowed.includes(zone);
     extra.zone = zone;
     qualifies = checks.zone;
-    reason = qualifies ? null : 'ONLY A TOP-CORNER FINISH COUNTS';
+    reason = qualifies ? null : 'Goal, but only the top corners count.';
   } else if (type === 'limited-power') {
     const maximumPower = clamp(
       objective.maximumPower ?? input.maximumPower ?? 1,
@@ -547,9 +547,9 @@ export function evaluateAdvancedObjective(input = {}) {
     qualifies = checks.power && checks.target;
     extra.maximumPower = maximumPower;
     reason = !checks.power
-      ? `KEEP POWER AT OR BELOW ${Math.round(maximumPower * 100)}%`
+      ? `Too hard. Keep it under ${Math.round(maximumPower * 100)}% power.`
       : !checks.target
-        ? 'GOAL SCORED, BUT THE GOLD TARGET WAS MISSED'
+        ? 'Goal, but not in the gold zone.'
         : null;
   } else if (type === 'blind-shot') {
     const aimGuideHidden = Boolean(
@@ -560,9 +560,9 @@ export function evaluateAdvancedObjective(input = {}) {
     checks.aimGuideHidden = aimGuideHidden;
     qualifies = aimGuideHidden && checks.target;
     reason = !aimGuideHidden
-      ? 'COMMIT BEFORE THE AIM GUIDE DISAPPEARS'
+      ? 'Go before the aim guide fades.'
       : !checks.target
-        ? 'GOAL SCORED, BUT THE GOLD TARGET WAS MISSED'
+        ? 'Goal, but not in the gold zone.'
         : null;
   } else if (type === 'reverse-target') {
     const requiredZone = objective.requiredZone;
@@ -574,7 +574,7 @@ export function evaluateAdvancedObjective(input = {}) {
     qualifies = checks.target && checks.zone;
     reason = qualifies
       ? null
-      : `FIND NUMBERED ZONE ${String(requiredZone ?? '?')}`;
+      : `Goal, but it had to hit zone ${String(requiredZone ?? '?')}.`;
   } else if (type === 'ring-shot') {
     const ringProgress = input.ringProgress ?? {};
     const crossed = finite(
@@ -587,9 +587,9 @@ export function evaluateAdvancedObjective(input = {}) {
     extra.ringsRequired = required;
     qualifies = checks.rings && checks.target;
     reason = !checks.rings
-      ? `THREAD ${required} HOOP${required === 1 ? '' : 'S'} BEFORE SCORING`
+      ? `Thread ${required} hoop${required === 1 ? '' : 's'} before it goes in.`
       : !checks.target
-        ? 'HOOPS CLEARED — NOW FIND THE GOLD TARGET'
+        ? 'Hoops done. Now find the gold zone.'
         : null;
   }
 

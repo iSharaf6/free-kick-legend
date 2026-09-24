@@ -328,29 +328,27 @@ test('idle stance holds each authored frame for a calm half-second cadence', () 
   assert.equal(keeper.getAnimationFrame(), 1);
 });
 
-test('keeper recovery holds each side then completes a shared six-frame get-up', () => {
+test('keeper recovery holds a caught ball up to standing and gets up ball-free after a parry', () => {
   const keeper = new Goalkeeper(sceneStub(), 0.6, CAM.ballDist + 17, { seed: 4 });
   keeper.state = 'land';
   keeper.grounded = true;
   keeper.diveDir = 1;
   keeper.hasBall = true;
 
-  for (const [time, frame] of [[0, 0], [0.12, 1], [0.18, 2], [0.24, 3], [0.30, 4], [0.35, 5]]) {
+  // With the ball: the side-specific hold rises all the way to a standing
+  // hold. It must never drop back to the prone, ball-free get-up row.
+  const heldFrames = [];
+  for (let time = 0.06; time < 0.92; time += 0.02) {
     keeper.stateT = time;
-    assert.equal(keeper.getRecoveryFrame(), frame);
+    heldFrames.push(keeper.getRecoveryFrame());
   }
-  for (const [time, frame] of [[0.40, 12], [0.50, 13], [0.60, 14], [0.70, 15], [0.80, 16], [0.90, 17]]) {
-    keeper.stateT = time;
-    assert.equal(keeper.getRecoveryFrame(), frame);
-  }
+  assert.deepEqual([...new Set(heldFrames)], [0, 1, 2, 3, 4, 5]);
 
   keeper.diveDir = -1;
   keeper.stateT = 0;
   assert.equal(keeper.getRecoveryFrame(), 6);
-  keeper.stateT = 0.35;
+  keeper.stateT = 0.9;
   assert.equal(keeper.getRecoveryFrame(), 11);
-  keeper.stateT = 0.90;
-  assert.equal(keeper.getRecoveryFrame(), 17);
 
   keeper.hasBall = false;
   keeper.stateT = 0;
@@ -837,4 +835,133 @@ test('the collision box is the defender, not the sprite canvas', () => {
   // Padding above the head is passable too.
   defender.jumpY = 0;
   assert.equal(wall.blocks({ x: 0, y: defender.height + BALL_R }), false);
+});
+
+function playSave(keeper, { maxSeconds = 3, step = PHYS.fixedStep, onDraw } = {}) {
+  for (let elapsed = 0; elapsed < maxSeconds; elapsed += step) {
+    keeper.update(step);
+    onDraw?.(keeper);
+    if (keeper.state === 'return' || keeper.state === 'idle') break;
+  }
+}
+
+const PHASED_TEXTURES = [
+  'keeper-anim-hd', 'keeper-footwork-hd', 'keeper-return-hd', 'keeper-dive-motion-hd',
+  'keeper-low-save-hd', 'keeper-practical-low-hd', 'keeper-practical-recovery-hd',
+  'keeper-mid-dive-hd', 'keeper-top-tip-hd', 'keeper-upper-parry-hd', 'keeper-mid-catch-hd',
+  'keeper-low-smother-hd', 'keeper-reflex-foot-hd', 'keeper-situational-punch-hd'
+];
+
+test('committed dives never step back to an earlier authored phase and never fly in a wind-up pose', () => {
+  const goalZ = CAM.ballDist + 17;
+  for (const [x, y, speed] of [[-1.6, 1.72, 24], [1.1, 0.7, 21], [-1.1, 1.1, 24], [1.4, 2.18, 24], [-0.8, 1.7, 24]]) {
+    const keeper = new Goalkeeper(sceneStub(PHASED_TEXTURES), 0.72, goalZ, { seed: 8 });
+    keeper.onShot({ z: 0, vx: 0, vy: 0, vz: speed, spin: 0, predictAt: () => ({ x, y, T: 0.72 }) }, goalZ);
+    const plan = keeper.savePlan;
+    assert.ok(plan?.phases, `${keeper.activeSaveMoveId} has authored phases`);
+    const windupFrames = new Set(plan.phases.windup.map((k) => plan.move.frames[k]));
+    let lastPos = 0;
+    playSave(keeper, {
+      onDraw: (k) => {
+        if (k.savePlan !== plan) return;
+        assert.ok(plan.sequencePos >= lastPos, `${k.activeSaveMoveId} stepped back a phase`);
+        lastPos = plan.sequencePos;
+        const [texture, frame] = k.spr.calls.setTexture;
+        if (k.state === 'dive' && texture === plan.move.texture) {
+          assert.equal(windupFrames.has(frame), false, `${k.activeSaveMoveId} flew in wind-up frame ${frame}`);
+        }
+      }
+    });
+  }
+});
+
+test('an early contact holds the contact pose instead of rewinding the clip', () => {
+  const goalZ = CAM.ballDist + 17;
+  const keeper = new Goalkeeper(sceneStub(PHASED_TEXTURES), 0.3, goalZ, { seed: 3 });
+  keeper.onShot({ z: 0, vx: 0, vy: 0, vz: 25, spin: 0, predictAt: () => ({ x: -1.1, y: 1.1, T: 0.4 }) }, goalZ);
+  while (keeper.state !== 'dive') keeper.update(PHYS.fixedStep);
+  for (let i = 0; i < 6; i++) keeper.update(PHYS.fixedStep);
+  keeper.impact({ x: keeper.x - 0.6, y: 1.1 }, { vx: -2, vy: 3, vz: 25 });
+  const contactFrame = keeper.spr.calls.setTexture[1];
+  keeper.update(PHYS.fixedStep);
+  const held = keeper.spr.calls.setTexture[1];
+  const plan = keeper.savePlan;
+  const contactPos = plan.phases.windup.length + plan.phases.flight.length - 1;
+  assert.ok(plan.sequencePos >= contactPos, 'contact pose shown at the moment of contact');
+  const posAtContact = plan.sequencePos;
+  for (let i = 0; i < 30; i++) {
+    keeper.update(PHYS.fixedStep);
+    assert.ok(plan.sequencePos >= posAtContact);
+  }
+  assert.ok(Number.isInteger(contactFrame) && Number.isInteger(held));
+});
+
+test('upright saves go straight to the return run without a turf get-up', () => {
+  const goalZ = CAM.ballDist + 17;
+  const keeper = new Goalkeeper(sceneStub(PHASED_TEXTURES), 0.72, goalZ, { seed: 5 });
+  keeper.onShot({ z: 0, vx: 0, vy: 0, vz: 28, spin: 0, predictAt: () => ({ x: 0.7, y: 0.92, T: 0.5 }) }, goalZ);
+  assert.equal(keeper.activeSaveMoveId, 'spread-save');
+  let sawGetUp = false;
+  let contacted = false;
+  playSave(keeper, {
+    onDraw: (k) => {
+      if (!contacted && k.state === 'dive' && k.diveP > 0.6) {
+        k.impact({ x: k.targetX, y: 0.92 }, { vx: 0, vy: 2, vz: 28 });
+        contacted = true;
+      }
+      const [texture] = k.spr.calls.setTexture;
+      if (texture === 'keeper-practical-recovery-hd') sawGetUp = true;
+    }
+  });
+  assert.equal(sawGetUp, false, 'a standing save must not face-plant into the turf get-up');
+  assert.equal(keeper.state, 'return');
+});
+
+test('a held ball rises with the hold frames and exposes glove points only when the art has no ball', () => {
+  const goalZ = CAM.ballDist + 17;
+  const keeper = new Goalkeeper(sceneStub(PHASED_TEXTURES), 0.72, goalZ, { seed: 9 });
+  keeper.onShot({ z: 0, vx: 0, vy: 0, vz: 21, spin: 0, predictAt: () => ({ x: -1.1, y: 0.7, T: 0.72 }) }, goalZ);
+  while (!(keeper.state === 'dive' && keeper.diveP > 0.5)) keeper.update(PHYS.fixedStep);
+  keeper.catchBall({ x: keeper.x - 0.6, y: 0.6 });
+  keeper.update(PHYS.fixedStep);
+  const inFlight = keeper.getHeldBallPoint();
+  assert.ok(inFlight && Number.isFinite(inFlight.x) && inFlight.y > 0, 'ball rides in the gloves during the dive');
+
+  const textures = new Set();
+  let sawBallFreeGetUp = false;
+  playSave(keeper, {
+    onDraw: (k) => {
+      const [texture, frame] = k.spr.calls.setTexture;
+      if (texture === 'keeper-practical-recovery-hd') {
+        textures.add(frame);
+        if (frame >= 12) sawBallFreeGetUp = true;
+        assert.equal(k.getHeldBallPoint(), null, 'hold frames already draw the ball');
+      }
+    }
+  });
+  assert.equal(sawBallFreeGetUp, false);
+  assert.ok([...textures].every((frame) => frame >= 6 && frame <= 11), 'left-side hold frames');
+
+  keeper.reset();
+  assert.equal(keeper.getHeldBallPoint(), null);
+});
+
+test('every one-scale keeper sheet shares one ready-stance height', () => {
+  const idle = new Goalkeeper(sceneStub(['keeper-anim-hd']), 0.6, CAM.ballDist + 17, { seed: 4 });
+  const scales = new Set();
+  for (let t = 0; t < 2.2; t += 0.05) {
+    idle.idleClock = t;
+    idle.draw();
+    scales.add(idle.spr.calls.setScale[1].toFixed(6));
+  }
+  assert.equal(scales.size, 1, 'idle frames draw at one scale so the crouch reads as a crouch');
+  idle.brace();
+  const braceScales = new Set();
+  for (let t = 0; t < 0.6; t += 0.02) {
+    idle.braceClock = t;
+    idle.draw();
+    braceScales.add(idle.spr.calls.setScale[1].toFixed(6));
+  }
+  assert.equal(braceScales.size, 1, 'the ready bounce moves the body instead of resizing it');
+  assert.deepEqual([...braceScales], [...scales]);
 });

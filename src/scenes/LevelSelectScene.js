@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME_W, RENDER_W, RENDER_H } from '../config.js';
+import { GAME_W, RENDER_W, RENDER_H, CAM } from '../config.js';
 import { crispText, sceneIntro, PIXEL_TEXT_WEIGHT, UI, PRIMARY_BUTTON } from '../ui.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { MenuMusic } from '../systems/MenuMusic.js';
@@ -8,7 +8,9 @@ import { LEVELS, CUPS as CUP_DATA } from '../data/levels.js';
 import { prefetchMatchPack } from '../data/matchAssets.js';
 import { PAL } from '../pixelart.js';
 import { addPitchSurface } from '../art/PitchSurface.js';
+import { addPixelPitch } from '../art/PixelPitch.js';
 import { addCrowdStand } from '../art/CrowdStand.js';
+import { installPixelGrid } from '../rendering/PixelGrid.js';
 
 const LEVELS_PER_CUP = 10;
 const CUP_COUNT = 5;
@@ -16,9 +18,10 @@ const CUP_COLORS = [0x087b4c, 0x1760bd, 0xc87312, 0x6238ae, 0xa52f35];
 const DISPLAY_FONT = '"Pixelify Sans", monospace';
 const PIXEL_FONT = '"Pixelify Sans", monospace';
 const CREAM = '#f7fbff';
-const GOLD = 0xffc928;
-const GOLD_HI = 0xffe56c;
-const GOLD_DARK = 0xffc928;
+const MUTED = '#86aac6';
+// A selected cup or match is marked in cream. Gold is the Play Match key's
+// alone, so the eye has exactly one gold thing to find on this screen.
+const SELECTED_EDGE = UI.cream;
 const BLUE_EDGE = UI.edge;
 const BLUE_MID = 0x164379;
 const BLUE_DEEP = 0x071a38;
@@ -32,7 +35,6 @@ const CUP_VIEWS = CUP_DATA.map((cup, index) => ({
   ...cup,
   roman: ['I', 'II', 'III', 'IV', 'V'][index],
   name: cup.name.toUpperCase(),
-  place: cup.subtitle,
   color: CUP_COLORS[index]
 }));
 
@@ -57,6 +59,9 @@ function configureTourCamera(scene) {
   camera.setZoom(TOUR_ZOOM);
   camera.centerOn(GAME_W / 2, TOUR_H / 2);
   camera.roundPixels = false;
+  // The stadium behind the cup browser sits on the same pixel grid as a match;
+  // the browser itself stays crisp above it.
+  installPixelGrid(scene, { uiDepth: 50 });
   return camera;
 }
 
@@ -91,9 +96,6 @@ function drawTourPanel(g, x, y, w, h, opts = {}) {
   const border = opts.border ?? BLUE_EDGE;
   const inner = opts.inner ?? BLUE_MID;
   const bottom = opts.bottom ?? BLUE_DEEP;
-  // Rail is opt-in (see ui.js drawPanel): gold marks the selected match card,
-  // it is no longer stamped on every surface.
-  const corner = opts.corner;
 
   g.fillStyle(INK, 0.62);
   g.fillRect(x, y + UI.shadowDrop, w, h);
@@ -106,10 +108,6 @@ function drawTourPanel(g, x, y, w, h, opts = {}) {
   g.fillRect(x + 1, y + 1, w - 2, 1);
   g.fillStyle(INK, 0.68);
   g.fillRect(x + 1, y + h - 2, w - 2, 1);
-  if (corner !== undefined && corner !== null) {
-    g.fillStyle(corner, 1);
-    g.fillRect(x, y, 2, h);
-  }
   return g;
 }
 
@@ -118,13 +116,13 @@ function drawTourButton(g, w, h, fill, state, opts = {}) {
   const disabled = state === 'disabled';
   const selected = opts.selected && !disabled;
   const y = pressed ? 2 : 0;
-  const edge = selected ? GOLD_HI : (opts.border ?? BLUE_EDGE);
+  const edge = selected ? SELECTED_EDGE : (opts.border ?? BLUE_EDGE);
   const face = disabled ? 0x162634 : fill;
 
   g.clear();
   if (!pressed) g.fillStyle(INK, 0.7).fillRect(-w / 2, -h / 2 + UI.shadowDrop, w, h);
   if (selected) {
-    g.fillStyle(GOLD, 0.12);
+    g.fillStyle(SELECTED_EDGE, 0.1);
     g.fillRect(-w / 2 - 2, -h / 2 - 2 + y, w + 4, h + 4);
   }
   g.fillStyle(edge, 1);
@@ -138,7 +136,7 @@ function drawTourButton(g, w, h, fill, state, opts = {}) {
   g.fillRect(-w / 2 + 1, h / 2 - 2 + y, w - 2, 1);
 
   if (selected) {
-    g.fillStyle(GOLD, 1);
+    g.fillStyle(SELECTED_EDGE, 1);
     g.fillRect(-w / 2 + 2, h / 2 - 3 + y, w - 4, 2);
   }
 }
@@ -228,7 +226,20 @@ export class LevelSelectScene extends Phaser.Scene {
       reducedMotion: this.reducedMotion,
       dressed: false
     });
-    this.pitchBackdrop = addPitchSurface(this, {
+    this.pitchBackdrop = addPixelPitch(this, {
+      left: Math.floor(TOUR_VIEW_X),
+      top: 98,
+      width: Math.ceil(TOUR_VIEW_W),
+      height: TOUR_H - 98,
+      horizonX: GAME_W / 2,
+      horizonY: CAM.horizonY,
+      focal: CAM.focal,
+      cameraHeight: CAM.height,
+      goalZ: CAM.ballDist + 22,
+      seed: 0x43555035,
+      depth: 0.3,
+      name: 'tour-pixel-pitch'
+    }) ?? addPitchSurface(this, {
       x: TOUR_VIEW_X,
       y: 98,
       width: TOUR_VIEW_W,
@@ -277,8 +288,7 @@ export class LevelSelectScene extends Phaser.Scene {
     const chrome = this.add.graphics().setDepth(100);
     drawTourPanel(chrome, 16, 7, 450, 32, {
       inner: 0x123b70,
-      bottom: 0x071a38,
-      cornerSize: 7
+      bottom: 0x071a38
     });
 
     makeTourButton(this, 34, 23, 25, 23, '', () => this.scene.start('Menu'), {
@@ -291,7 +301,8 @@ export class LevelSelectScene extends Phaser.Scene {
       hitHeight: 32
     }).setDepth(104);
 
-    tourText(this, GAME_W / 2, 23, 'FIVE CUP TOUR', {
+    // Named after the menu button that leads here.
+    tourText(this, GAME_W / 2, 23, 'CAREER', {
       originX: 0.5,
       fontFamily: DISPLAY_FONT,
       fontSize: '17px',
@@ -305,9 +316,7 @@ export class LevelSelectScene extends Phaser.Scene {
     const chip = this.add.graphics();
     drawTourPanel(chip, -44, -11.5, 88, 23, {
       inner: 0x123b70,
-      bottom: 0x071a38,
-      corner: GOLD,
-      cornerSize: 5
+      bottom: 0x071a38
     });
     const star = this.add.image(-29, 0, 'icon-star').setScale(1.25);
     const value = tourText(this, -16, 0, `${totalStars}/${LEVELS.length * 3}`, {
@@ -323,14 +332,11 @@ export class LevelSelectScene extends Phaser.Scene {
     const panels = this.add.graphics().setDepth(80);
     drawTourPanel(panels, 16, 82, 279, 219, {
       inner: 0x123b70,
-      bottom: 0x071a38,
-      cornerSize: 7
+      bottom: 0x071a38
     });
     drawTourPanel(panels, 301, 82, 164, 219, {
       inner: 0x123b70,
-      bottom: 0x071a38,
-      corner: GOLD,
-      cornerSize: 7
+      bottom: 0x071a38
     });
   }
 
@@ -356,7 +362,7 @@ export class LevelSelectScene extends Phaser.Scene {
         this.renderCupContent();
       }, {
         color: selected ? cup.color : 0x123b70,
-        border: selected ? GOLD_HI : UI.edge,
+        border: UI.edge,
         selected,
         disabled: !available,
         icon: available ? 'icon-cup' : 'icon-cup-locked',
@@ -385,31 +391,19 @@ export class LevelSelectScene extends Phaser.Scene {
     const cupName = tourText(this, 29, 103, cup.name, {
       fontFamily: DISPLAY_FONT,
       fontSize: '14px',
-      color: '#f5c94b',
+      color: UI.creamText,
       strokeThickness: 1,
       letterSpacing: 0
     });
-    const divider = tourText(this, 29 + cupName.displayWidth + 7, 103, '/', {
-      fontFamily: DISPLAY_FONT,
-      fontSize: '12px',
-      color: CREAM,
-      strokeThickness: 1
-    });
-    const cupPlace = tourText(this, divider.x + divider.displayWidth + 7, 103, cup.place, {
-      fontSize: '9px',
-      color: '#aac1d3',
-      strokeThickness: 1,
-      letterSpacing: 0.2
-    });
-    this.contentLayer.add([cupName, divider, cupPlace]);
+    this.contentLayer.add(cupName);
 
     if (cupLevels.length === 0) {
       const lock = this.add.image(155, 166, 'icon-cup-locked').setScale(3.2).setAlpha(0.62);
-      const soon = tourText(this, 155, 202, 'QUALIFY IN THE PREVIOUS CUP', {
+      const soon = tourText(this, 155, 202, 'Win the previous cup to play here.', {
         originX: 0.5,
         fontSize: '10px',
         color: '#7792a5',
-        letterSpacing: 0.25
+        letterSpacing: 0.1
       });
       this.contentLayer.add([lock, soon]);
       this.renderEmptyDetail(cup);
@@ -437,7 +431,7 @@ export class LevelSelectScene extends Phaser.Scene {
       this.renderCupContent();
     }, {
       color: selected ? cupColor : 0x123c35,
-      border: selected ? GOLD_HI : 0x31504e,
+      border: 0x31504e,
       selected,
       disabled: !unlocked,
       fontSize: '16px',
@@ -472,12 +466,13 @@ export class LevelSelectScene extends Phaser.Scene {
       fontSize: '13px',
       color: '#70899a'
     });
-    const copy = tourText(this, 383, 207, 'WIN THE PREVIOUS CUP\nTO OPEN THIS STAGE', {
+    const copy = tourText(this, 383, 207, 'Win the previous cup\nto open this one.', {
       originX: 0.5,
       fontSize: '10px',
       color: '#7891a2',
       align: 'center',
-      lineSpacing: 1
+      lineSpacing: 1,
+      letterSpacing: 0.1
     });
     this.contentLayer.add([icon, name, copy]);
   }
@@ -486,63 +481,73 @@ export class LevelSelectScene extends Phaser.Scene {
     if (!level || index < 0) return;
     const unlocked = index < this.unlocked;
     const stars = SaveManager.getStars(stableId(level, index));
-    const cup = CUP_VIEWS[Math.floor(index / LEVELS_PER_CUP)] ?? CUP_VIEWS[0];
+    const left = 313;
+    const width = 141;
 
-    const label = tourText(this, 313, 100, `MATCH ${String(index + 1).padStart(2, '0')}  ·  CUP ${cup.roman}`, {
-      fontSize: '10px',
-      color: '#86aac6',
-      letterSpacing: 0.3
-    });
-    const name = tourText(this, 383, 123, String(level.name || 'Unnamed kick').toUpperCase(), {
-      originX: 0.5,
+    // Name, how it went, what the kick asks of you, then the setup. The old
+    // panel was a DISTANCE / WALL / KEEPER table that never said what the
+    // level actually wanted.
+    const name = tourText(this, left, 96, String(level.name || 'Unnamed kick').toUpperCase(), {
+      originY: 0,
       fontFamily: DISPLAY_FONT,
       fontSize: '13px',
       color: CREAM,
       strokeThickness: 2,
-      align: 'center',
-      wordWrap: { width: 145, useAdvancedWrap: true }
+      letterSpacing: 0.1,
+      lineSpacing: 1,
+      wordWrap: { width, useAdvancedWrap: true }
     });
-    const rating = this.makeStars(383, 145, stars, { scale: 1.3, gap: 20 });
+    let y = name.y + name.displayHeight + 4;
+    // Three dark outlines under a level nobody has played yet say nothing, so
+    // the rating only appears once there is one.
+    if (stars > 0) {
+      y += 3;
+      this.contentLayer.add(this.makeStars(left + 20, y, stars, { scale: 1.1, gap: 15 }));
+      y += 11;
+    }
 
-    const rules = this.add.graphics();
-    rules.fillStyle(0x36546b, 0.9);
-    rules.fillRect(311, 159, 144, 1);
-    rules.fillRect(311, 221, 144, 1);
-    rules.fillStyle(0x7897ad, 0.16);
-    rules.fillRect(311, 160, 144, 1);
-    this.contentLayer.add(rules);
+    const rule = this.add.graphics();
+    rule.fillStyle(0x36546b, 0.9);
+    rule.fillRect(311, y, 144, 1);
+    y += 8;
 
-    const metrics = [
-      ['distance', 'DISTANCE', `${Math.round(level.distance || 0)} M`],
-      ['wall', 'WALL', `${level.wall || 0} PLAYERS`],
-      ['keeper', 'KEEPER', this.keeperLabel(level.keeper)]
-    ];
-    metrics.forEach(([type, metric, value], row) => {
-      const y = 175 + row * 20;
-      const icon = this.makeMetricIcon(type, 316, y);
-      const left = tourText(this, 328, y, metric, {
-        fontSize: '10px',
-        color: '#86aac6',
-        letterSpacing: 0.2
-      });
-      const right = tourText(this, 452, y, value, {
-        originX: 1,
-        fontFamily: DISPLAY_FONT,
+    const objective = tourText(this, left, y, level.objective?.label || 'Score from the free kick', {
+      originY: 0,
+      fontSize: '9px',
+      color: '#e3ecf3',
+      letterSpacing: 0.1,
+      lineSpacing: 2,
+      wordWrap: { width, useAdvancedWrap: true }
+    });
+    y += objective.displayHeight + 6;
+
+    const facts = tourText(this, left, y, [
+      `${Math.round(level.distance || 0)} m, ${this.wallCopy(level.wall || 0)}`,
+      `${this.keeperLabel(level.keeper)} keeper`
+    ].join('\n'), {
+      originY: 0,
+      fontSize: '8px',
+      color: MUTED,
+      letterSpacing: 0.1,
+      lineSpacing: 2
+    });
+    this.contentLayer.add([name, rule, objective, facts]);
+
+    // First clear pays the level reward; after that the only coins left are
+    // the three-star bonus. Show whichever is still on the table.
+    const reward = level.rewardCoins ?? level.reward?.coins ?? 0;
+    const bonus = level.reward?.threeStarBonus ?? 0;
+    const rewardCopy = stars === 0 && reward > 0
+      ? `+${reward} coins`
+      : stars > 0 && stars < 3 && bonus > 0
+        ? `+${bonus} coins for 3 stars`
+        : null;
+    if (rewardCopy) {
+      const rewardIcon = this.add.image(left + 4, 238, 'icon-coin').setScale(1.1);
+      const rewardText = tourText(this, left + 14, 238, rewardCopy, {
         fontSize: '9px',
         color: CREAM,
-        letterSpacing: 0
-      });
-      this.contentLayer.add([icon, left, right]);
-    });
-
-    const reward = level.rewardCoins ?? level.reward?.coins ?? 0;
-    if (reward > 0) {
-      const rewardIcon = this.add.image(317, 237, 'icon-coin').setScale(1.2);
-      const rewardText = tourText(this, 330, 237, `${reward} FIRST-WIN`, {
-        fontFamily: DISPLAY_FONT,
-        fontSize: '10px',
-        color: '#f5c94b',
-        letterSpacing: 0.15
+        letterSpacing: 0.1
       });
       this.contentLayer.add([rewardIcon, rewardText]);
     }
@@ -569,48 +574,17 @@ export class LevelSelectScene extends Phaser.Scene {
     });
     if (unlocked) play.buttonIcon?.setTint(0x1b1303);
 
-    this.contentLayer.add([label, name, rating, play]);
+    this.contentLayer.add(play);
   }
 
-  makeMetricIcon(type, x, y) {
-    const g = this.add.graphics().setPosition(x, y);
-    const hi = 0x86aac6;
-    const shadeColor = 0x3e6789;
-    g.fillStyle(shadeColor, 1);
-
-    if (type === 'distance') {
-      g.fillRect(-5, -2, 10, 5);
-      g.fillStyle(hi, 1);
-      g.fillRect(-5, -3, 10, 3);
-      g.fillStyle(BLUE_DEEP, 1);
-      [-3, 0, 3].forEach((mark) => g.fillRect(mark, -2, 1, 2));
-      g.setAngle(-35);
-    } else if (type === 'wall') {
-      g.fillRect(-6, -5, 12, 10);
-      g.fillStyle(hi, 1);
-      g.fillRect(-6, -5, 5, 3);
-      g.fillRect(1, -5, 5, 3);
-      g.fillRect(-4, -1, 5, 3);
-      g.fillRect(3, -1, 3, 3);
-      g.fillRect(-6, 3, 5, 2);
-      g.fillRect(1, 3, 5, 2);
-    } else {
-      g.fillRect(-4, -2, 9, 7);
-      g.fillRect(-5, -6, 2, 5);
-      g.fillRect(-2, -7, 2, 6);
-      g.fillRect(1, -6, 2, 5);
-      g.fillRect(4, -5, 2, 6);
-      g.fillStyle(hi, 1);
-      g.fillRect(-3, -1, 7, 5);
-      g.fillRect(-3, 5, 7, 2);
-    }
-    return g;
+  wallCopy(count = 0) {
+    return count > 0 ? `${count} in the wall` : 'no wall';
   }
 
   keeperLabel(skill = 0) {
-    if (skill < 0.28) return 'ROOKIE';
-    if (skill < 0.48) return 'SHARP';
-    if (skill < 0.66) return 'ELITE';
-    return 'LEGEND';
+    if (skill < 0.28) return 'Rookie';
+    if (skill < 0.48) return 'Sharp';
+    if (skill < 0.66) return 'Elite';
+    return 'Legend';
   }
 }

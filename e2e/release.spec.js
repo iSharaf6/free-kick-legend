@@ -147,7 +147,7 @@ test('the Continue action acknowledges input and rejects re-entry', async ({ pag
     for (const child of scene.children.list) visit(child);
     const image = (key) => objects.find((object) => object?.texture?.key === key);
     const wordmark = objects.find((object) => object?.text === 'KICK DISTRICT');
-    const proceduralPitch = objects.find((object) => object?.name === 'menu-procedural-pitch');
+    const pixelPitch = objects.find((object) => object?.name === 'menu-pixel-pitch');
     const snapshot = (object) => object && ({
       scaleX: object.scaleX,
       scaleY: object.scaleY,
@@ -158,10 +158,11 @@ test('the Continue action acknowledges input and rejects re-entry', async ({ pag
       labels: objects.map((object) => object?.text).filter(Boolean),
       crest: snapshot(image('kick-district-crest')),
       studio: snapshot(image('calynx-logo-pixel')),
-      pitch: proceduralPitch && {
-        bounds: proceduralPitch.pitchSurfaceLayout?.bounds,
-        laneCount: proceduralPitch.pitchSurfaceLayout?.lanes?.length,
-        fleckCount: proceduralPitch.pitchSurfaceLayout?.flecks?.length,
+      pitch: pixelPitch && {
+        top: pixelPitch.pixelPitchSpec?.top,
+        width: pixelPitch.pixelPitchSpec?.width,
+        height: pixelPitch.pixelPitchSpec?.height,
+        textureWidth: pixelPitch.width,
         oldRasterLoaded: scene.textures.exists('pitch-grass-hd-v2')
       },
       sponsorCount: objects.filter((object) => object?.texture?.key === 'calynx-logo-pixel' && object.depth === 7).length,
@@ -198,9 +199,10 @@ test('the Continue action acknowledges input and rejects re-entry', async ({ pag
     };
   });
   expect(frontMenu.labels).toEqual(expect.arrayContaining([
-    'KICK DISTRICT', 'OWN THE CURVE.', 'STUDIO', 'CONTINUE', 'LEVEL 01',
-    'CAREER', 'FIVE CUP TOUR', 'DAILY KICK', 'TIME ATTACK', 'LOCKER'
+    'KICK DISTRICT', 'CONTINUE', 'LEVEL 01', 'CAREER', 'DAILY KICK', 'TIME ATTACK', 'LOCKER'
   ]));
+  // Slogans and studio credits are gone from the title screen.
+  expect(frontMenu.labels).not.toEqual(expect.arrayContaining(['OWN THE CURVE.']));
   expect(frontMenu.labels).not.toEqual(expect.arrayContaining(['SWIPE UP', 'BEND LATE', 'FIND THE CORNER']));
   expect(frontMenu.crest).toBeFalsy();
   expect(frontMenu.sponsorCount).toBeGreaterThanOrEqual(4);
@@ -209,17 +211,18 @@ test('the Continue action acknowledges input and rejects re-entry', async ({ pag
   expect(frontMenu.headerFit).toEqual([true, true, true]);
   expect(frontMenu.wordmarkFit).toBe(true);
   expect(frontMenu.fonts).toEqual({ display: true, pixel: true, data: true });
-  for (const asset of [frontMenu.studio]) {
-    expect(asset).toBeTruthy();
-    expect(asset.scaleX).toBeCloseTo(asset.scaleY, 8);
-    expect(asset.displayAspect).toBeCloseTo(asset.sourceAspect, 8);
+  if (frontMenu.studio) {
+    expect(frontMenu.studio.scaleX).toBeCloseTo(frontMenu.studio.scaleY, 8);
+    expect(frontMenu.studio.displayAspect).toBeCloseTo(frontMenu.studio.sourceAspect, 8);
   }
+  // The menu turf is the same one-pixel-grid image as a match.
   expect(frontMenu.pitch).toMatchObject({
-    bounds: { x: 0, y: 104, width: 480, height: 166, right: 480, bottom: 270 },
-    laneCount: 12,
+    top: 104,
+    width: 480,
+    height: 166,
+    textureWidth: 480,
     oldRasterLoaded: false
   });
-  expect(frontMenu.pitch.fleckCount).toBeGreaterThan(24);
 
   await game.clickLogical(350, 65);
   const menuLabels = await page.evaluate(() => window.__game.scene.getScene('Menu').children.list
@@ -334,7 +337,7 @@ test('goal celebration layers animated generated pixel art, useful scorer data, 
       pyroCenterX: pyroSmoke.length === 2 ? (pyroSmoke[0].x + pyroSmoke[1].x) / 2 : null,
       goalFrameDepth: 1000 - scene.zGoal * 10 + 2,
       expectedPyroBaseY: 76 + (2.3 * 316) / (scene.zGoal + 0.25),
-      scorer: text.filter((line) => line.startsWith('+') || line.includes('MICA VALE') || line.includes('COMBO')),
+      scorer: text.filter((line) => line.startsWith('+') || line.includes('MICA VALE') || line.includes('SEC LEFT')),
       shaking: scene.cameras.main.shakeEffect.isRunning,
       resetDelay: scene.resultResetDelay('GOAL', 1150)
     };
@@ -370,9 +373,9 @@ test('goal celebration layers animated generated pixel art, useful scorer data, 
     smoke.frameTotal === 8 && smoke.playing
   ))).toBe(true);
   expect(goal.scorer).toEqual([
-    expect.stringMatching(/^\+\d+ · /),
+    expect.stringMatching(/^\+\d+  /),
     '#17  MICA VALE',
-    '1 GOAL · X1 COMBO · 60 SEC'
+    '1 GOAL  60 SEC LEFT'
   ]);
   expect(goal.shaking).toBe(false);
   expect(goal.resetDelay).toBe(1760);
@@ -382,22 +385,31 @@ test('goal celebration layers animated generated pixel art, useful scorer data, 
     window.__fkl?.goalCelebration?.timers?.size === 0
   ));
 
-  const labels = ['SAVED!', 'OFF TARGET', 'OFF THE POST!', 'BLOCKED!', 'WALL FLATTENED!'];
-  const fits = await page.evaluate((outcomes) => outcomes.map((label) => {
+  // Misses are one outlined word where the ball ended up; only a flattened
+  // wall still gets the stadium banner.
+  const words = ['SAVED', 'WIDE', 'OVER', 'POST!', 'BAR!', 'WALL', 'HELD', 'SHORT'];
+  const fits = await page.evaluate((outcomes) => outcomes.map((word) => {
     const scene = window.__fkl;
-    scene.showBanner(label);
-    const bounds = scene.banner.getBounds();
+    const label = scene.showOutcomeWord(word, { x: 5, y: 3.5 });
+    const bounds = label.getBounds();
     return {
-      label: scene.banner.text,
-      fits: bounds.left >= 8 && bounds.right <= 472,
-      font: scene.banner.style.fontFamily
+      label: label.text,
+      fits: bounds.left >= 8 && bounds.right <= 472 && bounds.top >= 20,
+      font: label.style.fontFamily
     };
-  }), labels);
-  expect(fits).toEqual(labels.map((label) => ({
+  }), words);
+  expect(fits).toEqual(words.map((label) => ({
     label,
     fits: true,
     font: '"Pixelify Sans", monospace'
   })));
+  const flattened = await page.evaluate(() => {
+    const scene = window.__fkl;
+    scene.showBanner('WALL FLATTENED!');
+    const bounds = scene.banner.getBounds();
+    return { label: scene.banner.text, fits: bounds.left >= 8 && bounds.right <= 472 };
+  });
+  expect(flattened).toEqual({ label: 'WALL FLATTENED!', fits: true });
 
   await page.evaluate(() => window.__audio.post('post'));
   expect(await page.evaluate(() => window.__audio.lastSample)).toMatchObject({
@@ -491,25 +503,25 @@ test('Career victory uses the trophy results card and advances to the next level
       }));
     const resultStars = scene.terminalOverlayObjects
       .filter((child) => child?.texture?.key === 'icon-star' || child?.texture?.key === 'icon-star-empty')
-      // The entrance tween changes displayWidth for 450ms. Position identifies
-      // the three result stars without coupling the assertion to animation time.
-      .filter((child) => child.y === 106)
+      // The entrance tween changes displayWidth for the first beats; the
+      // result-star tag identifies them without coupling to animation time.
+      .filter((child) => child.resultStar)
       .map((child) => child.texture.key);
     return { text, buttons, resultStars };
   });
 
   expect(result.text).toEqual(expect.arrayContaining([
-    'LEVEL CLEAR', 'ROCKET  •  1296 PTS', '3★ MASTERY: 1 SHOT  •  2050+ PTS',
-    'BEST REWARD ALREADY CLAIMED'
+    'MATCH WON', 'ROCKET   1296 PTS', '3rd star: clear it in 1 shot with 2050+ pts.',
+    'REWARD ALREADY CLAIMED'
   ]));
   expect(result.resultStars).toEqual(['icon-star', 'icon-star', 'icon-star-empty']);
   expect(result.buttons).toEqual([
-    { label: 'NEXT >', x: 128, y: 224, width: 104, height: 33 },
-    { label: 'REPLAY', x: 240, y: 224, width: 104, height: 33 },
-    { label: 'LEVELS', x: 352, y: 224, width: 104, height: 33 }
+    { label: 'NEXT', x: 170, y: 204, width: 96, height: 26 },
+    { label: 'REPLAY', x: 256, y: 204, width: 64, height: 26 },
+    { label: 'LEVELS', x: 326, y: 204, width: 64, height: 26 }
   ]);
 
-  await game.clickLogical(128, 224);
+  await game.clickLogical(170, 204);
   await page.waitForFunction(() => window.__fkl?.state === 'AIMING' && window.__fkl?.levelIndex === 1);
 });
 
@@ -572,7 +584,7 @@ test('Five Cup Tour keeps every image proportional and launches the selected mat
 
   expect(tour.selectedIndex).toBe(3);
   expect(tour.labels).toEqual(expect.arrayContaining([
-    'FIVE CUP TOUR', 'ROOKIE ACADEMY', 'PICK THE LEFT', '15 M', '1 PLAYERS', 'ROOKIE', 'PLAY MATCH'
+    'CAREER', 'ROOKIE ACADEMY', 'PICK THE LEFT', '15 m, 1 in the wall\nRookie keeper', 'PLAY MATCH'
   ]));
   expect(tour.distortedImages).toEqual([]);
   expect(tour.camera.worldHeight).toBeCloseTo(320, 8);

@@ -522,7 +522,12 @@ test('goals hold the complete broadcast celebration and expose useful mode conte
   assert.equal(scene.resultResetDelay('GOAL', 1150), 1760);
   assert.equal(
     scene.goalCardContext({ x: 0, y: 1.4 }, { points: 1454 }),
-    '3 GOALS · x2 COMBO · 43 SEC'
+    '2 IN A ROW  43 SEC LEFT'
+  );
+  scene.combo = 0;
+  assert.equal(
+    scene.goalCardContext({ x: 0, y: 1.4 }, { points: 1454 }),
+    '3 GOALS  43 SEC LEFT'
   );
 });
 
@@ -777,7 +782,7 @@ test('objectiveCheck delegates ring-shot progress and target requirements', () =
   scene.ringProgress = { count: 1, crossedIds: ['near'] };
   const missedRing = scene.objectiveCheck('GOAL', { x: 2.8, y: 2.2 }, rating);
   assert.equal(missedRing.qualifies, false);
-  assert.match(missedRing.reason, /THREAD 2 HOOPS/);
+  assert.match(missedRing.reason, /thread 2 hoops/i);
 });
 
 test('objectiveCheck delegates bank-shot frame contact recorded by the scene', () => {
@@ -792,7 +797,7 @@ test('objectiveCheck delegates bank-shot frame contact recorded by the scene', (
   scene.frameContacts.clear();
   const cleanFinish = scene.objectiveCheck('GOAL', { x: 0, y: 1.1 }, rating);
   assert.equal(cleanFinish.qualifies, false);
-  assert.match(cleanFinish.reason, /POST OR CROSSBAR/);
+  assert.match(cleanFinish.reason, /post or crossbar/i);
 });
 
 test('objectiveCheck passes scaled goal dimensions to corner-only evaluation', () => {

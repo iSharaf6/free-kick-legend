@@ -34,12 +34,12 @@ test('goal scorer card copy is stable for every football ordinal edge case', () 
       shirtNumber: 9,
       scoreDelta: 1454,
       shotLabel: 'clean finish',
-      contextLabel: '1 goal · x1 combo · 59 sec'
+      contextLabel: '1 goal  59 sec left'
     }),
     {
-      heading: '+1454 · CLEAN FINISH',
+      heading: '+1454  CLEAN FINISH',
       player: '#9  MALIK ROOK',
-      detail: '1 GOAL · X1 COMBO · 59 SEC'
+      detail: '1 GOAL  59 SEC LEFT'
     }
   );
 });

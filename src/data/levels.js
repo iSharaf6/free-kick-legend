@@ -56,11 +56,11 @@ function deepFreeze(value) {
 }
 
 export const CUPS = Object.freeze([
-  { id: 'academy', name: 'Rookie Academy', subtitle: 'Learn the strike', levelIds: [] },
-  { id: 'curve', name: 'Curve Craft', subtitle: 'Shape the impossible', levelIds: [] },
-  { id: 'targets', name: 'Target Masters', subtitle: 'Own every corner', levelIds: [] },
-  { id: 'pressure', name: 'Pressure Tour', subtitle: 'Deliver when it matters', levelIds: [] },
-  { id: 'legend', name: 'Legend Finals', subtitle: 'Become unplayable', levelIds: [] }
+  { id: 'academy', name: 'Rookie Academy', levelIds: [] },
+  { id: 'curve', name: 'Curve Craft', levelIds: [] },
+  { id: 'targets', name: 'Target Masters', levelIds: [] },
+  { id: 'pressure', name: 'Pressure Tour', levelIds: [] },
+  { id: 'legend', name: 'Legend Finals', levelIds: [] }
 ]);
 
 export const TARGETS = Object.freeze({

@@ -49,12 +49,13 @@ import {
 } from '../systems/LevelMechanics.js';
 import {
   makeButton, makeIconButton, makeStatChip, titleText, bodyText,
-  drawPanel, drawBroadcastFrame, configureHdCamera, crispText, canvasHasKeyboardFocus,
+  drawPanel, drawBroadcastFrame, configureHdCamera, crispText, canvasOwnsKeyEvent,
   setCanvasButtonNavigationBlocked, FONT, PIXEL_TEXT_WEIGHT, UI, PRIMARY_BUTTON
 } from '../ui.js';
 import { PAL } from '../pixelart.js';
 import { addCrowdStand } from '../art/CrowdStand.js';
 import { addPitchSurface } from '../art/PitchSurface.js';
+import { addPixelPitch } from '../art/PixelPitch.js';
 import { buildPitchMarkingLayout, PITCH_MARKING_DIMENSIONS } from '../art/PitchMarkings.js';
 import { queueKeeperSheets } from '../data/keeperAssets.js';
 
@@ -232,7 +233,17 @@ const HUD_TOP_MID = HUD_TOP_Y + HUD_TOP_H / 2;
 const HUD_SUB_Y = 21;
 const HUD_SUB_H = 11;
 const HUD_SUB_MID = HUD_SUB_Y + HUD_SUB_H / 2;
-const COACHING_HINT_Y = 197;
+const COACHING_HINT_Y = 150;
+
+// One sentence for a miss the player has now made twice in a row.
+const MISS_HINTS = Object.freeze({
+  wide: 'Finish your swipe at the goal.',
+  over: 'A shorter swipe keeps it down.',
+  short: 'Swipe faster for more power.',
+  save: "He's reading you. Try the other corner.",
+  caught: 'Aim away from the keeper.',
+  wall: 'Swipe steeper, or bend it round.'
+});
 
 // The thread itself: one continuous line drawn through the ball, every gate and
 // the finish. This is the level, not decoration - the gates are eyes on it.
@@ -340,6 +351,8 @@ export class GameScene extends Phaser.Scene {
     // level 9 (no progress text): the next result called setText on the dead
     // level-8 Text object and crashed the match.
     this.sessionToken = (this.sessionToken || 0) + 1;
+    // A retry of the same match skips the opening sentence it has already read.
+    this.isRetry = Boolean(data.retry);
     this.sessionAlive = true;
     this.sessionShutdown = false;
     this.transitioning = false;
@@ -361,6 +374,10 @@ export class GameScene extends Phaser.Scene {
     this.hint = null;
     this.objectiveUi = null;
     this.objectiveProgressTxt = null;
+    this.objectiveDots = null;
+    this.levelTitleText = null;
+    this.outcomeWord = null;
+    this.lastMissKind = null;
     this.attemptIcons = null;
     this.scoreTxt = null;
     this.comboTxt = null;
@@ -451,7 +468,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   create() {
-    configureHdCamera(this);
+    configureHdCamera(this, { uiDepth: 1490 });
     this.settings = SaveManager.getSettings?.() || {};
     this.aimAssist = this.settings.aimAssist ?? 'full';
     const viewportWidth = Number(globalThis.innerWidth) || GAME_W;
@@ -668,6 +685,9 @@ export class GameScene extends Phaser.Scene {
       tint: [0xffffff, 0xfff0b0],
       emitting: false
     }).setDepth(1800);
+    // Sits above the HUD depth so it clears the goal frame, but it is debris
+    // in the world and belongs on the pixel grid.
+    this.impact.pixelLayer = 'world';
 
     this.goalCelebration = new GoalCelebration(this);
     this.buildHud();
@@ -777,7 +797,7 @@ export class GameScene extends Phaser.Scene {
       // Leave the browser's first Tab alone so it can move DOM focus onto the
       // advertised canvas entry point. Phaser owns Tab only after that focus
       // boundary has been crossed.
-      if (!canvasHasKeyboardFocus(this)) return;
+      if (!canvasOwnsKeyEvent(this, event)) return;
       // Once paused, Tab belongs to the shared canvas-button navigator. The
       // opening key is claimed here; subsequent Tabs move through the visible
       // pause actions instead of unexpectedly resuming the match.
@@ -882,9 +902,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   currentRestartData() {
-    if (this.mode === 'career') return { mode: 'career', levelIndex: this.levelIndex };
-    if (this.mode === 'daily') return { mode: 'daily', dailyDate: this.dailyDate };
-    return { mode: 'arcade' };
+    if (this.mode === 'career') return { mode: 'career', levelIndex: this.levelIndex, retry: true };
+    if (this.mode === 'daily') return { mode: 'daily', dailyDate: this.dailyDate, retry: true };
+    return { mode: 'arcade', retry: true };
   }
 
   restartCurrentLevel(data = this.currentRestartData()) {
@@ -966,25 +986,12 @@ export class GameScene extends Phaser.Scene {
         .setDepth(3499).setInteractive()
     );
     const panel = this.add.graphics().setDepth(3500);
-    drawBroadcastFrame(panel, 70, 42, 340, 186, {
-      fill: 0x0d2236, border: PAL.goldDark, corner: PAL.gold, railY: 15,
-      // Logo spans x 81-121; start the rule clear of it.
-      railInsetLeft: 57
+    drawPanel(panel, 86, 70, 308, 124, {
+      fill: PAL.panel, border: PAL.borderDark, corner: PAL.borderDark
     });
     objects.push(panel);
-    objects.push(this.add.image(101, 59, 'calynx-logo-pixel')
-      .setDisplaySize(40, 12).setTint(PAL.gold).setDepth(3501));
-    objects.push(titleText(this, GAME_W / 2, 78, 'MATCH PAUSED', '15px', '#f3c449').setDepth(3501));
-    objects.push(bodyText(this, GAME_W / 2, 108, 'SHOT FROZEN · RETURN WHEN READY', {
-      originX: 0.5, originY: 0.5, align: 'center', fontSize: '7px', color: '#cfe8ff',
-      wordWrap: { width: 250, useAdvancedWrap: true }
-    }).setDepth(3501));
-
-    const assistLabel = () => `AIM ASSIST · ${String(this.aimAssist).toUpperCase()}`;
-    const assistText = bodyText(this, GAME_W / 2, 128, assistLabel(), {
-      originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '7px', color: '#f3c449'
-    }).setDepth(3501);
-    objects.push(assistText);
+    // Paused is one word. Everything else lives behind SETTINGS.
+    objects.push(titleText(this, GAME_W / 2, 104, 'PAUSED', '18px', '#f3e7c3').setDepth(3501));
 
     const actions = [
       { label: 'RESUME', cb: () => this.closePauseMenu() },
@@ -992,10 +999,7 @@ export class GameScene extends Phaser.Scene {
         label: 'SETTINGS',
         cb: () => {
           SettingsPanel.open({
-            onChange: (nextSettings) => {
-              this.applyLiveSettings(nextSettings);
-              if (assistText.active) assistText.setText(assistLabel());
-            }
+            onChange: (nextSettings) => this.applyLiveSettings(nextSettings)
           });
         }
       },
@@ -1010,9 +1014,6 @@ export class GameScene extends Phaser.Scene {
         fontSize: action.label.length > 7 ? '6px' : '7px', hitHeight: 32
       }).setDepth(3501));
     });
-    objects.push(bodyText(this, GAME_W / 2, 207, 'TAB / ARROWS CHOOSE  ·  ENTER SELECTS  ·  ESC RESUMES', {
-      originX: 0.5, originY: 0.5, align: 'center', fontSize: '6px', color: '#8fa2ab'
-    }).setDepth(3501));
     this.announceStatus('Match paused. Settings, resume, restart, and exit controls are available.');
     return true;
   }
@@ -1528,8 +1529,66 @@ export class GameScene extends Phaser.Scene {
   }
 
   drawPitch() {
+    // Turf and markings are one pixel image on the logical grid: mown bands,
+    // wear and shadow from the camera's own perspective, and lines placed a
+    // pixel at a time rather than as smoothed vectors.
+    const markings = [];
+    const minZ = 5.8;
+    const line = (x1, z1, x2, z2, alpha = 0.9) => {
+      if (z1 < minZ && z2 < minZ) return;
+      let cz1 = z1, cx1 = x1, cz2 = z2, cx2 = x2;
+      if (cz1 < minZ) {
+        const t = (minZ - z1) / (z2 - z1);
+        cz1 = minZ; cx1 = x1 + t * (x2 - x1);
+      }
+      if (cz2 < minZ) {
+        const t = (minZ - z2) / (z1 - z2);
+        cz2 = minZ; cx2 = x2 + t * (x1 - x2);
+      }
+      const a = project(cx1, 0, cz1);
+      const b = project(cx2, 0, cz2);
+      markings.push({
+        x1: a.x, y1: a.y, x2: b.x, y2: b.y, alpha,
+        thickness: Math.min(a.s, b.s) >= 30 ? 2 : 1
+      });
+    };
+
+    const layout = buildPitchMarkingLayout(this.zGoal);
+    layout.straight.forEach(({ from, to }) => line(from.x, from.z, to.x, to.z));
+
+    // The spot and D use the same world-space depth as the box layout.
+    const spotZ = layout.penaltySpot.z;
+    if (spotZ >= minZ) {
+      const spot = project(0, 0, spotZ);
+      markings.push({ type: 'spot', x: spot.x, y: spot.y, size: Math.max(1, Math.round(spot.s * 0.18)) });
+    }
+    let previous = null;
+    for (let a = -0.8; a <= 0.8001; a += 0.08) {
+      const px = Math.sin(a) * PITCH_MARKING_DIMENSIONS.penaltyArcRadius;
+      const pz = spotZ - Math.cos(a) * PITCH_MARKING_DIMENSIONS.penaltyArcRadius;
+      const point = pz >= minZ && pz < layout.penaltyFrontZ ? { x: px, z: pz } : null;
+      if (point && previous) line(previous.x, previous.z, point.x, point.z, 0.8);
+      previous = point;
+    }
+
     this.pitchSurface?.destroy?.();
-    this.pitchSurface = addPitchSurface(this, {
+    this.pitchSurface = addPixelPitch(this, {
+      top: STADIUM_Y,
+      width: GAME_W,
+      height: GAME_H - STADIUM_Y,
+      horizonX: GAME_W / 2,
+      horizonY: CAM.horizonY,
+      focal: CAM.focal,
+      cameraHeight: CAM.height,
+      cameraX: CAM.x,
+      goalZ: this.zGoal,
+      penaltyZ: spotZ,
+      spot: { x: this.ball?.x ?? (this.level.offsetX || 0), z: this.ball?.z ?? CAM.ballDist },
+      markings,
+      seed: 0x4b49434b,
+      depth: 1,
+      name: 'match-pixel-pitch'
+    }) ?? addPitchSurface(this, {
       x: 0,
       y: STADIUM_Y,
       width: GAME_W,
@@ -1543,58 +1602,6 @@ export class GameScene extends Phaser.Scene {
     if (this.pitchGfx) {
       this.pitchGfx.destroy();
       this.pitchGfx = null;
-    }
-    const m = this.add.graphics().setDepth(1);
-    this.pitchGfx = m;
-    m.lineStyle(1, PAL.line, 0.86);
-
-    const snap = (value) => Math.round(value * 4) / 4;
-
-    const line = (x1, z1, x2, z2) => {
-      const minZ = 5.8;
-      if (z1 < minZ && z2 < minZ) return;
-      let cz1 = z1, cx1 = x1, cz2 = z2, cx2 = x2;
-      if (cz1 < minZ) {
-        const t = (minZ - z1) / (z2 - z1);
-        cz1 = minZ; cx1 = x1 + t * (x2 - x1);
-      }
-      if (cz2 < minZ) {
-        const t = (minZ - z2) / (z1 - z2);
-        cz2 = minZ; cx2 = x2 + t * (x1 - x2);
-      }
-      const a = project(cx1, 0, cz1);
-      const b = project(cx2, 0, cz2);
-      m.lineBetween(snap(a.x), snap(a.y), snap(b.x), snap(b.y));
-    };
-
-    const layout = buildPitchMarkingLayout(this.zGoal);
-    layout.straight.forEach(({ from, to }) => line(from.x, from.z, to.x, to.z));
-
-    // The spot and D use the same world-space depth as the box layout.
-    const spotZ = layout.penaltySpot.z;
-    if (spotZ >= 5.8) {
-      const spot = project(0, 0, spotZ);
-      m.fillStyle(PAL.line, 0.85);
-      const spotSize = Math.max(1, Math.round(spot.s * 0.18));
-      m.fillRect(Math.round(spot.x - spotSize / 2), Math.round(spot.y - spotSize / 2),
-        spotSize, spotSize);
-    }
-
-    // Penalty D-Arc (centered at penalty spot, in front of boxZ)
-    m.lineStyle(1, PAL.line, 0.72);
-    const arcPoints = [];
-    for (let a = -0.8; a <= 0.8; a += 0.1) {
-      const px = Math.sin(a) * PITCH_MARKING_DIMENSIONS.penaltyArcRadius;
-      const pz = spotZ - Math.cos(a) * PITCH_MARKING_DIMENSIONS.penaltyArcRadius;
-      if (pz >= 5.8 && pz < layout.penaltyFrontZ) {
-        arcPoints.push(project(px, 0, pz));
-      }
-    }
-    for (let i = 0; i < arcPoints.length - 1; i++) {
-      m.lineBetween(
-        snap(arcPoints[i].x), snap(arcPoints[i].y),
-        snap(arcPoints[i + 1].x), snap(arcPoints[i + 1].y)
-      );
     }
   }
 
@@ -2430,14 +2437,24 @@ export class GameScene extends Phaser.Scene {
     this.responsiveHudTexts = { primary: [], tiny: [], secondary: [], menu: [] };
     this.careerStyleHud = null;
     this.conditionHud = [];
+    // No bordered bar across the top: a soft dark fade behind a few outlined
+    // words keeps the HUD readable over the stand without boxing it in.
     const chrome = this.add.graphics().setDepth(1988);
-    drawPanel(chrome, 4, HUD_TOP_Y, GAME_W - 8, HUD_TOP_H, {
-      fill: PAL.panel,
-      border: PAL.borderDark,
-      corner: PAL.goldDark
-    });
+    chrome.fillGradientStyle(PAL.ink, PAL.ink, PAL.ink, PAL.ink, 0.72, 0.72, 0, 0);
+    chrome.fillRect(0, 0, GAME_W, 30);
+    const hudStroke = { stroke: '#071018', strokeThickness: 3 };
 
-    this.muteButton = makeIconButton(this, 12, HUD_TOP_MID, 12,
+    // Pause lives top-left, where every phone game keeps it. The visible key is
+    // small; its touch target stays a full 44 CSS px on a compact screen.
+    this.menuButton = makeButton(this, 12, HUD_TOP_MID, 16, 14, 'II',
+      () => this.togglePauseMenu(), {
+        color: PAL.panelHi, hover: PAL.blue,
+        fontSize: '7px', hitWidth: 34, hitHeight: 34, letterSpacing: 0,
+        accessibleLabel: 'Match menu'
+      }).setDepth(2102);
+    this.menuHint = null;
+
+    this.muteButton = makeIconButton(this, 31, HUD_TOP_MID, 12,
       Audio.muted ? 'icon-mute' : 'icon-sound', () => {
         const muted = Audio.toggleMuted();
         MenuMusic.setMuted(muted);
@@ -2445,19 +2462,21 @@ export class GameScene extends Phaser.Scene {
         this.muteButton.buttonIcon?.setTexture(muted ? 'icon-mute' : 'icon-sound');
       }, {
         color: PAL.panelHi, hover: PAL.blue, border: PAL.borderDark,
-        iconScale: 0.48, hitWidth: 26, hitHeight: 25
+        iconScale: 0.48, hitWidth: 22, hitHeight: 25
       }).setDepth(2000);
 
     if (this.mode === 'career') {
-      // One strip, three zones: identity left, match title centred, conditions
-      // right. Everything used to compete inside the same run of text.
-      this.matchHudText = this.trackResponsiveHudText(bodyText(this, 31, HUD_TOP_MID,
+      // Three things while aiming: controls and match number left, the match
+      // and its progress in the middle, the balls you have left on the right.
+      this.matchHudText = this.trackResponsiveHudText(bodyText(this, 42, HUD_TOP_MID,
         `MATCH ${String(this.levelIndex + 1).padStart(2, '0')}`, {
-        fontFamily: FONT, fontSize: primaryHudFont, color: '#f3e7c3', letterSpacing: 0.2
+        originY: 0.5, fontFamily: FONT, fontSize: primaryHudFont, color: '#aebdc4', letterSpacing: 0.1,
+        ...hudStroke
       }).setDepth(2000), 'primary');
-      bodyText(this, GAME_W / 2, HUD_TOP_MID, String(this.level.name).toUpperCase(), {
+      this.levelTitleText = bodyText(this, GAME_W / 2, HUD_TOP_MID, String(this.level.name).toUpperCase(), {
         originX: 0.5, originY: 0.5, fontFamily: FONT,
-        fontSize: this.compactHud ? '11px' : '9px', color: '#f3c449', letterSpacing: 0.2
+        fontSize: this.compactHud ? '11px' : '9px', color: '#f3e7c3', letterSpacing: 0.1,
+        ...hudStroke
       }).setDepth(2000);
 
       this.attemptIcons = [];
@@ -2465,8 +2484,8 @@ export class GameScene extends Phaser.Scene {
       // so size the HUD icons from the texture instead of a fixed scale.
       const iconTexW = this.textures.get(this.ballTexture).getSourceImage()?.width || 12;
       for (let i = 0; i < this.maxAttempts; i++) {
-        const iconSize = this.compactHud ? 9 : 7.5;
-        const icon = this.add.image(GAME_W - 10 - i * 11, HUD_TOP_MID, this.ballTexture)
+        const iconSize = this.compactHud ? 9 : 8;
+        const icon = this.add.image(GAME_W - 11 - i * 11, HUD_TOP_MID, this.ballTexture)
           .setScale(iconSize / iconTexW).setDepth(2000);
         this.attemptIcons.push(icon);
       }
@@ -2474,82 +2493,49 @@ export class GameScene extends Phaser.Scene {
       const attemptsWidth = this.maxAttempts * 11;
       if (wind.magnitude >= 0.1 || this.level.wind?.rotation) {
         const arrow = Math.abs(wind.x) < 0.06 ? (wind.y >= 0 ? '^' : 'v') : wind.x > 0 ? '>' : '<';
-        this.windTxt = this.trackResponsiveHudText(bodyText(this, GAME_W - 10 - attemptsWidth, HUD_TOP_MID,
+        this.windTxt = this.trackResponsiveHudText(bodyText(this, GAME_W - 12 - attemptsWidth, HUD_TOP_MID,
           `WIND ${wind.magnitude.toFixed(1)} ${arrow}`, {
-          originX: 1, fontFamily: FONT, fontSize: primaryHudFont, color: '#f3c449', letterSpacing: 0.2
+          originX: 1, originY: 0.5, fontFamily: FONT, fontSize: primaryHudFont, color: '#cfe8ff', letterSpacing: 0.1,
+          ...hudStroke
         }).setDepth(2000), 'primary');
       }
 
+      // Multi-goal matches show their progress as dots under the title rather
+      // than as a "0 / 2 TARGETS" chip.
       const needed = Math.max(1, this.level.objective?.goals || 1);
-      // Desktop has room for broadcast metadata. On a compact landscape
-      // screen the match name, attempts and action prompt must own the rail;
-      // repeating cup/loadout prose there only manufactures microtext.
-      if (!this.compactHud) {
-        const subChrome = this.add.graphics().setDepth(1988);
-        const subWidth = needed > 1 ? 145 : 96;
-        drawPanel(subChrome, 4, HUD_SUB_Y, subWidth, HUD_SUB_H, {
-          fill: PAL.panelMuted, border: PAL.borderDark, corner: PAL.goldDark, alpha: 0.9
-        });
-        this.trackResponsiveHudText(bodyText(this, 9, HUD_SUB_MID,
-          `${String(this.level.cup || 'career').toUpperCase()} CUP`, {
-          originY: 0.5, fontSize: secondaryHudFont, color: '#b9c6c5', letterSpacing: 0.18
-        }).setDepth(2000), 'secondary');
-        if (needed > 1) {
-          this.objectiveProgressTxt = this.trackResponsiveHudText(bodyText(this, 4 + subWidth - 5, HUD_SUB_MID,
-            `0 / ${needed} TARGETS`, {
-            originX: 1, originY: 0.5, fontFamily: FONT, fontSize: secondaryHudFont,
-            color: '#f3c449', letterSpacing: 0.12
-          }).setDepth(2000), 'secondary');
-        }
-
-        const styleX = 4 + subWidth + 4;
-        const styleLabel = `${this.loadoutGameplay.ability} · ${this.loadoutGameplay.ballFeel}`.toUpperCase();
-        const stylePlate = this.add.graphics().setDepth(1988);
-        const styleText = this.trackResponsiveHudText(bodyText(this, styleX, HUD_SUB_MID, styleLabel, {
-          originX: 0.5, originY: 0.5, fontSize: secondaryHudFont, color: '#9ef0dc', letterSpacing: 0.1
-        }).setDepth(2000), 'secondary');
-        this.careerStyleHud = { x: styleX, label: styleLabel, plate: stylePlate, text: styleText };
-        this.buildConditionChips();
-        this.layoutCareerSecondaryHud();
+      this.objectiveDots = null;
+      if (needed > 1) {
+        this.objectiveDots = this.add.graphics().setDepth(2000);
+        this.objectiveDotsNeeded = needed;
+        this.refreshObjectiveDots();
       }
       this.buildTutorial();
       if (!(this.compactHud && this.tutorialActive())) this.buildObjectiveStrip();
     } else if (this.mode === 'daily') {
-      const dailyRail = this.compactHud ? 'DAILY' : `DAILY · ${this.dailyDate}`;
-      this.trackResponsiveHudText(bodyText(this, 31, HUD_TOP_MID, dailyRail, {
-        originY: 0.5, fontSize: tinyHudFont, color: '#f3c449', letterSpacing: 0.12
-      }).setDepth(2000), 'tiny');
-      this.trackResponsiveHudText(bodyText(this, this.compactHud ? 220 : GAME_W / 2, HUD_TOP_MID,
-        this.compactHud ? 'DAILY KICK' : 'ONE SHARED CHALLENGE', {
-        originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: primaryHudFont,
-        color: '#f3e7c3', letterSpacing: 0.08
-      }).setDepth(2000), 'tiny');
+      this.trackResponsiveHudText(bodyText(this, 42, HUD_TOP_MID, 'DAILY KICK', {
+        originY: 0.5, fontFamily: FONT, fontSize: primaryHudFont, color: '#aebdc4', letterSpacing: 0.1,
+        ...hudStroke
+      }).setDepth(2000), 'primary');
       this.scoreTxt = this.trackResponsiveHudText(bodyText(this, 369, HUD_TOP_MID, `SCORE ${this.score}`, {
-        originX: 1, originY: 0.5, fontFamily: FONT, fontSize: primaryHudFont, color: '#f3e7c3'
+        originX: 1, originY: 0.5, fontFamily: FONT, fontSize: primaryHudFont, color: '#f3e7c3', ...hudStroke
       }).setDepth(2000), 'primary');
       const shots = makeStatChip(this, GAME_W - 29, HUD_TOP_MID, 48, 'icon-star', `1/${this.maxAttempts}`, {
         height: 14, fill: PAL.night, border: PAL.goldDark, color: '#f3c449', fontSize: primaryHudFont, iconScale: 0.52
       }).setDepth(2000);
       this.dailyShotsTxt = this.trackResponsiveHudText(shots.valueText, 'primary');
 
-      const objectivePlate = this.add.graphics().setDepth(1975);
-      drawPanel(objectivePlate, 130, GAME_H - 39, 344, 25, {
-        fill: PAL.panel, border: PAL.goldDark, corner: PAL.gold, alpha: 0.93
-      });
-      const dailyLabel = bodyText(this, 143, GAME_H - 26.5, 'DAILY BONUS', {
-        fontFamily: FONT, fontSize: '6px', color: '#f3c449', letterSpacing: 0.45
+      // Today's twist in one line on the pitch, not a boxed banner.
+      const dailyCopy = bodyText(this, GAME_W / 2, GAME_H - 16, 'Hit the gold ring for +650.', {
+        originX: 0.5, originY: 0.5, fontSize: '8px', color: '#f3e7c3', letterSpacing: 0.1, ...hudStroke
       }).setDepth(2000);
-      const dailyCopy = bodyText(this, 216, GAME_H - 26.5, 'Hit the moving target for +650. Every goal counts.', {
-        fontSize: '7px', color: '#d7dfda', letterSpacing: 0.12
-      }).setDepth(2000);
-      this.objectiveUi = [objectivePlate, dailyLabel, dailyCopy];
+      this.objectiveUi = [dailyCopy];
     } else {
       this.scoreTxt = this.trackResponsiveHudText(bodyText(this, GAME_W / 2 - 40, HUD_TOP_MID, `SCORE ${this.score}`, {
-        originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: primaryHudFont, color: '#f3e7c3'
+        originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: primaryHudFont, color: '#f3e7c3', ...hudStroke
       }).setDepth(2000), 'primary');
       this.comboTxt = this.trackResponsiveHudText(bodyText(this, GAME_W / 2 + 40, HUD_TOP_MID,
         this.combo > 1 ? `x${this.combo} COMBO` : `${this.goals} GOALS`, {
-          originX: 0.5, originY: 0.5, fontSize: tinyHudFont, color: '#74bde8', letterSpacing: 0.18
+          originX: 0.5, originY: 0.5, fontSize: tinyHudFont, color: '#74bde8', letterSpacing: 0.18, ...hudStroke
         }).setDepth(2000), 'tiny');
       const timer = makeStatChip(this, GAME_W - 29, HUD_TOP_MID, 48, 'icon-clock', Math.ceil(this.timeLeft), {
         height: 14, fill: PAL.night, border: PAL.goldDark, color: '#f3c449', fontSize: primaryHudFont, iconScale: 0.52
@@ -2595,39 +2581,33 @@ export class GameScene extends Phaser.Scene {
         .setY(COACHING_HINT_Y)
         .setAlpha(1);
     }
-    // Touch players need the same route to match controls that keyboard users
-    // get from TAB. The native 1x compact viewport therefore receives a real
-    // 44px logical target while the slimmer visible plate leaves the playfield
-    // and objective strip clear.
-    this.menuButton = makeButton(this, 43, GAME_H - 22, 78, 24, 'II  MATCH MENU',
-      () => this.togglePauseMenu(), {
-        // A persistent utility control, not the screen's primary action, so it
-        // takes the quiet derived edge rather than a gold one.
-        color: PAL.panelHi, hover: PAL.blue,
-        fontSize: '7px', hitWidth: 78, hitHeight: 44, letterSpacing: 0.12
-      }).setDepth(2102);
-    this.menuHint = this.trackResponsiveHudText(bodyText(this, 87, GAME_H - 22, 'TAB', {
-      originY: 0.5, fontFamily: FONT, fontSize: this.compactHud ? '8px' : '6px',
-      color: '#cfe8ff', letterSpacing: 0.28
-    }).setDepth(2102), 'menu');
+    // The power gauge draws itself beside the ball; it has no text labels.
+    this.meterUi = [];
+  }
 
-    // Labels for the live gesture meter; drawAim toggles their visibility.
-    const meterX = GAME_W / 2 - 48;
-    const meterY = GAME_H - 48;
-    this.meterUi = [
-      bodyText(this, meterX - 33, meterY + 1, 'LOFT', {
-        fontSize: this.compactHud ? '8px' : '6px', color: '#74bde8', letterSpacing: 0.2,
-        originX: 1, originY: 0.5
-      }),
-      bodyText(this, meterX + 1, meterY - 7, 'POWER', {
-        fontSize: this.compactHud ? '8px' : '6px', color: '#f3e7c3', letterSpacing: 0.2
-      }),
-      bodyText(this, meterX + 96, meterY + 8, 'CURL', {
-        fontSize: this.compactHud ? '8px' : '6px', color: '#d75a3a', letterSpacing: 0.2,
-        originY: 0.5
-      })
-    ];
-    this.meterUi.forEach((label) => label.setDepth(1501).setVisible(false));
+  // Goals still needed, as dots under the match title: filled gold for each
+  // one scored, hollow for the rest.
+  refreshObjectiveDots() {
+    const gfx = this.objectiveDots;
+    if (!gfx?.active) return;
+    const needed = this.objectiveDotsNeeded || 1;
+    const done = Math.min(this.goalsThisLevel || 0, needed);
+    const size = 4;
+    const gap = 3;
+    const width = needed * size + (needed - 1) * gap;
+    const x0 = Math.round(GAME_W / 2 - width / 2);
+    const y0 = HUD_TOP_MID + 7;
+    gfx.clear();
+    for (let i = 0; i < needed; i++) {
+      const x = x0 + i * (size + gap);
+      gfx.fillStyle(0x071018, 0.9).fillRect(x - 1, y0 - 1, size + 2, size + 2);
+      if (i < done) {
+        gfx.fillStyle(0xf2c832, 1).fillRect(x, y0, size, size);
+      } else {
+        gfx.fillStyle(0xf3e7c3, 0.9).fillRect(x, y0, size, 1).fillRect(x, y0 + size - 1, size, 1)
+          .fillRect(x, y0, 1, size).fillRect(x + size - 1, y0, 1, size);
+      }
+    }
   }
 
   /**
@@ -2662,6 +2642,15 @@ export class GameScene extends Phaser.Scene {
    */
   buildObjectiveStrip() {
     const rings = this.level.rings || [];
+    // A plain "score a goal" match needs no strip; the sentence below is
+    // enough. The strip is kept for hoops and target zones, where the order
+    // and the corner are the whole point.
+    if (!rings.length && !this.baseTarget) {
+      this.objectiveSteps = [];
+      this.objectiveUi = null;
+      this.showObjectiveBrief(GAME_H - 16);
+      return;
+    }
     const steps = [
       ...rings.map((_, index) => ({ kind: 'hoop', text: String(index + 1) })),
       { kind: 'goal', text: this.describeFinish() }
@@ -2720,23 +2709,28 @@ export class GameScene extends Phaser.Scene {
     // away and gives the screen back. During the tutorial it is not said at
     // all: the coaching copy occupies that line, and stacking a third sentence
     // under it is the dump-everything-at-once problem this is here to avoid.
-    const brief = this.tutorialActive() ? null : this.level.objective?.label;
-    if (brief) {
-      this.objectiveBrief = bodyText(this, GAME_W / 2, plateY - 9, brief, {
-        originX: 0.5, originY: 0.5, fontSize: this.compactHud ? '9px' : '7px', color: '#d7dfda',
-        stroke: '#071018', strokeThickness: 3, letterSpacing: 0.15
-      }).setDepth(2000);
-      this.tweens.add({
-        targets: this.objectiveBrief,
-        alpha: 0,
-        delay: 3400,
-        duration: 500,
-        ease: 'Sine.easeOut',
-        onComplete: () => this.objectiveBrief?.setVisible(false)
-      });
-    }
-
+    this.showObjectiveBrief(plateY - 9);
     this.refreshObjectiveStrip();
+  }
+
+  // The match's one sentence, said once when the match opens and then gone.
+  // A retry of the same match already knows it. During the tutorial the
+  // coaching copy owns that line instead.
+  showObjectiveBrief(y) {
+    const brief = this.tutorialActive() || this.isRetry ? null : this.level.objective?.label;
+    if (!brief) return;
+    this.objectiveBrief = bodyText(this, GAME_W / 2, y, brief, {
+      originX: 0.5, originY: 0.5, fontSize: this.compactHud ? '9px' : '8px', color: '#f3e7c3',
+      stroke: '#071018', strokeThickness: 3, letterSpacing: 0.1
+    }).setDepth(2000);
+    this.tweens.add({
+      targets: this.objectiveBrief,
+      alpha: 0,
+      delay: 2600,
+      duration: 400,
+      ease: 'Sine.easeOut',
+      onComplete: () => this.objectiveBrief?.setVisible(false)
+    });
   }
 
   describeFinish() {
@@ -2987,27 +2981,78 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  // The numbers behind a shot are for the screen reader; on screen the
+  // outcome word, the keeper and the crowd already say what happened.
   showShotReadout(outcome, point, rating) {
     const text = this.describeShot(outcome, point, rating);
     const scored = outcome === 'GOAL';
     this.announceStatus(`${scored ? 'Goal' : String(outcome).toLowerCase()}. ${text}.`);
-    if (!this.shotReadout) return;
-    this.tweens.killTweensOf([this.shotReadout, this.shotReadoutPlate]);
+  }
 
-    this.shotReadout.setText(text).setColor(scored ? '#f3c449' : '#d7dfda');
-    // The plate is redrawn to the text so it never sits half-empty or clips.
-    const width = Math.min(GAME_W - 16, Math.round(this.shotReadout.displayWidth) + 16);
-    this.shotReadoutPlate.clear();
-    drawPanel(this.shotReadoutPlate, Math.round(GAME_W / 2 - width / 2), READOUT_Y, width, 13, {
-      fill: PAL.panel, border: PAL.borderDark, corner: scored ? PAL.gold : PAL.goldDark, alpha: 0.94
-    });
+  missKind(outcome, point) {
+    if (outcome === 'GOAL' || outcome === 'POST') return null;
+    if (outcome === 'SAVE') return 'save';
+    if (outcome === 'CAUGHT') return 'caught';
+    if (outcome === 'WALL') return 'wall';
+    const plane = point && Number.isFinite(point.x) ? point : this.headingFor;
+    if (!plane) return 'short';
+    if (plane.y > this.goalHeight) return 'over';
+    if (Math.abs(plane.x) > this.goalWidth / 2) return 'wide';
+    return 'miss';
+  }
 
-    const objects = [this.shotReadout, this.shotReadoutPlate];
-    objects.forEach((object) => object.setAlpha(0));
-    this.tweens.add({ targets: objects, alpha: 1, duration: 160, ease: 'Cubic.easeOut' });
-    this.tweens.add({
-      targets: objects, alpha: 0, delay: 1750, duration: 260, ease: 'Cubic.easeOut'
-    });
+  isNearMiss(point) {
+    const plane = point && Number.isFinite(point.x) ? point : this.headingFor;
+    if (!plane) return false;
+    const wideBy = Math.abs(plane.x) - this.goalWidth / 2;
+    const overBy = plane.y - this.goalHeight;
+    return Math.max(wideBy, overBy) < 0.7;
+  }
+
+  playCrowdGroan() {
+    if (this.settings?.reducedMotion) return;
+    this.crowdTiers?.playGroan?.((delay, callback) => this.schedule(delay, callback));
+  }
+
+  // A miss gets one word, placed where the ball ended up - not a banner, a
+  // plate and a paragraph. The keeper, the crowd and the ball already told the
+  // story; the word just names it.
+  showOutcomeWord(word, point = null, depthZ = this.zGoal, color = '#f3e7c3') {
+    const plane = point && Number.isFinite(point.x) ? point : this.headingFor;
+    let x = GAME_W / 2;
+    let y = 58;
+    if (plane && Number.isFinite(depthZ)) {
+      const at = project(plane.x, Math.max(0.3, Number(plane.y) || 1) + 0.7, depthZ);
+      x = at.x;
+      y = at.y;
+    }
+    x = Math.round(Phaser.Math.Clamp(x, 60, GAME_W - 60));
+    y = Math.round(Phaser.Math.Clamp(y, 44, 150));
+    if (!this.outcomeWord?.active) {
+      this.outcomeWord = crispText(this.add.text(0, 0, '', {
+        fontFamily: RESULT_FONT,
+        fontStyle: PIXEL_TEXT_WEIGHT,
+        fontSize: '16px',
+        color,
+        stroke: '#071018',
+        strokeThickness: 4,
+        align: 'center'
+      }).setOrigin(0.5).setDepth(2100));
+      this.outcomeWord.setShadow(0, 2, '#071018', 0, true, true);
+    }
+    const label = this.outcomeWord;
+    this.tweens.killTweensOf(label);
+    label.setText(word).setColor(color).setPosition(x, y);
+    this.announceStatus(word);
+    if (this.settings?.reducedMotion) {
+      label.setAlpha(1).setScale(1);
+      this.tweens.add({ targets: label, alpha: 0, delay: 900, duration: 200 });
+      return label;
+    }
+    label.setAlpha(0).setScale(1.6).setY(y + 4);
+    this.tweens.add({ targets: label, alpha: 1, scale: 1, y, duration: 150, ease: 'Back.easeOut' });
+    this.tweens.add({ targets: label, alpha: 0, y: y - 6, delay: 760, duration: 260, ease: 'Quad.easeIn' });
+    return label;
   }
 
   hideShotReadout() {
@@ -3178,7 +3223,7 @@ export class GameScene extends Phaser.Scene {
       targets: this.inputHint,
       y: COACHING_HINT_Y - 5,
       alpha: 0,
-      delay: 700,
+      delay: 1500,
       duration: 450,
       ease: 'Quad.easeOut'
     });
@@ -3946,24 +3991,35 @@ export class GameScene extends Phaser.Scene {
         break;
       }
       case 'CAUGHT':
-        this.showBanner('CAUGHT!', '#ff8a65');
+        this.showOutcomeWord('HELD', pt, this.keepers[0]?.z ?? this.zGoal);
+        this.playCrowdGroan();
         Audio.groan();
         break;
       case 'SAVE':
-        this.showBanner('SAVED!', '#ff8a65');
+        this.showOutcomeWord('SAVED', pt, this.keepers[0]?.z ?? this.zGoal);
+        this.playCrowdGroan();
         Audio.groan();
         break;
       case 'WALL':
-        this.showBanner(this.lastWallKnockdown ? 'WALL FLATTENED!' : 'BLOCKED!', this.lastWallKnockdown ? '#f2c832' : '#ff8a65');
+        if (this.lastWallKnockdown) {
+          this.showBanner('WALL FLATTENED!', '#f2c832');
+        } else {
+          this.showOutcomeWord('WALL', pt, this.zWall ?? this.zGoal);
+        }
         Audio.groan();
         break;
       case 'POST':
-        this.showBanner(this.frameContacts.has('crossbar') ? 'OFF THE BAR!' : 'OFF THE POST!', '#ffab40');
+        this.showOutcomeWord(this.frameContacts.has('crossbar') ? 'BAR!' : 'POST!', pt, this.zGoal, '#ffc04d');
+        this.playCrowdGroan();
         Audio.groan();
         break;
-      default:
-        this.showBanner('OFF TARGET', '#b0bec5');
+      default: {
+        const kind = this.missKind(outcome, pt);
+        this.showOutcomeWord(kind === 'over' ? 'OVER' : kind === 'wide' ? 'WIDE' : kind === 'short' ? 'SHORT' : 'MISS',
+          pt, this.zGoal);
+        if (this.isNearMiss(pt)) this.playCrowdGroan();
         Audio.groan();
+      }
     }
 
     // The scorer card already carries the diagnostic on goals. A second plate
@@ -3991,7 +4047,7 @@ export class GameScene extends Phaser.Scene {
       this.schedule(this.resultResetDelay(outcome, 1150), () => {
         if (!this.over) {
           this.restartCurrentLevel({
-            mode: 'arcade', score: this.score, goals: this.goals,
+            mode: 'arcade', retry: true, score: this.score, goals: this.goals,
             combo: this.combo, timeLeft: this.timeLeft
           });
         }
@@ -4031,21 +4087,22 @@ export class GameScene extends Phaser.Scene {
     if (this.mode === 'arcade') {
       const nextGoals = this.goals + 1;
       const nextCombo = this.combo + 1;
-      return `${nextGoals} ${nextGoals === 1 ? 'GOAL' : 'GOALS'} · x${nextCombo} COMBO · ${Math.ceil(this.timeLeft)} SEC`;
+      return nextCombo > 1
+        ? `${nextCombo} IN A ROW  ${Math.ceil(this.timeLeft)} SEC LEFT`
+        : `${nextGoals} ${nextGoals === 1 ? 'GOAL' : 'GOALS'}  ${Math.ceil(this.timeLeft)} SEC LEFT`;
     }
     if (this.mode === 'daily') {
-      const nextGoals = this.goals + 1;
-      return `SHOT ${this.attempt}/${this.maxAttempts} · ${nextGoals} ${nextGoals === 1 ? 'GOAL' : 'GOALS'} · ${this.score + (rating.points || 0)} TOTAL`;
+      return `${this.score + (rating.points || 0)} TOTAL  SHOT ${this.attempt} OF ${this.maxAttempts}`;
     }
 
     const objective = this.level.objective || { goals: 1 };
     const needed = Math.max(1, objective.goals || 1);
     const check = this.objectiveCheck('GOAL', point, rating);
     const progress = Math.min(this.goalsThisLevel + (check.qualifies ? 1 : 0), needed);
-    const remaining = Math.max(this.maxAttempts - this.attempt, 0);
-    return check.qualifies
-      ? `${progress}/${needed} TARGETS · ${remaining} ${remaining === 1 ? 'SHOT' : 'SHOTS'} LEFT`
-      : `OBJECTIVE MISSED · ${remaining} ${remaining === 1 ? 'SHOT' : 'SHOTS'} LEFT`;
+    if (!check.qualifies) return "DIDN'T COUNT";
+    if (progress >= needed) return "THAT'S THE MATCH";
+    const left = needed - progress;
+    return left === 1 ? 'ONE MORE TO GO' : `${left} MORE TO GO`;
   }
 
   handleDailyOutcome(outcome, rating) {
@@ -4068,9 +4125,8 @@ export class GameScene extends Phaser.Scene {
     this.attempt++;
     const remaining = this.maxAttempts - this.attempt + 1;
     this.dailyShotsTxt?.setText(`${this.attempt}/${this.maxAttempts}`);
-    this.pendingAttemptHint = outcome === 'GOAL'
-      ? `${rating.label.toUpperCase()}  ·  ${remaining} SHOTS LEFT`
-      : `${remaining} SHOTS LEFT  ·  BUILD THE SCORE`;
+    // The shots chip already counts down; the pitch stays clear.
+    this.pendingAttemptHint = null;
     this.schedule(this.resultResetDelay(outcome), () => this.resetAttempt());
   }
 
@@ -4079,13 +4135,13 @@ export class GameScene extends Phaser.Scene {
     const shot = this.lastShot || {};
     if (outcome !== 'GOAL') {
       const reasons = {
-        SAVE: 'KEEPER READ IT — CHANGE CORNER OR ADD CURL',
-        CAUGHT: 'TOO CLOSE TO THE KEEPER — AIM WIDER',
-        WALL: 'WALL BLOCKED IT — LIFT OR BEND THE SHOT',
-        POST: 'INCHES AWAY — USE SLIGHTLY LESS WIDTH',
-        MISS: 'OFF TARGET — FINISH THE SWIPE TOWARD GOAL'
+        SAVE: 'Saved.',
+        CAUGHT: 'Held by the keeper.',
+        WALL: 'Into the wall.',
+        POST: 'Off the woodwork.',
+        MISS: 'Off target.'
       };
-      return { qualifies: false, finish: null, reason: reasons[outcome] || 'SHOT DID NOT COUNT' };
+      return { qualifies: false, finish: null, reason: reasons[outcome] || 'That one did not count.' };
     }
 
     const advanced = evaluateAdvancedObjective({
@@ -4152,14 +4208,14 @@ export class GameScene extends Phaser.Scene {
 
     let reason = null;
     if (!qualifies) {
-      if (duplicateFinish) reason = 'USE A DIFFERENT FINISH THIS TIME';
-      else if (!targetOk) reason = 'GOAL SCORED, BUT THE GOLD TARGET WAS MISSED';
-      else if (!curveDirectionOk) reason = `CURVE THE OTHER WAY — ${objective.curveDirection?.toUpperCase()}`;
-      else if (!curveOk) reason = 'MORE BEND NEEDED — ARC THE END OF YOUR SWIPE';
-      else if (!highEnough) reason = 'TOO LOW — SWIPE LONGER AND STEEPER';
-      else if (!lowEnough) reason = 'TOO HIGH — USE A SHORTER, FLATTER SWIPE';
-      else if (objective.type === 'power') reason = 'MORE POWER NEEDED — SWIPE FASTER';
-      else reason = 'GOAL SCORED, BUT THE OBJECTIVE WAS NOT MET';
+      if (duplicateFinish) reason = "Goal, but you've done that one. Try a different finish.";
+      else if (!targetOk) reason = 'Goal, but not in the gold zone.';
+      else if (!curveDirectionOk) reason = `Goal, but bend it ${objective.curveDirection} this time.`;
+      else if (!curveOk) reason = 'Goal, but it needed more bend.';
+      else if (!highEnough) reason = 'Goal, but it needed more height.';
+      else if (!lowEnough) reason = 'Goal, but keep it lower.';
+      else if (objective.type === 'power') reason = 'Goal, but hit it harder.';
+      else reason = "Goal, but it didn't do what the match asked.";
     }
     return { qualifies, finish, reason };
   }
@@ -4181,7 +4237,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     const needed = Math.max(1, objective.goals || 1);
-    this.objectiveProgressTxt?.setText(`${Math.min(this.goalsThisLevel, needed)} / ${needed} TARGETS`);
+    this.refreshObjectiveDots();
     if (this.goalsThisLevel >= needed) {
       const stars = careerStars({
         attempt: this.attempt,
@@ -4203,12 +4259,17 @@ export class GameScene extends Phaser.Scene {
     this.attempt++;
     const remaining = Math.max(this.maxAttempts - this.attempt + 1, 0);
     if (this.attempt > this.maxAttempts) {
-      this.schedule(this.resultResetDelay(outcome, 1350), () => this.showLevelFailed());
+      this.schedule(this.resultResetDelay(outcome, 700), () => this.showLevelFailed());
     } else {
-      const message = scored && !check.qualifies
+      // Coaching is earned: the first miss of a kind is its own lesson, the
+      // same miss twice gets one short sentence. Progress is already on the
+      // dots and the balls, so nothing here counts shots.
+      const kind = this.missKind(outcome, point);
+      const repeated = Boolean(kind) && kind === this.lastMissKind;
+      this.lastMissKind = scored ? null : kind;
+      this.pendingAttemptHint = scored && !check.qualifies
         ? check.reason
-        : scored ? `${this.goalsThisLevel}/${needed} DONE — ${remaining} SHOTS LEFT` : `${check.reason}  ·  ${remaining} LEFT`;
-      this.pendingAttemptHint = message;
+        : (!scored && repeated ? MISS_HINTS[kind] ?? null : null);
       this.schedule(this.resultResetDelay(outcome), () => this.resetAttempt());
     }
   }
@@ -4261,6 +4322,10 @@ export class GameScene extends Phaser.Scene {
       keeper.draw();
     });
     this.hideShotReadout();
+    if (this.outcomeWord?.active) {
+      this.tweens.killTweensOf(this.outcomeWord);
+      this.outcomeWord.setAlpha(0);
+    }
     this.setResultFocus(null);
     // Back to the run-up mark for the next attempt: walked, not teleported.
     this.kicker?.cancelSequence();
@@ -4333,6 +4398,8 @@ export class GameScene extends Phaser.Scene {
     this.swipe.cancel();
     this.cancelScheduledCalls();
     this.setPauseUnderlayAvailable(false);
+    // Result cards own the screen: no coaching line may peek out beneath one.
+    this.clearCoachingLayers?.();
 
     const overlayObjects = this.terminalOverlayObjects;
     const dim = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, PAL.ink, 0.84)
@@ -4544,149 +4611,124 @@ export class GameScene extends Phaser.Scene {
     this.swipe.cancel();
     this.cancelScheduledCalls();
     this.setPauseUnderlayAvailable(false);
+    // Result cards own the screen: no coaching line may peek out beneath one.
+    this.clearCoachingLayers?.();
 
+    // A small card over a still-visible pitch: the result, the stars, the
+    // coins and the next match. The striker is still celebrating behind it.
     const overlayObjects = this.terminalOverlayObjects;
-    const dim = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, PAL.ink, 0.84)
+    const dim = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, PAL.ink, 0.62)
       .setDepth(2999).setInteractive();
+    const card = { x: 118, y: 56, w: 244, h: 170 };
     const chrome = this.add.graphics().setDepth(3000);
-    // Logo spans x 75-115 on this card.
-    drawTrophyResultsFrame(chrome, { x: 58, y: 24, w: 364, h: 226, railInsetLeft: 63 });
-
-    // Restrained rays and confetti live behind the headline. They sell the
-    // reward moment without obscuring the three pieces of actionable data.
-    chrome.fillStyle(PAL.gold, 0.06);
-    chrome.fillTriangle(240, 49, 117, 52, 240, 86);
-    chrome.fillTriangle(240, 49, 363, 52, 240, 86);
-    chrome.fillTriangle(240, 51, 156, 88, 324, 88);
-    chrome.fillStyle(PAL.gold, 0.9);
-    [[132, 69], [151, 84], [331, 67], [350, 82], [119, 95], [365, 96]].forEach(([x, y]) => {
-      chrome.fillRect(x, y, 1, 1);
+    drawPanel(chrome, card.x, card.y, card.w, card.h, {
+      fill: PAL.panel, border: PAL.borderDark, corner: PAL.borderDark
     });
-
-    drawPanel(chrome, 91, 129, 298, 67, {
-      fill: 0x091a2a,
-      border: PAL.borderDark,
-      corner: 0x48627a,
-      highlight: 0x274157
-    });
-    chrome.fillStyle(PAL.borderDark, 0.68);
-    chrome.fillRect(97, 151, 286, 1);
-    chrome.fillRect(97, 173, 286, 1);
     overlayObjects.push(dim, chrome);
 
-    const ballTexture = this.ballTexture || 'ball-classic';
-    const crestBall = this.add.image(240, 27.5, ballTexture)
-      .setDisplaySize(21, 21).setDepth(3002);
-    const resultBrand = this.add.image(95, 40, 'calynx-logo-pixel')
-      .setDisplaySize(40, 12).setTint(PAL.gold).setDepth(3002);
-    const headline = titleText(this, GAME_W / 2, 68, 'LEVEL CLEAR', '25px', '#f3c449')
+    const headline = titleText(this, GAME_W / 2, card.y + 20, 'MATCH WON', '20px', '#f3e7c3')
       .setDepth(3002);
-    overlayObjects.push(crestBall, resultBrand, headline);
+    overlayObjects.push(headline);
 
     const earnedStars = Phaser.Math.Clamp(Number(stars) || 0, 0, 3);
+    const starY = card.y + 54;
     for (let i = 0; i < 3; i++) {
-      const star = this.add.image(
-        GAME_W / 2 + (i - 1) * 46,
-        106,
-        i < earnedStars ? 'icon-star' : 'icon-star-empty'
-      ).setDisplaySize(31, 31).setDepth(3002);
+      const earned = i < earnedStars;
+      const star = this.add.image(GAME_W / 2 + (i - 1) * 40, starY, earned ? 'icon-star' : 'icon-star-empty')
+        .setDisplaySize(28, 28).setDepth(3002);
+      star.resultStar = true;
       overlayObjects.push(star);
       if (!this.settings.reducedMotion) {
+        // Each earned star lands on its own beat: it drops in oversized and
+        // settles, so three stars are three small rewards, not one.
         const finalScaleX = star.scaleX;
         const finalScaleY = star.scaleY;
-        star.setScale(finalScaleX * 0.72, finalScaleY * 0.72);
+        const from = earned ? 1.9 : 0.6;
+        star.setScale(finalScaleX * from, finalScaleY * from).setAlpha(0);
         this.tweens.add({
           targets: star,
           scaleX: finalScaleX,
           scaleY: finalScaleY,
-          delay: 150 + i * 150,
-          duration: 170,
-          ease: 'Back.easeOut',
-          onStart: () => { if (i < earnedStars) Audio.star(i); }
+          alpha: 1,
+          delay: 220 + i * 220,
+          duration: earned ? 260 : 160,
+          ease: earned ? 'Back.easeOut' : 'Quad.easeOut',
+          onStart: () => {
+            if (!earned) return;
+            Audio.star(i);
+            this.impact?.explode?.(8, star.x, star.y);
+          }
         });
       }
     }
 
-    const rowIcons = [
-      this.add.image(112, 141, 'icon-cup').setScale(1.05),
-      this.add.image(112, 163, 'icon-star').setScale(1.02),
-      this.add.image(112, 185, 'icon-coin').setScale(1.05)
-    ];
-    rowIcons.forEach((icon) => {
-      icon.setDepth(3002);
-      overlayObjects.push(icon);
-    });
-
-    const masteryShots = `${goalsRequired} SHOT${goalsRequired === 1 ? '' : 'S'}`;
-    const rewardText = reward > 0 ? `+${reward} COINS EARNED` : 'BEST REWARD ALREADY CLAIMED';
-    const rows = [
-      bodyText(this, 130, 141, `${String(rating).toUpperCase()}  •  ${points} PTS`, {
-        fontFamily: FONT, fontSize: '9px', color: '#f3e7c3'
+    const rewardText = reward > 0 ? `+${reward} COINS` : 'REWARD ALREADY CLAIMED';
+    const lines = [
+      bodyText(this, GAME_W / 2, card.y + 84, `${String(rating).toUpperCase()}   ${points} PTS`, {
+        originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '9px', color: '#f3e7c3'
       }),
-      bodyText(this, 130, 163, `3★ MASTERY: ${masteryShots}  •  2050+ PTS`, {
-        fontFamily: FONT, fontSize: '7px', color: '#f3e7c3'
-      }),
-      bodyText(this, 130, 185, rewardText, {
-        fontFamily: FONT, fontSize: reward > 0 ? '9px' : '8px',
-        color: reward > 0 ? '#f3c449' : '#f3e7c3'
+      bodyText(this, GAME_W / 2, card.y + 98, rewardText, {
+        originX: 0.5, originY: 0.5, fontFamily: FONT, fontSize: '8px', color: reward > 0 ? '#f3d27a' : '#9fb0b8'
       })
     ];
-    rows.forEach((row) => {
-      row.setDepth(3002);
-      overlayObjects.push(row);
+    if (earnedStars < 3) {
+      const shots = `${goalsRequired} shot${goalsRequired === 1 ? '' : 's'}`;
+      lines.push(bodyText(this, GAME_W / 2, card.y + 113, `3rd star: clear it in ${shots} with 2050+ pts.`, {
+        originX: 0.5, originY: 0.5, fontSize: '7px', color: '#9fb0b8'
+      }));
+    }
+    lines.forEach((line) => {
+      line.setDepth(3002);
+      overlayObjects.push(line);
     });
 
     const actions = [];
     if (hasNext) {
       actions.push({
-        label: 'NEXT >',
+        label: 'NEXT',
+        width: 96,
         cb: () => this.restartCurrentLevel({ mode: 'career', levelIndex: this.levelIndex + 1 })
       });
     }
     actions.push({
       label: 'REPLAY',
-      cb: () => this.restartCurrentLevel({ mode: 'career', levelIndex: this.levelIndex })
+      width: hasNext ? 64 : 96,
+      cb: () => this.restartCurrentLevel({ mode: 'career', levelIndex: this.levelIndex, retry: true })
     });
     actions.push({
       label: 'LEVELS',
+      width: hasNext ? 64 : 96,
       cb: () => this.startScene('LevelSelect')
     });
 
-    const buttonW = actions.length === 3 ? 104 : 136;
-    const gap = actions.length === 3 ? 8 : 10;
-    const totalW = actions.length * buttonW + (actions.length - 1) * gap;
+    const gap = 6;
+    const totalW = actions.reduce((sum, action) => sum + action.width, 0) + gap * (actions.length - 1);
+    let x = GAME_W / 2 - totalW / 2;
     actions.forEach((action, index) => {
-      const button = makeButton(this,
-        GAME_W / 2 - totalW / 2 + buttonW / 2 + index * (buttonW + gap),
-        224,
-        buttonW,
-        33,
-        action.label,
-        action.cb,
-        {
+      const button = makeButton(this, x + action.width / 2, card.y + card.h - 22, action.width, 26,
+        action.label, action.cb, {
           ...cardButtonStyle(index),
-          fontSize: '9px',
-          hitHeight: 39
-        }
-      ).setDepth(3003);
+          fontSize: index === 0 && hasNext ? '9px' : '8px',
+          hitHeight: 34
+        }).setDepth(3003);
       overlayObjects.push(button);
+      x += action.width + gap;
     });
 
     this.announceStatus(
-      `Level clear. ${earnedStars} stars. ${rating}, ${points} points. ${reward > 0 ? `${reward} coins earned.` : 'Best reward already claimed.'}`
+      `Match won. ${earnedStars} stars. ${rating}, ${points} points. ${reward > 0 ? `${reward} coins earned.` : 'Reward already claimed.'}`
     );
   }
 
   showLevelFailed() {
     this.state = 'OVERLAY';
     PlatformService.gameplayStop();
-    this.showOverlay('TRY AGAIN', [
-      this.lastObjectiveFeedback || this.level.objective?.label || 'Out of attempts',
-      'TIP: CHANGE ONE THING — HEIGHT, POWER, OR CURVE'
+    this.showOverlay('OUT OF BALLS', [
+      this.level.objective?.label || 'Score to clear the match.'
     ], [
       {
-        label: 'RETRY',
-        cb: () => this.restartCurrentLevel({ mode: 'career', levelIndex: this.levelIndex })
+        label: 'GO AGAIN',
+        cb: () => this.restartCurrentLevel({ mode: 'career', levelIndex: this.levelIndex, retry: true })
       },
       { label: 'LEVELS', cb: () => this.startScene('LevelSelect') }
     ]);
@@ -4701,6 +4743,8 @@ export class GameScene extends Phaser.Scene {
     this.swipe.cancel();
     this.cancelScheduledCalls();
     this.setPauseUnderlayAvailable(false);
+    // Result cards own the screen: no coaching line may peek out beneath one.
+    this.clearCoachingLayers?.();
     const overlayObjects = this.terminalOverlayObjects;
     const dim = this.add.rectangle(GAME_W / 2, GAME_H / 2, GAME_W, GAME_H, PAL.ink, 0.74)
       .setDepth(2999).setInteractive();
@@ -4741,7 +4785,7 @@ export class GameScene extends Phaser.Scene {
     });
     overlayObjects.push(panel);
 
-    overlayObjects.push(titleText(this, GAME_W / 2, titleY, title, '17px', '#f3c449').setDepth(3001));
+    overlayObjects.push(titleText(this, GAME_W / 2, titleY, title, '17px', '#f3e7c3').setDepth(3001));
     body.setY(bodyY);
     overlayObjects.push(body);
 
@@ -4869,6 +4913,34 @@ export class GameScene extends Phaser.Scene {
 
   drawBall() {
     if (this.ballCaught) {
+      // While the keeper holds it, the real ball rides in his gloves - it no
+      // longer vanishes between the diving catch and the hold frames. Frames
+      // that paint their own ball report no point, and the sprite hides.
+      let holder = null;
+      let held = null;
+      for (const keeper of this.keepers || []) {
+        held = keeper.getHeldBallPoint?.() ?? null;
+        if (held) {
+          holder = keeper;
+          break;
+        }
+      }
+      if (held) {
+        const at = project(held.x, held.y, held.z);
+        const heldScale = ((at.s * BALL_R * 2) / (this.ballSpr.texture.source[0]?.width || 12)) *
+          0.66 * (this.ballVisualScale ?? 1);
+        this.ballSpr.setVisible(true)
+          .setPosition(at.x, at.y)
+          .setScale(heldScale)
+          .setRotation(0)
+          .setDepth((holder.spr?.depth ?? 1000 - held.z * 10) + 1);
+        this.shadowSpr.setVisible(false);
+        this.ballOutlineGfx?.clear();
+        this.ballGlossGfx?.clear();
+        this.ballGhosts?.forEach((ghost) => ghost.spr.setVisible(false));
+        this.trailGfx.clear();
+        return;
+      }
       this.ballSpr.setVisible(false);
       this.shadowSpr.setVisible(false);
       this.ballOutlineGfx?.clear();
@@ -5190,44 +5262,34 @@ export class GameScene extends Phaser.Scene {
       );
     }
 
-    const meterX = GAME_W / 2 - 48;
-    const meterY = GAME_H - 48;
-    // The backing plate spanned x 156-292 while LOFT is right-aligned to 159
-    // and CURL starts at 288, so both labels hung outside a bare rectangle.
-    // Every bar keeps its exact position; the plate is now a shared-language
-    // panel wide enough to hold the labels at the compact 8px size too.
-    drawPanel(this.aimGfx, meterX - 62, meterY - 13, 188, 31, {
-      fill: UI.surfaceMuted, alpha: 0.9
-    });
-    // POWER: swipe speed, exactly as the release physics reads it
-    this.aimGfx.fillStyle(0x213a52, 1);
-    this.aimGfx.fillRect(meterX, meterY, 94, 5);
-    this.aimGfx.fillStyle(power > 0.88 ? 0xf3c449 : 0xf3e7c3, 1);
-    this.aimGfx.fillRect(meterX, meterY, Math.round(94 * power), 5);
-    // Slippery run-up: the band is how much the footing can take off or add.
+    // One slim pixel gauge beside the ball: how hard it will be struck. Loft
+    // and bend are already drawn by the arc itself, so they need no dials.
+    const ballX = Math.round(this.ballSpr?.x ?? GAME_W / 2);
+    const ballY = Math.round(this.ballSpr?.y ?? 190);
+    const segments = 12;
+    const segH = 2;
+    const gx = ballX + 14;
+    const gBottom = ballY + 8;
+    const gTop = gBottom - segments * (segH + 1) + 1;
+    const segmentY = (i) => gBottom - (i + 1) * (segH + 1) + 1;
+    this.aimGfx.fillStyle(0x071018, 0.85).fillRect(gx - 1, gTop - 1, 5, gBottom - gTop + 2);
+    const lit = Math.round(Phaser.Math.Clamp(power, 0, 1) * segments);
+    for (let i = 0; i < segments; i++) {
+      const t = i / (segments - 1);
+      const color = t < 0.5 ? 0x7fd46b : t < 0.8 ? 0xf3c449 : 0xff7a4a;
+      this.aimGfx.fillStyle(i < lit ? color : 0x213a52, 1).fillRect(gx, segmentY(i), 3, segH);
+    }
+    // Slippery run-up: a side band shows how much the footing may take or add.
     if (preview.powerJitterRange > 0) {
-      const lo = Phaser.Math.Clamp(power - preview.powerJitterRange, 0, 1);
-      const hi = Phaser.Math.Clamp(power + preview.powerJitterRange, 0, 1);
-      this.aimGfx.fillStyle(0xff8a65, 0.5);
-      this.aimGfx.fillRect(meterX + Math.round(94 * lo), meterY - 2, Math.max(1, Math.round(94 * (hi - lo))), 9);
+      const lo = Math.floor(Phaser.Math.Clamp(power - preview.powerJitterRange, 0, 1) * segments);
+      const hi = Math.ceil(Phaser.Math.Clamp(power + preview.powerJitterRange, 0, 1) * segments);
+      this.aimGfx.fillStyle(0xff8a65, 0.8);
+      for (let i = lo; i < hi; i++) this.aimGfx.fillRect(gx + 4, segmentY(i), 1, segH);
     }
     const maxPower = Phaser.Math.Clamp(this.level.shotRules?.maxPower ?? 1, 0.45, 1);
     if (maxPower < 1) {
-      const capX = meterX + Math.round(94 * maxPower);
-      this.aimGfx.fillStyle(0xff8a65, 1);
-      this.aimGfx.fillRect(capX - 1, meterY - 2, 2, 9);
+      const capY = segmentY(Math.round(maxPower * segments) - 1) - 1;
+      this.aimGfx.fillStyle(0xffffff, 1).fillRect(gx - 2, capY, 7, 1);
     }
-    // LOFT: vertical bar fed by the released vertical velocity
-    this.aimGfx.fillStyle(0x213a52, 1);
-    this.aimGfx.fillRect(meterX - 10, meterY - 6, 5, 18);
-    const loftH = Math.round(18 * loft);
-    this.aimGfx.fillStyle(0x74bde8, 1);
-    this.aimGfx.fillRect(meterX - 10, meterY + 12 - loftH, 5, loftH);
-    // CURL: marker driven by the released spin value
-    this.aimGfx.fillStyle(0x1b2f42, 1);
-    this.aimGfx.fillRect(meterX + 7, meterY + 8, 80, 2);
-    const curlX = meterX + 47 + Phaser.Math.Clamp(spin, -1, 1) * 40;
-    this.aimGfx.fillStyle(0xd75a3a, 1);
-    this.aimGfx.fillRect(curlX - 2, meterY + 7, 5, 4);
   }
 }

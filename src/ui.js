@@ -1,6 +1,7 @@
 import { Audio } from './systems/AudioSynth.js';
 import { PAL } from './pixelart.js';
 import { GAME_W, GAME_H, RENDER_SCALE, RENDER_W, RENDER_H } from './config.js';
+import { installPixelGrid } from './rendering/PixelGrid.js';
 
 // One authored face keeps every menu, HUD and information label aligned with
 // the settings chrome. Pixelify is intentionally loaded at its open-C 400 cut.
@@ -35,7 +36,11 @@ export const UI = Object.freeze({
   shadow: PAL.ink,
   // Hard shadow cast straight down: panels and buttons read as solid objects
   // resting on the scene instead of outlined boxes floating over it.
-  shadowDrop: 3
+  shadowDrop: 3,
+  // Warm cream for titles and for a selected tab or tile. Gold is kept for the
+  // one primary action on a screen, so selection must not borrow it.
+  cream: 0xf3e7c3,
+  creamText: '#f3e7c3'
 });
 
 // The one call-to-action on a screen. Spread into makeButton's options so every
@@ -67,6 +72,18 @@ export function canvasHasKeyboardFocus(scene, documentRef = globalThis.document)
   // still on the page, browser chrome, or the native settings dialog.
   const activeElement = documentRef?.activeElement;
   return !activeElement || activeElement === canvas;
+}
+
+// Phaser queues window key events and handles them on its next frame. By then
+// a key pressed inside the native settings dialog can look like a canvas key:
+// the dialog has closed and focus is back on the canvas. The event's own
+// target says where it really happened, so canvas controls act only on keys
+// that were aimed at the canvas.
+export function canvasOwnsKeyEvent(scene, event, documentRef = globalThis.document) {
+  const canvas = gameCanvas(scene, documentRef);
+  const target = event?.target;
+  if (canvas && target && target.nodeType === 1 && target !== canvas) return false;
+  return canvasHasKeyboardFocus(scene, documentRef);
 }
 
 function configureCanvasAccessibility(scene) {
@@ -246,7 +263,7 @@ function createButtonNavigation(scene) {
 
   const handle = (event, action) => {
     if (hasActiveDomDialog()) return;
-    if (!canvasHasKeyboardFocus(scene)) return;
+    if (!canvasOwnsKeyEvent(scene, event)) return;
     if (isRepeatedKeyEvent(event)) {
       event?.preventDefault?.();
       if (event) event.cancelled = 1;
@@ -334,16 +351,18 @@ function toCss(value) {
   return `#${value.toString(16).padStart(6, '0')}`;
 }
 
-export function configureHdCamera(scene) {
+export function configureHdCamera(scene, { uiDepth } = {}) {
   configureCanvasAccessibility(scene);
   const camera = scene.cameras.main;
   camera.setViewport(0, 0, RENDER_W, RENDER_H);
   camera.setZoom(RENDER_SCALE);
   camera.centerOn(GAME_W / 2, GAME_H / 2);
-  // Static art stays crisp, but motion resolves on quarter-logical-pixel steps
-  // through the HD backing surface. The supplied sprites were authored for
-  // this density and lose both silhouette and shading when snapped to 480p.
+  // Motion resolves on quarter-logical-pixel steps through the HD backing
+  // surface; the pixel grid then settles the world onto the logical grid.
   camera.roundPixels = false;
+  // Scenes that name where their interface begins get the world rendered on
+  // the true pixel grid, with the interface on a crisp camera above it.
+  if (Number.isFinite(uiDepth)) installPixelGrid(scene, { uiDepth });
   return camera;
 }
 
@@ -378,13 +397,13 @@ export function drawPanel(g, x, y, w, h, opts = {}) {
   g.fillStyle(PAL.ink, 0.42 * alpha);
   g.fillRect(x + 1, y + h - 2, w - 2, 1);
 
-  // The colour rail is now opt-in. Painting a cyan rail on every panel by
-  // default is what made the chrome read as a template; a rail only appears
-  // where a caller asks for one to carry meaning (gold for a reward or a
-  // selected state).
-  const accent = opts.corner ?? opts.accent;
-  if (accent !== undefined && accent !== null) {
-    g.fillStyle(accent, 0.96 * alpha);
+  // No colour rail by default. A stripe down the left edge of every panel was
+  // the single most templated-looking thing in the chrome, and most callers
+  // passed `corner` out of habit rather than to say anything. `corner` now
+  // only tints drawBroadcastFrame's header rule; a caller that really means a
+  // rail has to ask for one with `rail`.
+  if (opts.rail !== undefined && opts.rail !== null) {
+    g.fillStyle(opts.rail, 0.96 * alpha);
     g.fillRect(x, y, 2, h);
   }
   return g;
@@ -395,7 +414,7 @@ export function drawBroadcastFrame(g, x, y, w, h, opts = {}) {
   drawPanel(g, x, y, w, h, {
     fill: opts.fill ?? UI.surface,
     border: opts.border ?? UI.edge,
-    corner: opts.corner,
+    rail: opts.rail,
     highlight: opts.highlight,
     alpha: opts.alpha
   });
@@ -420,7 +439,7 @@ function drawButton(g, w, h, fill, state, opts, focused = false) {
   // The edge is derived from the face, so a gold button gets a gold edge and a
   // navy one a navy edge. A single loud blue outline on every control was the
   // main thing making unrelated buttons look identical and busy.
-  const border = opts.border ?? (opts.selected ? PAL.gold : shade(fill, 46));
+  const border = opts.border ?? (opts.selected ? UI.cream : shade(fill, 46));
 
   g.clear();
   if (!pressed) {
@@ -442,7 +461,7 @@ function drawButton(g, w, h, fill, state, opts, focused = false) {
   }
 
   if (opts.selected) {
-    g.fillStyle(PAL.gold, 1);
+    g.fillStyle(UI.cream, 1);
     g.fillRect(-w / 2 + 2, h / 2 - 3 + y, w - 4, 2);
   }
 
@@ -488,7 +507,7 @@ export function makeButton(scene, x, y, w, h, label, onClick, opts = {}) {
     strokeThickness: opts.strokeThickness ?? 1,
     align: leftAligned ? 'left' : 'center'
   }).setOrigin(leftAligned ? 0 : 0.5, 0.5));
-  txt.setLetterSpacing(opts.letterSpacing ?? 0.25);
+  txt.setLetterSpacing(opts.letterSpacing ?? 0.2);
 
   const children = [bg];
   let icon = null;
@@ -633,7 +652,7 @@ export function makeStatChip(scene, x, y, w, iconKey, value, opts = {}) {
   drawPanel(g, -w / 2, -h / 2, w, h, {
     fill: opts.fill ?? PAL.panel,
     border: opts.border ?? PAL.borderDark,
-    corner: opts.corner ?? PAL.goldDark
+    rail: opts.rail
   });
   const icon = scene.add.image(-w / 2 + 13, 0, iconKey).setScale(opts.iconScale ?? 1);
   const txt = bodyText(scene, -w / 2 + 25, 0, String(value), {
@@ -666,7 +685,12 @@ export function addScanlines(scene, depth = 2500, alpha = 0.045) {
 }
 
 export function sceneIntro(scene, duration = 180) {
-  scene.cameras.main.fadeIn(duration, (PAL.ink >> 16) & 0xff, (PAL.ink >> 8) & 0xff, PAL.ink & 0xff);
+  // Every camera fades together, or the interface camera would pop in over a
+  // world that is still fading up.
+  const cameras = scene.cameras.cameras?.length ? scene.cameras.cameras : [scene.cameras.main];
+  for (const camera of cameras) {
+    camera.fadeIn(duration, (PAL.ink >> 16) & 0xff, (PAL.ink >> 8) & 0xff, PAL.ink & 0xff);
+  }
 }
 
 export function formatCompact(value) {

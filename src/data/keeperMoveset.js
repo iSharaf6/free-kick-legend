@@ -111,3 +111,85 @@ export const KEEPER_PRACTICAL_MOVESET = Object.freeze(
 export function getKeeperMove(id) {
   return KEEPER_MOVES_BY_ID[id] || null;
 }
+
+// How a committed save plays its authored clip. Numbers are indices into the
+// move's `frames` (so left and right share one spec); `{ texture, left, right }`
+// borrows a frame from another one-scale sheet.
+//   windup     - played during the brief `set` before launch, never in flight
+//   flight     - launch .. contact; the last entry is the contact pose
+//   after      - follow-through after contact (parries)
+//   afterCatch - follow-through when the ball was held (defaults to `after`)
+//   ground     - first turf pose after touchdown (groundCatch when held)
+//   end        - 'lying' gets up from the turf, 'kneel' rises from a kneel,
+//                'upright' is already standing and goes straight to the return
+//   contacts   - candidate contact poses [k, lateral, height]: k indexes the
+//                flight, lateral/height locate its leading glove in metres
+//                from the sprite root (measured from the one-scale atlases).
+//                The save uses the highest glove at or below the ball (else
+//                the lowest), and the drawn dive is lifted/offset so that
+//                glove meets the keeper's physical hand position. Flight poses
+//                after the chosen contact become follow-through.
+const SIDE_LYING = Object.freeze({ texture: 'keeper-dive-motion-hd', right: 11, left: 23 });
+const phases = (spec) => Object.freeze(spec);
+export const KEEPER_SAVE_PHASES = Object.freeze({
+  'full-stretch': phases({
+    windup: [1, 2, 3, 4], flight: [5, 6, 7, 8, 9], after: [10], ground: 11, end: 'lying',
+    contacts: [[7, 1.08, 1.1], [9, 0.99, 0.69]]
+  }),
+  'low-dive': phases({
+    windup: [1, 2, 3], flight: [4, 5], after: [6], afterCatch: [], ground: 7, end: 'lying',
+    contacts: [[4, 0.97, 0.76], [5, 1.08, 0.33]]
+  }),
+  'low-parry': phases({
+    windup: [1, 2], flight: [3, 4], after: [5, 6], ground: 7, end: 'lying', contacts: [[4, 0.9, 0.21]]
+  }),
+  'mid-dive': phases({
+    windup: [1, 2], flight: [3, 4, 5, 6], after: [], ground: 7, end: 'lying',
+    contacts: [[4, 1.28, 1.35], [6, 1.01, 0.79]]
+  }),
+  'top-tip': phases({
+    windup: [1, 2], flight: [3, 4, 5, 6], after: [7], ground: SIDE_LYING, end: 'lying',
+    contacts: [[5, 1.1, 2.2], [6, 0.94, 2.68]]
+  }),
+  'upper-parry': phases({
+    windup: [1, 2, 3], flight: [4, 5, 6], after: [], ground: 7, end: 'lying',
+    contacts: [[6, 0.92, 2.18], [5, 0.78, 2.24]]
+  }),
+  'mid-catch': phases({
+    windup: [1, 2], flight: [3, 4], after: [], afterCatch: [5], ground: SIDE_LYING, groundCatch: 6,
+    end: 'lying', contacts: [[3, 1.05, 0.91], [4, 0.87, 0.8]]
+  }),
+  'low-smother': phases({
+    windup: [1, 2], flight: [3, 4], after: [], afterCatch: [5, 6], ground: 4, groundCatch: 7,
+    end: 'lying', endCatch: 'kneel', contacts: [[3, 0.85, 0.48], [4, 1.01, 0.35]]
+  }),
+  'reflex-foot': phases({ windup: [1, 2], flight: [3, 4], after: [5, 6], ground: 7, end: 'upright' }),
+  'spread-save': phases({ windup: [0, 1], flight: [2, 3], after: [], ground: 5, end: 'upright', centred: true })
+});
+
+// A dive plan must never show a baked-in ball before the keeper holds one.
+// Catch-only clips therefore present their ball-free parry counterpart.
+export const KEEPER_PLAN_PRESENTATION = Object.freeze({
+  'low-catch-left': 'low-parry-left',
+  'low-catch-right': 'low-parry-right'
+});
+
+// Standing catches start at the first frame with the ball already secured in
+// the gloves: the contact has happened before the clip begins.
+export const KEEPER_CATCH_PHASES = Object.freeze({
+  'front-smother': Object.freeze({ from: 1 }),
+  'mid-catch-centre': Object.freeze({ from: 2 }),
+  'high-claim-standing': Object.freeze({ from: 2 }),
+  // The five-frame jump claim is authored airborne from before contact; a
+  // grounded overhead claim reads correctly once the ball is already held.
+  'jump-catch-cross-claim': Object.freeze({ texture: 'keeper-anim-hd', frames: Object.freeze([18, 17]) })
+});
+
+// Frames whose artwork already draws the held ball.
+export const KEEPER_BAKED_BALL_FRAMES = Object.freeze({
+  'keeper-handling-hd': Object.freeze([0, 1, 2, 3, 5, 6, 7, 8]),
+  'keeper-high-claim-hd': Object.freeze([0, 1, 2, 3, 4]),
+  'keeper-practical-low-hd': Object.freeze([20, 21, 22, 23, 28, 29, 30, 31]),
+  'keeper-mid-catch-hd': Object.freeze([5, 6, 7, 13, 14, 15]),
+  'keeper-practical-recovery-hd': Object.freeze([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+});
