@@ -83,6 +83,10 @@ const SITUATIONAL_SAVE_FRAMES = Object.freeze({
   'single-hand-punch-left': Object.freeze([12, 13, 14, 15, 16, 17]),
   'single-hand-punch-right': Object.freeze([18, 19, 20, 21, 22, 23])
 });
+// The authored ready-set bounce, played while the striker runs in.
+const BRACE_MOVE = getKeeperMove('ready-set');
+const BRACE_FRAMES = Object.freeze(BRACE_MOVE?.frames?.length ? [...BRACE_MOVE.frames] : [2, 4]);
+const BRACE_FRAME_SECONDS = (BRACE_MOVE?.frameMs ?? 130) / 1000 * 0.85;
 const KEEPER_FRAMES = Object.freeze({
   idle: Object.freeze([0, 1, 0, 3]),
   anticipate: 2,
@@ -305,8 +309,18 @@ export class Goalkeeper {
     return this;
   }
 
+  // The striker has started his run-up: the keeper comes up onto his toes
+  // with the authored ready-set bounce until the ball is struck.
+  brace() {
+    if (this.destroyed || this.state !== 'idle' || this.presentationAction) return this;
+    this.braced = true;
+    this.braceClock = 0;
+    return this;
+  }
+
   onShot(ball, zGoal) {
     this.hasBall = false;
+    this.braced = false;
     const interceptZ = this.z > ball.z ? this.z : zGoal;
     const prediction = ball.predictAt(interceptZ);
     const flightT = Number.isFinite(prediction.T) ? prediction.T : 0.6;
@@ -624,6 +638,7 @@ export class Goalkeeper {
         this.state = 'idle';
         this.pose = 'idle';
         this.idleClock += dt;
+        if (this.braced) this.braceClock = (this.braceClock || 0) + dt;
         // Idle animation supplies the weight shift; keep planted feet fixed in
         // world space instead of moving the whole sprite independently.
         this.x += (this.homeX - this.x) * Math.min(dt * 5, 1);
@@ -677,6 +692,11 @@ export class Goalkeeper {
     if (this.state === 'set') {
       const progress = this.setT > 0 ? this.stateT / this.setT : 1;
       return progress < 0.52 ? KEEPER_FRAMES.anticipate : KEEPER_FRAMES.set;
+    }
+
+    if (this.braced && this.state === 'idle') {
+      const bounce = BRACE_FRAMES[Math.floor((this.braceClock || 0) / BRACE_FRAME_SECONDS) % BRACE_FRAMES.length];
+      return bounce;
     }
 
     const idleCycle = IDLE_FRAME_SECONDS * KEEPER_FRAMES.idle.length;
@@ -1454,6 +1474,8 @@ export class Goalkeeper {
     if (this.destroyed) return this;
     this.flashTimer?.remove?.(false);
     this.flashTimer = null;
+    this.braced = false;
+    this.braceClock = 0;
     this.state = 'idle';
     this.pose = 'idle';
     this.stateT = 0;

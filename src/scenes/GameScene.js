@@ -10,7 +10,7 @@ import { queueMatchPack } from '../data/matchAssets.js';
 import { Ball } from '../objects/Ball.js';
 import { Wall } from '../objects/Wall.js';
 import { Goalkeeper } from '../objects/Goalkeeper.js';
-import { Kicker } from '../objects/Kicker.js';
+import { Kicker, planStrikerContact } from '../objects/Kicker.js';
 import { SwipeInput, computeShotFromPath } from '../systems/SwipeInput.js';
 import { applyLoadoutToShot, resolveLoadoutGameplay } from '../systems/LoadoutGameplay.js';
 import { AIM_ASSIST_MODES, SaveManager } from '../systems/SaveManager.js';
@@ -177,6 +177,16 @@ const SLOWMO_LEAD_SECONDS = 0.2;
 const SLOWMO_TOP_CORNER_SCALE = 0.4;
 const SLOWMO_NEAR_MISS_SCALE = 0.62;
 const SLOWMO_RAMP_SECONDS = 0.18;
+
+// The striker's run-up mark, in metres back (towards the camera) and to the
+// left of his plant spot. Two strides: long enough to read as a run-up, short
+// enough that release-to-contact stays snappy (Kicker.RUN_UP_CONTACT_MS).
+const STRIKER_RUN_UP = Object.freeze({ x: 0.78, z: 0.9 });
+// The kicker's gameplay scale at the ball's depth; everything else follows
+// perspective from here.
+const STRIKER_BASE_SCALE = 2.37;
+// Ball squash at contact: how long the boot keeps it deformed.
+const BALL_CONTACT_SQUASH_SECONDS = 0.11;
 
 // First-run coaching for match 01. SaveManager has carried a {completed, step}
 // tutorial record since the save format was written, and nothing ever set it -
@@ -581,22 +591,21 @@ export class GameScene extends Phaser.Scene {
     }));
     this.prevBallScreen = null;
 
-    // Aiming is a standing state. The striker waits a step off the ball in an
-    // idle stance and only adopts the loaded "ready" pose once the player
-    // starts a gesture, so the frame no longer shows a run-up that has not
-    // happened yet: AIM -> RUN-UP -> CONTACT -> FOLLOW THROUGH.
+    // Aiming is a standing state. The striker waits on his run-up mark, back
+    // and to the left of the ball, in an idle stance; he loads into "ready"
+    // once the player starts a gesture, and on release runs in, plants beside
+    // the ball and strikes: AIM -> RUN-UP -> PLANT -> CONTACT -> FOLLOW THROUGH.
     //
-    // His spot is a world position, not a screen offset, so his feet sit on the
-    // turf at his own depth and his size follows the same projection as the
-    // wall and the keeper.
-    const stanceZ = this.ball.z + 0.55;
-    const stance = project(this.ball.x - 0.55, 0, stanceZ);
-    const ballScale = project(this.ball.x, 0, this.ball.z).s;
+    // Both spots are world positions, not screen offsets, so his feet sit on
+    // the turf at his own depth and his size follows the same projection as
+    // the wall and the keeper.
+    this.strikerLayout = this.layoutStriker();
+    const stance = this.strikerLayout.mark;
     this.kicker = new Kicker(this, stance.x, stance.y, {
       kitId: this.loadout.kit,
       characterId: this.loadout.character,
       pose: 'idle',
-      scale: 2.37 * (stance.s / ballScale),
+      scale: stance.scale,
       depth: 1260,
       // Reduced motion suppresses the loop; it must not permanently remove the
       // striker's ability to breathe if the player enables motion later.
@@ -635,6 +644,20 @@ export class GameScene extends Phaser.Scene {
       tint: [PAL.grassDither, PAL.grass, PAL.grassShadow],
       emitting: false
     }).setDepth(1255);
+
+    // Run-up footfalls: pale, low and quick - dust, not debris.
+    this.dust = this.add.particles(0, 0, 'spark', {
+      speed: { min: 6, max: 26 },
+      angle: { min: 195, max: 345 },
+      gravityY: 40,
+      lifespan: { min: 220, max: 380 },
+      scale: { start: 0.75, end: 0 },
+      alpha: { start: 0.75, end: 0 },
+      tint: [0xcfe0a4, 0xa9c98a, PAL.grassDither],
+      emitting: false
+    }).setDepth(1255);
+    // Contact ring/rays sit over the striker so the boot never hides the hit.
+    this.contactFx = this.add.graphics().setDepth(1263).setVisible(false);
 
     // white burst on saves / wall blocks / post hits
     this.impact = this.add.particles(0, 0, 'spark', {
@@ -3124,7 +3147,11 @@ export class GameScene extends Phaser.Scene {
   onSwipeStart() {
     // Aiming has begun: the striker loads into the ready stance. Until now he
     // has been standing, which is what the frame should show before any input.
-    if (this.state === 'AIMING') this.kicker?.setPose('ready');
+    // A walk back to the mark stops where he is; the run-up starts from there.
+    if (this.state === 'AIMING') {
+      this.kicker?.cancelSequence?.();
+      this.kicker?.setPose('ready');
+    }
     // The player's live gesture is the only instruction that should occupy the
     // coaching lane while aiming. Invalid releases restore the tutorial below.
     this.clearCoachingLayers();
@@ -3135,7 +3162,8 @@ export class GameScene extends Phaser.Scene {
 
   onSwipeEnd(valid) {
     if (valid || this.state !== 'AIMING') return;
-    this.kicker?.setPose('idle');
+    if (this.strikerLayout && this.kicker?.returnToMark) this.kicker.returnToMark(this.strikerLayout.mark);
+    else this.kicker?.setPose('idle');
     this.setTutorialCopyAlpha(1, 140);
     if (!this.objectiveUi) return;
     this.tweens.killTweensOf(this.objectiveUi);
@@ -3241,16 +3269,89 @@ export class GameScene extends Phaser.Scene {
     this.aimGuideHidden = shot.aimGuideHidden;
     this.wallClearanceY = null;
     Audio.prepare();
+    // The keeper sees the run-up start and bounces onto his toes.
+    this.keepers.forEach((keeper) => keeper.brace?.());
+    const layout = this.strikerLayout;
     this.kicker?.playKick({
       reducedMotion: this.settings.reducedMotion,
+      approach: layout ? { to: layout.plant } : null,
+      contactPoint: layout?.contact ?? null,
+      onStep: (step) => this.onStrikerStep(step),
       onContact: () => this.launchShot(shot)
     });
+  }
+
+  // Footfalls on the run-up kick a little turf dust; the plant a bit more.
+  onStrikerStep({ x, y, heavy = false } = {}) {
+    if (this.settings?.reducedMotion || !this.dust) return;
+    this.dust.explode(heavy ? 7 : 3, x, y - 0.5);
+    if (heavy) this.turf?.explode(3, x + 2, y - 0.5);
+    Audio.step?.(heavy);
+  }
+
+  // The contact frame: a white ring and a burst of short rays at the boot,
+  // drawn on the logical pixel grid so it belongs to the art rather than
+  // floating over it as a vector effect. Stronger strikes burst wider.
+  playContactBurst(power = 0.7) {
+    if (this.settings?.reducedMotion || !this.contactFx) return;
+    const b = this.ball;
+    const centre = project(b.x, b.y - this.ballVisualSink(), b.z);
+    const r = Math.max(2, centre.s * this.ballDrawnRadiusWorld());
+    const gfx = this.contactFx;
+    const state = { t: 0 };
+    const rays = 9;
+    const spin = Math.PI / rays * 0.5;
+    const draw = () => {
+      const t = state.t;
+      gfx.clear();
+      const fade = 1 - t;
+      // Core flash for the first frames only: the hit itself.
+      if (t < 0.28) {
+        gfx.fillStyle(0xffffff, 0.75 * (1 - t / 0.28));
+        gfx.fillCircle(Math.round(centre.x), Math.round(centre.y), r * (1.05 + t));
+      }
+      const ringR = r + 1.5 + (5 + power * 9) * Math.sqrt(t);
+      const ringSteps = Math.max(16, Math.ceil(ringR * 5));
+      gfx.fillStyle(0xffffff, 0.85 * fade);
+      for (let i = 0; i < ringSteps; i++) {
+        const a = (i / ringSteps) * Math.PI * 2;
+        gfx.fillRect(Math.round(centre.x + Math.cos(a) * ringR), Math.round(centre.y + Math.sin(a) * ringR * 0.82), 1, 1);
+      }
+      gfx.fillStyle(0xfff1b8, 0.9 * fade);
+      const inner = r + 2 + t * (6 + power * 8);
+      const length = (2.5 + power * 5) * (1 - t * 0.6);
+      for (let i = 0; i < rays; i++) {
+        const a = spin + (i / rays) * Math.PI * 2;
+        const cos = Math.cos(a);
+        const sin = Math.sin(a) * 0.82;
+        for (let d = 0; d < length; d += 1) {
+          gfx.fillRect(Math.round(centre.x + cos * (inner + d)), Math.round(centre.y + sin * (inner + d)), 1, 1);
+        }
+      }
+    };
+    this.tweens.killTweensOf(gfx);
+    gfx.setVisible(true).setAlpha(1);
+    this.tweens.add({
+      targets: state,
+      t: 1,
+      duration: 150 + power * 60,
+      ease: 'Quad.easeOut',
+      onUpdate: draw,
+      onComplete: () => {
+        gfx.clear();
+        gfx.setVisible(false);
+      }
+    });
+    draw();
   }
 
   launchShot(shot) {
     if (this.state !== 'WINDUP' || this.over) return;
     this.state = 'FLIGHT';
     Audio.kick(shot.power);
+    this.ballSquashT = BALL_CONTACT_SQUASH_SECONDS;
+    this.ballSquashAmount = 0.08 + (shot.power ?? 0.7) * 0.1;
+    this.playContactBurst(shot.power ?? 0.7);
     // Contact throws turf. Cheap, brief, and it plants the strike on the pitch.
     if (!this.settings.reducedMotion) {
       const contact = project(this.ball.x, 0, this.ball.z);
@@ -3326,6 +3427,11 @@ export class GameScene extends Phaser.Scene {
     // also has to be immune to slow motion, or a bullet-time impact would shake
     // in treacle.
     this.updateCameraShake(rawDt);
+    // The contact squash is held for the whole kick freeze and only springs
+    // back once the ball is actually travelling.
+    if (this.ballSquashT > 0 && !(this.hitStopT > 0)) {
+      this.ballSquashT = Math.max(0, this.ballSquashT - rawDt);
+    }
 
     // Hit-stop takes precedence over everything: the world is stopped, briefly.
     // The restore is not optional - simSpeed is the accumulator's multiplier, so
@@ -4156,7 +4262,15 @@ export class GameScene extends Phaser.Scene {
     });
     this.hideShotReadout();
     this.setResultFocus(null);
-    this.kicker?.cancelSequence().setPose('idle');
+    // Back to the run-up mark for the next attempt: walked, not teleported.
+    this.kicker?.cancelSequence();
+    if (this.strikerLayout && this.kicker?.returnToMark) {
+      this.kicker.returnToMark(this.strikerLayout.mark);
+    } else {
+      this.kicker?.setPose('idle');
+    }
+    this.ballSquashT = 0;
+    this.contactFx?.clear().setVisible(false);
     this.buildWall();
     this.ringVisuals?.forEach((visual) => this.destroyRingVisual(visual));
     // Progress has to be cleared before the gates are rebuilt, or the new
@@ -4695,6 +4809,46 @@ export class GameScene extends Phaser.Scene {
    * it. Cosmetic balls ship at different paddings, so this is measured from the
    * equipped texture once rather than hard-coded.
    */
+  // The ball is drawn smaller than its physics radius (see drawBall), so the
+  // drawn centre is sunk by the difference: a resting ball touches its shadow
+  // instead of hovering a few pixels above the turf.
+  ballDrawnRadiusWorld() {
+    return BALL_R * 0.66 * (this.ballRadiusFraction ?? 1) * (this.ballVisualScale ?? 1);
+  }
+
+  ballVisualSink() {
+    return Math.max(0, BALL_R - this.ballDrawnRadiusWorld());
+  }
+
+  // Run-up mark and plant spot for the equipped striker. The plant comes from
+  // the strike frame's boot, so the boot lands on the ball on contact.
+  layoutStriker() {
+    const ballGround = project(this.ball.x, 0, this.ball.z);
+    const ballS = ballGround.s;
+    const scaleAtGroundY = (groundY) => {
+      const s = Math.max(1, (groundY - CAM.horizonY) / CAM.height);
+      return STRIKER_BASE_SCALE * (s / ballS);
+    };
+    const restY = Math.max(this.ball.y - this.ballVisualSink(), this.ballDrawnRadiusWorld());
+    const centre = project(this.ball.x, restY, this.ball.z);
+    const r = Math.max(1.2, ballS * this.ballDrawnRadiusWorld());
+    const plant = planStrikerContact({
+      characterId: this.loadout?.character,
+      ball: { x: centre.x, y: centre.y, groundY: ballGround.y, r },
+      scaleAtGroundY
+    });
+    // Back into the world to lay the mark out with real perspective.
+    const plantS = Math.max(1, (plant.y - CAM.horizonY) / CAM.height);
+    const plantZ = CAM.focal / plantS;
+    const plantX = (plant.x - GAME_W / 2) / plantS + CAM.x;
+    const mark = project(plantX - STRIKER_RUN_UP.x, 0, Math.max(1.2, plantZ - STRIKER_RUN_UP.z));
+    return {
+      plant,
+      mark: { x: mark.x, y: mark.y, scale: STRIKER_BASE_SCALE * (mark.s / ballS) },
+      contact: { x: centre.x - r * 0.35, y: centre.y + r * 0.2 }
+    };
+  }
+
   measureBallRadiusFraction(textureKey) {
     const source = this.textures.get(textureKey)?.getSourceImage?.();
     const width = source?.width;
@@ -4724,7 +4878,9 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     const b = this.ball;
-    const pos = project(b.x, b.y, b.z);
+    // Drawn at its visible radius, the ball's centre sits below its physics
+    // centre; sinking it keeps a resting ball on its shadow.
+    const pos = project(b.x, b.y - this.ballVisualSink(), b.z);
     // A dead ball stays planted. Ambient motion belongs to the player and the
     // stadium; moving the ball while its shadow and swipe hitbox remain fixed
     // reads as hovering and makes the most important contact point feel loose.
@@ -4733,10 +4889,21 @@ export class GameScene extends Phaser.Scene {
     // larger than strict projection - just not so large it out-masses a player.
     const visualScale = this.ballVisualScale ?? 1;
     const ballScale = ((pos.s * BALL_R * 2) / (this.ballSpr.texture.source[0]?.width || 12)) * 0.66 * visualScale;
+    // Contact squash: the boot flattens the ball against the shot for the
+    // length of the kick freeze, then it springs back round as it leaves.
+    let squashX = 1;
+    let squashY = 1;
+    const squashT = this.ballSquashT ?? 0;
+    if (squashT > 0 && !this.settings?.reducedMotion) {
+      const k = squashT / BALL_CONTACT_SQUASH_SECONDS;
+      const amount = (this.ballSquashAmount ?? 0.24) * k;
+      squashX = 1 - amount;
+      squashY = 1 + amount * 0.8;
+    }
     this.ballSpr
       .setPosition(pos.x, pos.y)
-      .setScale(ballScale)
-      .setRotation(b.rot)
+      .setScale(ballScale * squashX, ballScale * squashY)
+      .setRotation(squashT > 0 ? 0 : b.rot)
       .setDepth(depth);
 
     // Keyline and specular. Both are drawn from the projected radius so they
@@ -4745,7 +4912,7 @@ export class GameScene extends Phaser.Scene {
     if (this.ballOutlineGfx) {
       this.ballOutlineGfx.clear().setDepth(depth - 0.5)
         .fillStyle(0x071018, 0.8)
-        .fillCircle(pos.x, pos.y, radius + 0.9);
+        .fillEllipse(pos.x, pos.y, (radius + 0.9) * 2 * squashX, (radius + 0.9) * 2 * squashY);
     }
     if (this.ballGlossGfx) {
       this.ballGlossGfx.clear().setDepth(depth + 0.5)
@@ -4845,7 +5012,7 @@ export class GameScene extends Phaser.Scene {
   recordBallTrailSample() {
     const b = this.ball;
     if (!b?.flying || (this.state !== 'FLIGHT' && this.state !== 'RESULT')) return false;
-    const pos = project(b.x, b.y, b.z);
+    const pos = project(b.x, b.y - this.ballVisualSink(), b.z);
     const previous = this.trailPts.at(-1);
     if (previous && Math.hypot(pos.x - previous.x, pos.y - previous.y) < 0.05) return false;
 

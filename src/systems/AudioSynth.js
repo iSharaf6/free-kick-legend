@@ -239,6 +239,13 @@ export class Synth {
     });
   }
 
+  // A boot on turf during the run-up. Deliberately under the crowd bed: it is
+  // felt as rhythm more than heard, and the plant lands a touch heavier.
+  step(heavy = false) {
+    this._tone({ freq: heavy ? 96 : 84, end: 52, time: heavy ? 0.07 : 0.05, type: 'sine', vol: heavy ? 0.1 : 0.05 });
+    this._noise({ time: heavy ? 0.06 : 0.04, vol: heavy ? 0.045 : 0.022, freq: 420, rampUp: 0.004 });
+  }
+
   whoosh(amount = 0.5) {
     const a = Math.max(0, Math.min(1, amount));
     this._noise({ time: 0.22, vol: 0.025 + a * 0.045, freq: 1500 + a * 900, rampUp: 0.06 });
