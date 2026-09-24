@@ -7,6 +7,7 @@ import {
   crowdWaveLift
 } from '../data/crowdStand.js';
 import { addStandDressing } from './StandDressing.js';
+import { addPixelCrowdTiers, createPixelCrowdStand } from './PixelCrowd.js';
 
 // One writer for the crowd.
 //
@@ -206,6 +207,18 @@ export function addCrowdStand(scene, {
   dressed = true,
   autoStart = true
 } = {}) {
+  // Pixel supporters wherever the renderer can paint them; the sliced
+  // panorama remains only as the fallback for renderer-less embeds.
+  const pixelTiers = addPixelCrowdTiers(scene, { viewWidth, depthOffset });
+  if (pixelTiers) {
+    const dressing = dressed
+      ? addStandDressing(scene, { viewWidth, reducedMotion, depthOffset })
+      : null;
+    const stand = createPixelCrowdStand(scene, pixelTiers, dressing, { reducedMotion });
+    if (autoStart) stand.startAmbient();
+    return stand;
+  }
+
   const tiles = [];
 
   if (registerCrowdSliceFrames(scene)) {

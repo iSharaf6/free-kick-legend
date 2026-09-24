@@ -20,7 +20,7 @@ test('touch-sized match menu pauses gameplay and TAB still opens the same menu',
     };
   });
 
-  expect(control).toMatchObject({ label: 'II  MATCH MENU', visible: true });
+  expect(control).toMatchObject({ label: 'II', visible: true });
   expect(control.cssHitWidth).toBeGreaterThanOrEqual(44);
   expect(control.cssHitHeight).toBeGreaterThanOrEqual(44);
 
@@ -40,7 +40,6 @@ test('active match recomputes compact state without shrinking HUD or restarting 
   const before = await page.evaluate(() => ({
     compact: window.__fkl.compactHud,
     fontSize: window.__fkl.matchHudText.style.fontSize,
-    styleX: window.__fkl.careerStyleHud.text.x,
     sessionToken: window.__fkl.sessionToken,
     mode: window.__fkl.mode,
     levelIndex: window.__fkl.levelIndex,
@@ -59,14 +58,12 @@ test('active match recomputes compact state without shrinking HUD or restarting 
     window.__fkl?.compactHud === true && window.__fkl.matchHudText?.style?.fontSize === '9px'
   ));
   const compact = await page.evaluate(() => ({
-    styleX: window.__fkl.careerStyleHud.text.x,
     sessionToken: window.__fkl.sessionToken,
     mode: window.__fkl.mode,
     levelIndex: window.__fkl.levelIndex,
     attempt: window.__fkl.attempt,
     state: window.__fkl.state
   }));
-  expect(compact.styleX).toBe(before.styleX);
   expect(compact).toMatchObject({
     sessionToken: before.sessionToken,
     mode: before.mode,

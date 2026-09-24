@@ -66,29 +66,34 @@ function drawModernStandShade(gfx, viewWidth, back, front) {
  */
 export function makeStandPropTextures(scene) {
   if (!scene.textures.exists(FLAG_TEXTURE)) {
-    const g = scene.add.graphics();
-    // Three flutter frames, 10x8 each, drawn white so a per-instance tint is
-    // the only thing that decides a flag's colour.
-    // Pennants, not rectangles: a flag that reads as a solid block at this size
-    // looks like a piece of interface floating in the stand. Each row is
-    // [inset, width] so the cloth tapers and the fly end ripples per frame.
-    const frames = [
-      [[0, 8], [0, 8], [0, 7], [1, 5], [1, 3]],
-      [[0, 6], [0, 8], [1, 7], [1, 6], [2, 3]],
-      [[0, 7], [0, 6], [0, 8], [1, 6], [1, 4]]
-    ];
-    frames.forEach((rows, frame) => {
-      const ox = frame * 10;
-      g.fillStyle(0xffffff, 1);
-      g.fillRect(ox, 1, 1, 7);                    // pole
-      rows.forEach(([inset, width], row) => {
-        if (width > 0) g.fillRect(ox + 1, row + inset, width, 1);
-      });
-    });
-    g.generateTexture(FLAG_TEXTURE, 30, 8);
-    g.destroy();
-    const texture = scene.textures.get(FLAG_TEXTURE);
-    for (let frame = 0; frame < 3; frame++) texture.add(frame, 0, frame * 10, 0, 10, 8);
+    // Three flutter frames, 12x10 each, painted in white and a light grey
+    // stripe so a per-instance tint gives a two-tone club flag. Drawn a pixel
+    // at a time and shown at exactly 1x: a scaled pennant smears into an
+    // unreadable glyph on the pixel grid.
+    const texture = scene.textures.createCanvas(FLAG_TEXTURE, 36, 10);
+    const context = texture.getContext();
+    const image = context.createImageData(36, 10);
+    const put = (x, y, v) => {
+      const i = (y * 36 + x) * 4;
+      image.data[i] = v; image.data[i + 1] = v; image.data[i + 2] = v; image.data[i + 3] = 255;
+    };
+    for (let frame = 0; frame < 3; frame++) {
+      const ox = frame * 12;
+      for (let y = 0; y < 10; y++) put(ox, y, 150);                // pole
+      for (let x = 1; x < 11; x++) {
+        // The cloth ripples: each column drops by a travelling sine.
+        const drop = Math.round(Math.sin((x * 0.9) + frame * 2.1) * 0.8 + (x / 10) * 0.6);
+        for (let y = 0; y < 6; y++) {
+          const yy = y + drop;
+          if (yy < 0 || yy > 9) continue;
+          const stripe = y >= 2 && y <= 3 ? 190 : 255;
+          put(ox + x, yy, x === 10 ? stripe - 40 : stripe);
+        }
+      }
+    }
+    context.putImageData(image, 0, 0);
+    for (let frame = 0; frame < 3; frame++) texture.add(frame, 0, frame * 12, 0, 12, 10);
+    texture.refresh();
   }
 
   if (!scene.textures.exists(GLOW_TEXTURE)) {
@@ -305,11 +310,11 @@ export function addStandDressing(scene, {
     // Raised towards the top of their tier: cloth held above the heads in front
     // of it, not a coloured square buried at chest height among them.
     flags.push(track(scene.add
-      .image(12 + random() * (viewWidth - 24),
-        tier.top + (tier.bottom - tier.top) * (0.34 + random() * 0.22),
+      .image(Math.round(12 + random() * (viewWidth - 24)),
+        Math.round(tier.top + (tier.bottom - tier.top) * (0.34 + random() * 0.22)),
         FLAG_TEXTURE, Math.floor(random() * 3))
-      .setOrigin(0.5, 1)
-      .setScale(inBack ? 0.7 : 0.95)
+      .setOrigin(0, 1)
+      .setScale(1)
       .setTint(FLAG_COLOURS[Math.floor(random() * FLAG_COLOURS.length)])
       // Back flags share the rear tier exposure; front flags retain the cloth's
       // saturated club colours instead of fading into the architecture.

@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { GAME_W, GAME_H } from '../config.js';
 import {
   makeButton, makeIconButton, makeStatChip, titleText, bodyText,
-  drawPanel, sceneIntro, formatCompact, configureHdCamera, FONT, UI
+  drawPanel, sceneIntro, formatCompact, configureHdCamera, FONT, UI, PRIMARY_BUTTON
 } from '../ui.js';
 import { SaveManager } from '../systems/SaveManager.js';
 import { Audio } from '../systems/AudioSynth.js';
@@ -16,21 +16,39 @@ import { PAL } from '../pixelart.js';
 import { Kicker } from '../objects/Kicker.js';
 
 const CATEGORY_META = {
-  character: { label: 'PLAYERS', icon: 'kicker-hd-kit-home-idle', color: 0x087b4c },
-  kit: { label: 'KITS', icon: 'icon-kit', color: 0x1760bd },
-  ball: { label: 'BALLS', icon: 'ball-classic', color: 0xc87312 },
-  trail: { label: 'TRAILS', icon: 'icon-trail', color: 0x6238ae }
+  character: { label: 'PLAYERS', icon: 'kicker-hd-kit-home-idle' },
+  kit: { label: 'KITS', icon: 'icon-kit' },
+  ball: { label: 'BALLS', icon: 'ball-classic' },
+  trail: { label: 'TRAILS', icon: 'icon-trail' }
 };
 
+// Tabs share one navy; the open one is a step lighter with a cream underline.
+// Four saturated category faces made the tab row the loudest thing on screen.
+const TAB_FACE = 0x14345e;
+const TAB_FACE_SELECTED = 0x1d4678;
+const BODY_COLOR = '#b8d3e7';
+const MUTED_COLOR = '#9fb4c6';
+const STYLE_COLOR = '#65e5c2';
+const WARNING_COLOR = '#ff8e91';
+
+// Legendary reads as amber rather than the primary-action gold.
 const RARITY_COLORS = {
   common: PAL.muted,
   uncommon: PAL.greenHi,
   rare: PAL.blueHi,
-  legendary: PAL.gold
+  legendary: 0xff9f43
 };
 
 function css(color) {
   return `#${color.toString(16).padStart(6, '0')}`;
+}
+
+// Cosmetic data writes its stat lines as 'a · b · c'. On screen that reads as
+// a spec sheet; commas make it a sentence.
+function asSentence(value) {
+  const text = String(value || '').replace(/\s*·\s*/g, ', ').trim();
+  if (!text) return '';
+  return /[.!?]$/.test(text) ? text : `${text}.`;
 }
 
 export class LockerScene extends Phaser.Scene {
@@ -58,7 +76,7 @@ export class LockerScene extends Phaser.Scene {
   }
 
   create() {
-    configureHdCamera(this);
+    configureHdCamera(this, { uiDepth: 50 });
     this.reducedMotion = Boolean(SaveManager.getSettings().reducedMotion);
     MenuMusic.enterMenu();
     this.add.image(0, 0, 'stadium-menu').setOrigin(0).setDepth(0);
@@ -97,16 +115,8 @@ export class LockerScene extends Phaser.Scene {
       hitWidth: 31,
       hitHeight: 29
     }).setDepth(104);
-    titleText(this, 59, 18, 'LOCKER', '15px', '#f7fbff')
+    titleText(this, 59, 18, 'LOCKER', '15px', UI.creamText)
       .setOrigin(0, 0.5).setDepth(104);
-    bodyText(this, 276, 18, 'MATCHDAY CUSTOMISATION', {
-      originX: 0.5,
-      fontSize: '7px',
-      color: '#9ccce8',
-      letterSpacing: 0.26
-    }).setDepth(104);
-    this.add.image(359, 18, 'calynx-logo-pixel')
-      .setDisplaySize(38, 11.5).setTint(0x64d7ff).setDepth(104);
     this.coinChip = makeStatChip(this, 425, 18, 80, 'icon-coin', formatCompact(SaveManager.getCoins()), {
       height: 21,
       fill: 0x07152f,
@@ -122,8 +132,7 @@ export class LockerScene extends Phaser.Scene {
       fill: 0x0a1c3c
     });
     drawPanel(g, 207, 72, 264, 188, {
-      fill: 0x0b244a,
-      corner: 0xffc928
+      fill: 0x0b244a
     });
 
     // A simple illuminated presentation stage keeps the detailed selected
@@ -159,15 +168,15 @@ export class LockerScene extends Phaser.Scene {
         this.renderTabs();
         this.renderContent();
       }, {
-        color: selected ? meta.color : 0x14345e,
-        hover: meta.color,
+        color: selected ? TAB_FACE_SELECTED : TAB_FACE,
+        hover: TAB_FACE_SELECTED,
         selected,
-        border: selected ? 0xffc928 : UI.edge,
+        border: selected ? UI.cream : UI.edge,
         icon: meta.icon,
         iconScale,
         iconX: 14,
-        fontSize: category === 'character' ? '8px' : '9px',
-        letterSpacing: 0.45,
+        fontSize: '9px',
+        letterSpacing: 0.2,
         hitHeight: 32
       });
       this.tabLayer.add(button);
@@ -270,85 +279,71 @@ export class LockerScene extends Phaser.Scene {
       }
       this.contentLayer.add(line);
     }
-
-    const previewLabel = selected.category === 'character'
-      ? 'SELECTED PLAYER PREVIEW'
-      : `SELECTED ${selected.category.toUpperCase()} PREVIEW`;
-    const selectedLabel = bodyText(this, 104, 244, previewLabel, {
-      originX: 0.5,
-      fontSize: '6px',
-      color: '#9ccce8',
-      letterSpacing: 0.45
-    });
-    this.contentLayer.add(selectedLabel);
   }
 
   renderCatalog(items, selected) {
     const rarity = RARITY_COLORS[selected.rarity] ?? PAL.muted;
-    const name = titleText(this, 221, 87, selected.name.toUpperCase(), '12px', '#f7fbff')
+    const name = titleText(this, 221, 87, selected.name.toUpperCase(), '12px', UI.creamText)
       .setOrigin(0, 0.5);
     const rarityText = bodyText(this, 458, 88, selected.rarity.toUpperCase(), {
       originX: 1,
       fontFamily: FONT,
-      fontSize: '6px',
+      fontSize: '7px',
       color: css(rarity),
-      letterSpacing: 0.45
+      letterSpacing: 0.2
     });
-    const description = bodyText(this, 221, selected.category === 'character' ? 102 : 108, selected.description, {
-      originY: 0,
-      fontSize: selected.category === 'character' ? '6px' : '7px',
-      color: '#b8d3e7',
-      wordWrap: { width: 235, useAdvancedWrap: true },
-      lineSpacing: selected.category === 'character' ? 1 : 2
-    });
-    this.contentLayer.add([name, rarityText, description]);
+    this.contentLayer.add([name, rarityText]);
 
+    // One short paragraph: what it is, then what it does. Items that change
+    // nothing about the kick say so in two words instead of a disclaimer.
+    const lines = [{ text: selected.description, color: BODY_COLOR }];
     if (selected.category === 'character') {
-      const playerMeta = bodyText(
-        this,
-        221,
-        126,
-        `${selected.archetype.toUpperCase()}  ·  ${selected.dominantFoot.toUpperCase()} FOOT  ·  ${selected.personality.toUpperCase()}`,
-        {
-          fontSize: '6px',
-          color: '#ffc928',
-          letterSpacing: 0.22
-        }
-      );
-      this.contentLayer.add(playerMeta);
+      lines.push({
+        text: `${selected.archetype}, ${selected.dominantFoot}-footed, ${String(selected.personality).toLowerCase()}.`,
+        color: MUTED_COLOR
+      });
     }
-
-    const style = selected.gameplay
-      ? `${selected.gameplay.ability || selected.gameplay.feel}  ·  ${selected.gameplay.summary}`
+    const effect = selected.gameplay
+      ? `${selected.gameplay.ability || selected.gameplay.feel}: ${asSentence(selected.gameplay.summary)}`
       : selected.utility
-        ? `${selected.utility.label}  ·  ${selected.utility.summary}`
-        : 'VISUAL IDENTITY  ·  NO GAMEPLAY MODIFIER';
-    const styleText = bodyText(this, 221, selected.category === 'character' ? 140 : 130, style.toUpperCase(), {
-      fontSize: '6px',
-      color: '#65e5c2',
-      wordWrap: { width: 232, useAdvancedWrap: true },
-      lineSpacing: 1,
-      letterSpacing: 0.12
+        ? `${selected.utility.label}: ${asSentence(selected.utility.summary)}`
+        : 'Looks only.';
+    lines.push({ text: effect, color: STYLE_COLOR });
+
+    let y = 98;
+    lines.forEach(({ text, color }, index) => {
+      const line = bodyText(this, 221, y, text, {
+        originY: 0,
+        fontSize: '7px',
+        color,
+        // Phaser wraps before letter spacing is applied, so leave it room.
+        wordWrap: { width: 226, useAdvancedWrap: true },
+        lineSpacing: 1,
+        letterSpacing: 0.1
+      });
+      this.contentLayer.add(line);
+      y += line.displayHeight + (index === 0 ? 4 : 2);
     });
-    this.contentLayer.add(styleText);
 
     const compact = items.length > 6;
     items.forEach((item, index) => {
       const x = compact ? 225 + index * 33 : 231 + index * 43;
-      this.contentLayer.add(this.makeCosmeticTile(x, 166, item, item.id === selected.id, compact));
+      this.contentLayer.add(this.makeCosmeticTile(x, 169, item, item.id === selected.id, compact));
     });
 
     const owned = SaveManager.ownsCosmetic(selected.id);
     const equipped = SaveManager.getEquippedCosmetic(selected.category) === selected.id;
     const gate = this.unlockGate(selected);
-    const requirement = bodyText(this, 221, 202, this.requirementText(selected, owned, gate), {
-      fontSize: '7px',
-      color: gate.available || owned ? '#ffc928' : '#ff8e91',
-      letterSpacing: 0.25
-    });
-    this.contentLayer.add(requirement);
+    const blocker = this.requirementText(selected, owned, gate);
+    if (blocker) {
+      this.contentLayer.add(bodyText(this, 221, 203, blocker, {
+        fontSize: '7px',
+        color: gate.available ? MUTED_COLOR : WARNING_COLOR,
+        letterSpacing: 0.1
+      }));
+    }
 
-    let label = `BUY  ·  ${selected.price}`;
+    let label = `BUY ${selected.price}`;
     let icon = 'icon-coin';
     let disabled = !gate.available;
     if (owned && equipped) {
@@ -364,11 +359,10 @@ export class LockerScene extends Phaser.Scene {
       icon = 'icon-lock';
     }
 
-    const meta = CATEGORY_META[this.category];
+    // Buying or equipping is this screen's one primary action, so while it is
+    // available it gets the same gold key as Continue and Play Match.
     const action = makeButton(this, 339, 232, 224, 31, label, () => this.handleAction(selected), {
-      color: meta.color,
-      hover: this.category === 'kit' ? PAL.blueHi : this.category === 'ball' ? 0xe47c3e : 0x836bb5,
-      border: UI.edge,
+      ...(disabled ? { color: TAB_FACE, hover: TAB_FACE_SELECTED, border: UI.edge } : PRIMARY_BUTTON),
       icon,
       iconScale: 0.75,
       iconX: 18,
@@ -376,6 +370,8 @@ export class LockerScene extends Phaser.Scene {
       disabled,
       hitHeight: 34
     });
+    // Ink glyph on the gold face, matching Play Match.
+    if (!disabled) action.buttonIcon?.setTint(0x1b1303);
     this.contentLayer.add(action);
   }
 
@@ -389,7 +385,7 @@ export class LockerScene extends Phaser.Scene {
     }, {
       color: selected ? 0x2b4557 : PAL.night,
       hover: 0x2b4557,
-      border: selected ? PAL.gold : rarity,
+      border: selected ? UI.cream : rarity,
       selected,
       hitWidth: compact ? 31 : 41,
       hitHeight: compact ? 37 : 43
@@ -441,21 +437,19 @@ export class LockerScene extends Phaser.Scene {
     }
   }
 
+  // Only say something when a thing stands between the player and the item.
+  // Owned and equipped states are already on the button.
   requirementText(item, owned, gate) {
-    if (owned) return SaveManager.getEquippedCosmetic(item.category) === item.id
-      ? 'READY FOR THE NEXT MATCH'
-      : 'OWNED  ·  TAP EQUIP';
+    if (owned) return null;
     const unlock = item.unlock || { type: 'coins', value: item.price };
     if (!gate.available) {
-      if (unlock.type === 'stars') return `LOCKED  ·  REACH ${unlock.value} STARS`;
-      if (unlock.type === 'cup') return `LOCKED  ·  WIN ${gate.cup?.name?.toUpperCase() || 'THE CUP'}`;
-      if (unlock.type === 'daily') return `LOCKED  ·  COMPLETE ${unlock.value} DAILY KICKS`;
-      return 'LOCKED BY PROGRESSION';
+      if (unlock.type === 'stars') return `Earn ${unlock.value} stars to unlock.`;
+      if (unlock.type === 'cup') return `Win ${gate.cup?.name || 'the cup'} to unlock.`;
+      if (unlock.type === 'daily') return `Play ${unlock.value} daily kicks to unlock.`;
+      return 'Keep playing to unlock.';
     }
     const shortfall = Math.max(0, item.price - SaveManager.getCoins());
-    return shortfall > 0
-      ? `${item.price} COINS  ·  NEED ${shortfall} MORE`
-      : `${item.price} COINS  ·  AVAILABLE NOW`;
+    return shortfall > 0 ? `You need ${shortfall} more coins.` : null;
   }
 
   handleAction(item) {
@@ -476,7 +470,7 @@ export class LockerScene extends Phaser.Scene {
     }
 
     const needed = Math.max(0, item.price - SaveManager.getCoins());
-    const warning = bodyText(this, 339, 211, `NEED ${needed} MORE COINS`, {
+    const warning = bodyText(this, 339, 211, `You need ${needed} more coins.`, {
       originX: 0.5,
       fontFamily: FONT,
       fontSize: '7px',

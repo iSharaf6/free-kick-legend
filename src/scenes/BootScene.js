@@ -9,7 +9,6 @@ import { AUDIO_SAMPLES, Audio } from '../systems/AudioSynth.js';
 import { MenuMusic } from '../systems/MenuMusic.js';
 import { applyDocumentSettings } from '../systems/SettingsPanel.js';
 import { makePuppetTextures } from '../art/PuppetTextures.js';
-import { CROWD_STAND } from '../data/crowdStand.js';
 import { paintPitchSurface } from '../art/PitchSurface.js';
 
 const KICKER_POSES = {
@@ -46,7 +45,8 @@ export class BootScene extends Phaser.Scene {
   // first paint and roughly a tenth of it.
   preload() {
     const base = import.meta.env.BASE_URL;
-    this.load.image(CROWD_STAND.textureKey, `${base}${CROWD_STAND.assetPath}`);
+    // The stands are painted as pixel supporters at runtime (PixelCrowd.js),
+    // so the 1.4 MB painted panorama no longer ships before the menu.
     this.load.image('calynx-logo-pixel', `${base}assets/hd/calynx-logo-pixel.png`);
 
     // The menu hero wears exactly one striker. Reading the save this early is
@@ -115,7 +115,7 @@ export class BootScene extends Phaser.Scene {
     };
 
     const bootNote = document.querySelector('.boot-note');
-    if (bootNote) bootNote.textContent = 'Syncing matchday';
+    if (bootNote) bootNote.textContent = 'Loading…';
     // The public GitHub Pages build is standalone. Asking the CrazyGames SDK
     // to initialize on that origin adds a dead loading tail and can emit a
     // minified GeneralError; portal-hosted builds keep automatic detection.

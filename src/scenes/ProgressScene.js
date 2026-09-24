@@ -9,7 +9,8 @@ import {
   makeIconButton,
   makeStatChip,
   sceneIntro,
-  titleText
+  titleText,
+  UI
 } from '../ui.js';
 import { PAL } from '../pixelart.js';
 import { SaveManager } from '../systems/SaveManager.js';
@@ -18,6 +19,9 @@ import { MenuMusic } from '../systems/MenuMusic.js';
 import { DAILY_STREAK_REWARDS, utcDateKey } from '../data/progression.js';
 
 const PAGE_SIZE = 4;
+// Same tab treatment as the Locker: one navy, the open tab a step lighter.
+const TAB_FACE = PAL.panelHi;
+const TAB_FACE_SELECTED = 0x1d4678;
 
 function css(color) {
   return `#${color.toString(16).padStart(6, '0')}`;
@@ -34,7 +38,7 @@ export class ProgressScene extends Phaser.Scene {
   }
 
   create() {
-    configureHdCamera(this);
+    configureHdCamera(this, { uiDepth: 50 });
     MenuMusic.enterMenu();
     this.date = utcDateKey();
     SaveManager.ensureDaily(this.date);
@@ -57,8 +61,7 @@ export class ProgressScene extends Phaser.Scene {
     const g = this.add.graphics().setDepth(100);
     drawPanel(g, 7, 5, GAME_W - 14, 28, {
       fill: PAL.panel,
-      border: PAL.borderDark,
-      corner: PAL.goldDark
+      border: PAL.borderDark
     });
     makeIconButton(this, 23, 19, 20, 'icon-back', () => this.scene.start('Menu'), {
       color: PAL.panelHi,
@@ -68,16 +71,8 @@ export class ProgressScene extends Phaser.Scene {
       hitWidth: 31,
       hitHeight: 29
     }).setDepth(104);
-    titleText(this, 58, 18, 'PLAYER PROGRESS', '14px', '#f3e7c3')
+    titleText(this, 58, 18, 'PLAYER PROGRESS', '14px', UI.creamText)
       .setOrigin(0, 0.5).setDepth(104);
-    bodyText(this, 292, 19, 'PLAY  ·  COMPLETE  ·  CLAIM', {
-      originX: 0.5,
-      fontSize: '6px',
-      color: '#8fa2ab',
-      letterSpacing: 0.35
-    }).setDepth(104);
-    this.add.image(361, 19, 'calynx-logo-pixel')
-      .setDisplaySize(38, 11.5).setTint(PAL.gold).setDepth(104);
     this.coinChip = makeStatChip(this, 426, 19, 78, 'icon-coin', formatCompact(SaveManager.getCoins()), {
       height: 21,
       fill: PAL.night,
@@ -93,29 +88,38 @@ export class ProgressScene extends Phaser.Scene {
     const dailyClaims = dailyStates.filter((state) => state.completed && !state.claimed).length;
     const achievementClaims = achievementStates.filter((state) => state.completed && !state.claimed).length;
 
-    makeButton(this, 146, 50, 210, 27,
-      `DAILY MISSIONS${dailyClaims ? `  ·  ${dailyClaims} READY` : ''}`,
-      () => this.switchTab('daily'), {
-        color: this.tab === 'daily' ? PAL.green : PAL.panelHi,
-        hover: PAL.greenHi,
-        selected: this.tab === 'daily',
-        border: this.tab === 'daily' ? PAL.gold : PAL.borderDark,
-        icon: 'icon-clock',
+    const tabs = [
+      { id: 'daily', x: 146, label: 'DAILY MISSIONS', icon: 'icon-clock', ready: dailyClaims },
+      { id: 'achievements', x: 368, label: 'ACHIEVEMENTS', icon: 'icon-cup', ready: achievementClaims }
+    ];
+    tabs.forEach((tab) => {
+      const selected = this.tab === tab.id;
+      makeButton(this, tab.x, 50, 210, 27, tab.label, () => this.switchTab(tab.id), {
+        color: selected ? TAB_FACE_SELECTED : TAB_FACE,
+        hover: TAB_FACE_SELECTED,
+        selected,
+        border: selected ? UI.cream : PAL.borderDark,
+        icon: tab.icon,
         iconScale: 0.72,
         fontSize: '8px'
       }).setDepth(120);
+      // Rewards waiting on a tab get the same red count badge as the menu's
+      // trophy button, instead of a second clause in the label.
+      if (tab.ready) this.addClaimBadge(tab.x + 101, 37, tab.ready);
+    });
+  }
 
-    makeButton(this, 368, 50, 210, 27,
-      `ACHIEVEMENTS${achievementClaims ? `  ·  ${achievementClaims} READY` : ''}`,
-      () => this.switchTab('achievements'), {
-        color: this.tab === 'achievements' ? PAL.blue : PAL.panelHi,
-        hover: PAL.blueHi,
-        selected: this.tab === 'achievements',
-        border: this.tab === 'achievements' ? PAL.gold : PAL.borderDark,
-        icon: 'icon-cup',
-        iconScale: 0.72,
-        fontSize: '8px'
-      }).setDepth(120);
+  addClaimBadge(x, y, count) {
+    const badge = this.add.graphics().setDepth(125);
+    badge.fillStyle(PAL.red, 1);
+    badge.fillCircle(x, y, 5);
+    bodyText(this, x, y, String(Math.min(count, 9)), {
+      originX: 0.5,
+      fontSize: '7px',
+      color: '#ffffff',
+      strokeThickness: 0,
+      letterSpacing: 0
+    }).setDepth(126);
   }
 
   switchTab(tab) {
@@ -135,21 +139,27 @@ export class ProgressScene extends Phaser.Scene {
     const g = this.add.graphics();
     drawPanel(g, 14, -18, 452, 38, {
       fill: state.claimed ? 0x122e2a : PAL.panel,
-      border: state.completed ? PAL.goldDark : PAL.borderDark,
-      corner: state.completed ? PAL.gold : PAL.borderDark
+      border: state.completed ? UI.edgeHi : PAL.borderDark
     });
 
     const icon = this.add.image(34, 1, state.completed ? 'icon-star' : 'icon-star-empty').setScale(0.75);
-    const name = bodyText(this, 50, -7, state.label.toUpperCase(), {
-      fontSize: '8px',
-      color: state.completed ? '#f3e7c3' : '#c4ceca',
-      letterSpacing: 0.25
+    // Daily missions are a single sentence ('Take 8 free kicks'); only
+    // achievements carry a second line. A mission is not padded out with a
+    // restatement of its own target.
+    const hasDescription = Boolean(state.description);
+    const name = bodyText(this, 50, hasDescription ? -6 : 1, state.label, {
+      fontSize: '9px',
+      color: state.completed ? UI.creamText : '#c4ceca',
+      letterSpacing: 0.1
     });
-    const description = bodyText(this, 50, 8, state.description ?? `${formatCompact(state.target)} TARGET`, {
-      fontSize: '6px',
-      color: '#82979f',
-      letterSpacing: 0.15
-    });
+    const parts = [g, icon, name];
+    if (hasDescription) {
+      parts.push(bodyText(this, 50, 9, state.description, {
+        fontSize: '7px',
+        color: '#8fa2ab',
+        letterSpacing: 0.1
+      }));
+    }
 
     const bar = this.add.graphics();
     const progress = Phaser.Math.Clamp(state.progress / Math.max(state.target, 1), 0, 1);
@@ -157,21 +167,22 @@ export class ProgressScene extends Phaser.Scene {
     bar.fillRect(245, -4, 92, 9);
     bar.fillStyle(PAL.borderDark, 1);
     bar.fillRect(247, -2, 88, 5);
-    bar.fillStyle(state.completed ? PAL.gold : PAL.blueHi, 1);
+    bar.fillStyle(state.completed ? PAL.greenHi : PAL.blueHi, 1);
     bar.fillRect(247, -2, Math.floor(88 * progress), 5);
-    const progressText = bodyText(this, 291, 10,
+    const progressText = bodyText(this, 291, 11,
       `${formatCompact(state.progress)} / ${formatCompact(state.target)}`, {
         originX: 0.5,
-        fontSize: '6px',
-        color: '#aebbb9'
+        fontSize: '7px',
+        color: '#aebbb9',
+        letterSpacing: 0.1
       });
 
     const button = makeButton(this, 407, 1, 98, 24,
-      state.claimed ? 'CLAIMED' : state.completed ? `CLAIM  +${state.reward}` : `+${state.reward} COINS`,
+      state.claimed ? 'CLAIMED' : state.completed ? `CLAIM +${state.reward}` : `+${state.reward} COINS`,
       () => this.claimReward(state, row, claim), {
         color: state.completed && !state.claimed ? PAL.green : PAL.panelMuted,
         hover: PAL.greenHi,
-        border: state.completed && !state.claimed ? PAL.goldDark : PAL.borderDark,
+        border: state.completed && !state.claimed ? PAL.greenHi : PAL.borderDark,
         icon: 'icon-coin',
         iconScale: 0.62,
         iconX: 13,
@@ -190,7 +201,7 @@ export class ProgressScene extends Phaser.Scene {
       });
     }
 
-    row.add([g, icon, name, description, bar, progressText, button]);
+    row.add([...parts, bar, progressText, button]);
     this.contentLayer.add(row);
     this.animateRow(row, y, index, state.claimed);
     return row;
@@ -244,20 +255,19 @@ export class ProgressScene extends Phaser.Scene {
 
     const daily = SaveManager.getDaily(this.date);
     const g = this.add.graphics();
-    drawPanel(g, 14, 209, 452, 48, {
+    drawPanel(g, 14, 207, 452, 54, {
       fill: PAL.night,
-      border: PAL.goldDark,
-      corner: PAL.gold
+      border: PAL.borderDark
     });
     this.contentLayer.add(g);
     const streakCopy = daily.streak > 0
-      ? `${daily.streak} DAY STREAK  ·  ${daily.completed ? 'TODAY COMPLETE' : 'PLAY TODAY TO EXTEND IT'}`
-      : 'START YOUR STREAK  ·  PLAY TODAY';
-    this.contentLayer.add(bodyText(this, 24, 217, streakCopy, {
-        fontSize: '7px',
-        color: daily.completed ? '#f3c449' : '#c4ceca',
-        letterSpacing: 0.3
-      }));
+      ? `${daily.streak}-day streak. ${daily.completed ? 'Done for today.' : 'Play today to keep it going.'}`
+      : 'Play today to start a streak.';
+    this.contentLayer.add(bodyText(this, 24, 216, streakCopy, {
+      fontSize: '8px',
+      color: UI.creamText,
+      letterSpacing: 0.1
+    }));
 
     const cycleIndex = daily.completed
       ? (Math.max(daily.streak, 1) - 1) % DAILY_STREAK_REWARDS.length
@@ -265,19 +275,21 @@ export class ProgressScene extends Phaser.Scene {
     DAILY_STREAK_REWARDS.forEach((reward, index) => {
       const x = 26 + index * 62;
       const active = index === cycleIndex;
-      g.fillStyle(active ? PAL.goldDark : PAL.borderDark, 1);
-      g.fillRect(x, 228, 54, 21);
+      g.fillStyle(active ? UI.cream : PAL.borderDark, 1);
+      g.fillRect(x, 226, 54, 28);
       g.fillStyle(active ? PAL.panelHi : PAL.panelMuted, 1);
-      g.fillRect(x + 2, 230, 50, 17);
-      this.contentLayer.add(bodyText(this, x + 27, 234, `D${index + 1}`, {
+      g.fillRect(x + 1, 227, 52, 26);
+      this.contentLayer.add(bodyText(this, x + 27, 234, `Day ${index + 1}`, {
         originX: 0.5,
-        fontSize: '5px',
-        color: active ? '#f3c449' : '#82979f'
+        fontSize: '7px',
+        color: active ? UI.creamText : '#82979f',
+        letterSpacing: 0.1
       }));
-      this.contentLayer.add(bodyText(this, x + 27, 242, `+${reward}`, {
+      this.contentLayer.add(bodyText(this, x + 27, 246, `+${reward}`, {
         originX: 0.5,
-        fontSize: '6px',
-        color: active ? '#f3e7c3' : '#aebbb9'
+        fontSize: '8px',
+        color: active ? UI.creamText : '#aebbb9',
+        letterSpacing: 0.1
       }));
     });
   }

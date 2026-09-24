@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME_W, GAME_H, STADIUM_Y } from '../config.js';
+import { GAME_W, GAME_H, STADIUM_Y, CAM } from '../config.js';
 import {
   sceneIntro, formatCompact, configureHdCamera, crispText, PIXEL_TEXT_WEIGHT, UI
 } from '../ui.js';
@@ -8,12 +8,13 @@ import { Audio } from '../systems/AudioSynth.js';
 import { MenuMusic } from '../systems/MenuMusic.js';
 import { SettingsPanel } from '../systems/SettingsPanel.js';
 import { PlatformService } from '../systems/PlatformService.js';
-import { LEVELS } from '../data/levels.js';
+import { LEVELS, CUPS } from '../data/levels.js';
 import { PAL } from '../pixelart.js';
 import { Kicker } from '../objects/Kicker.js';
 import { utcDateKey } from '../data/progression.js';
 import { addMenuCrowd } from '../art/CrowdStand.js';
 import { addPitchSurface } from '../art/PitchSurface.js';
+import { addPixelPitch } from '../art/PixelPitch.js';
 import { getCosmetic } from '../data/cosmetics.js';
 import { prefetchMatchPack } from '../data/matchAssets.js';
 import { ensureLoaded, queueKickerSet } from '../data/kickerAssets.js';
@@ -27,9 +28,7 @@ const INK = 0x030714;
 const NAVY = 0x07132c;
 const PANEL = 0x0b2147;
 const CREAM = '#f7fbff';
-const GOLD = 0xffc928;
 const GOLD_HI = 0xffe56c;
-const GOLD_DARK = 0xb77900;
 // Menu action faces. Secondary rows share one raised navy so the stack reads as
 // a single list; only the primary action owns a saturated face.
 const PRIMARY_FACE = 0xf2b91c;
@@ -345,23 +344,29 @@ function makeMenuAction(scene, x, y, w, h, spec, onClick) {
   const icon = makeActionIcon(scene, spec.iconType, spec.iconColor ?? spec.accent, !onLightFace)
     .setPosition(-w / 2 + (spec.featured ? 21 : 20), 0);
   const labelX = -w / 2 + (spec.featured ? 51 : 48);
-  const label = menuText(scene, labelX, spec.featured ? -6 : -5, spec.label, {
+  // A row only carries a second line when there is something real to say
+  // (a level, a streak, a best score). Without one the label sits centred
+  // rather than above an empty slot or a slogan.
+  const hasSubtitle = Boolean(spec.subtitle);
+  const labelY = hasSubtitle ? (spec.featured ? -6 : -5) : 0;
+  const subtitleY = hasSubtitle ? (spec.featured ? 9 : 8) : 0;
+  const label = menuText(scene, labelX, labelY, spec.label, {
     fontFamily: DISPLAY_FONT,
     fontSize: spec.featured ? '16px' : '14px',
     color: spec.labelColor ?? CREAM,
     stroke: onLightFace ? '#ffe9a0' : undefined,
     strokeThickness: onLightFace ? 0 : 1,
     shadow: !onLightFace,
-    letterSpacing: 0.25
+    letterSpacing: 0.2
   });
-  const subtitle = menuText(scene, labelX + 1, spec.featured ? 9 : 8, spec.subtitle, {
+  const subtitle = menuText(scene, labelX + 1, subtitleY, spec.subtitle ?? '', {
     fontFamily: PIXEL_FONT,
     fontSize: spec.featured ? '10px' : '9px',
     color: spec.subtitleColor,
     strokeThickness: onLightFace ? 0 : 1,
     shadow: !onLightFace,
-    letterSpacing: 0.65
-  });
+    letterSpacing: 0.2
+  }).setVisible(hasSubtitle);
   const chevron = scene.add.graphics().setPosition(w / 2 - 14, 0);
   const container = scene.add.container(x, y, [bg, icon, label, subtitle, chevron]);
   container.setSize(w, h + 3);
@@ -370,8 +375,8 @@ function makeMenuAction(scene, x, y, w, h, spec, onClick) {
     const offset = state === 'pressed' ? 2 : 0;
     const alpha = state === 'disabled' ? 0.42 : 1;
     icon.setY(offset).setAlpha(alpha);
-    label.setY((spec.featured ? -6 : -5) + offset).setAlpha(alpha);
-    subtitle.setY((spec.featured ? 9 : 8) + offset).setAlpha(alpha);
+    label.setY(labelY + offset).setAlpha(alpha);
+    subtitle.setY(subtitleY + offset).setAlpha(alpha);
     chevron.clear().setY(offset).setAlpha(alpha);
     // The chevron brightens to the mode's accent on hover so the whole row
     // answers the pointer, not just the face.
@@ -454,11 +459,24 @@ export class MenuScene extends Phaser.Scene {
   }
 
   create() {
-    configureHdCamera(this);
+    configureHdCamera(this, { uiDepth: 140 });
     this.compactMenu = Number(globalThis.innerHeight) <= 520 &&
       Number(globalThis.innerWidth) > Number(globalThis.innerHeight);
     this.add.image(0, 0, 'stadium-menu').setOrigin(0).setDepth(0);
-    addPitchSurface(this, {
+    // The same pixel turf as a match, seen from the same camera.
+    addPixelPitch(this, {
+      top: STADIUM_Y,
+      width: GAME_W,
+      height: GAME_H - STADIUM_Y,
+      horizonX: GAME_W / 2,
+      horizonY: CAM.horizonY,
+      focal: CAM.focal,
+      cameraHeight: CAM.height,
+      goalZ: CAM.ballDist + 22,
+      seed: 0x4d454e55,
+      depth: 1,
+      name: 'menu-pixel-pitch'
+    }) ?? addPitchSurface(this, {
       x: 0,
       y: STADIUM_Y,
       width: GAME_W,
@@ -598,44 +616,29 @@ export class MenuScene extends Phaser.Scene {
     bar.fillGradientStyle(INK, INK, INK, INK, 0.82, 0.82, 0, 0);
     bar.fillRect(0, 0, GAME_W, 52);
 
-    menuText(this, 15, 16, 'KICK DISTRICT', {
+    // The wordmark stands alone. The studio already owns every advertising
+    // board behind the player; a slogan and a second logo under the name only
+    // made the corner busier.
+    menuText(this, 15, 19, 'KICK DISTRICT', {
       fontFamily: DISPLAY_FONT,
       fontSize: '17px',
       color: CREAM,
       strokeThickness: 1,
       letterSpacing: -0.2
     }).setDepth(205);
-    menuText(this, 16, 32, 'OWN THE CURVE.', {
-      fontFamily: PIXEL_FONT,
-      fontSize: '6px',
-      color: '#ffc928',
-      letterSpacing: 0.72
-    }).setDepth(205);
-    menuText(this, 87, 32, '·', {
-      originX: 0.5,
-      fontSize: '6px',
-      color: '#587287'
-    }).setDepth(205);
-    const calynx = this.add.image(110, 32, 'calynx-logo-pixel').setScale(0.48).setDepth(205);
-    calynx.setTint(0x64d7ff);
-    menuText(this, 128, 32, 'STUDIO', {
-      fontSize: '5px',
-      color: '#9ccce8',
-      letterSpacing: 0.35
-    }).setDepth(205);
 
-    this.soundButton = makeHeaderControl(this, 188, 22, 19, 23, {
+    this.soundButton = makeHeaderControl(this, 186, 22, 19, 23, {
       icon: muted ? 'icon-mute' : 'icon-sound',
       iconScale: 0.78,
       color: 0x13365f
     }, () => this.toggleSound()).setDepth(206);
 
-    this.settingsButton = makeHeaderControl(this, 230, 22, 62, 23, {
+    this.settingsButton = makeHeaderControl(this, 230, 22, 64, 23, {
       gear: true,
       label: 'SETTINGS',
-      labelX: -5.5,
+      labelX: -7,
       letterSpacing: 0,
-      fontSize: '6px',
+      fontSize: '7px',
       color: 0x13365f
     }, () => {
       SettingsPanel.open({
@@ -645,12 +648,12 @@ export class MenuScene extends Phaser.Scene {
       });
     }).setDepth(206);
 
+    // A reward waiting to be claimed is announced by the red count badge
+    // alone; gold stays with Continue.
     makeHeaderControl(this, 280, 22, 30, 23, {
       icon: 'icon-cup',
       iconScale: 1.05,
-      color: 0x13365f,
-      border: readyClaims ? GOLD : undefined,
-      rail: readyClaims ? GOLD : undefined
+      color: 0x13365f
     }, () => this.scene.start('Progress')).setDepth(206);
 
     this.headerStatPanels = [
@@ -702,60 +705,23 @@ export class MenuScene extends Phaser.Scene {
 
   makeHero(equippedKit, equippedCharacter) {
     const player = getCosmetic(equippedCharacter) || getCosmetic('character-mica');
-    const card = this.add.graphics().setDepth(150);
-    drawPremiumPanel(card, 28, 202, 192, 65, {
-      fill: 0x0b244a,
-      bottom: 0x06142d
-    });
-
-    drawPremiumPanel(card, 37, 207, 31, 30, {
-      fill: 0x163d7a,
-      bottom: 0x0a2454,
-      border: GOLD_DARK
-    });
-    menuText(this, 52.5, 222, String(player.number), {
+    // Just who is taking the kick. Archetype, ability and shot numbers live
+    // in the Locker, where the player is choosing between strikers; on the
+    // front menu they were a spec sheet nobody asked to read.
+    const nameplate = menuText(this, 116, 217, `${player.name.toUpperCase()}  ·  #${player.number}`, {
       originX: 0.5,
-      fontFamily: DISPLAY_FONT,
-      fontSize: '16px',
-      color: CREAM,
-      strokeThickness: 1
-    }).setDepth(154);
-    menuText(this, 75, 212, `${player.name.toUpperCase()}  ·  #${player.number}`, {
       fontFamily: DISPLAY_FONT,
       fontSize: '10px',
       color: CREAM,
-      letterSpacing: 0.35
-    }).setDepth(154);
-    // Identity first, then what the striker actually does. The card used to
-    // stack ROLE / SIGNATURE / SHOT rows at 5px - under 14 CSS px at 720p and
-    // unreadable on a phone - beside a career bar that repeated the header's
-    // star chip. Nothing here is now smaller than 7px, and the technique reads
-    // as a sentence instead of a spec sheet.
-    menuText(this, 75, 226, player.archetype.toUpperCase(), {
-      fontFamily: DISPLAY_FONT,
-      fontSize: '8px',
-      color: '#f3c449',
-      letterSpacing: 0.3
-    }).setDepth(154);
-    card.fillStyle(UI.edgeHi, 0.35);
-    card.fillRect(37, 240, 174, 1);
-    menuText(this, 38, 247, player.gameplay.ability, {
-      fontFamily: DISPLAY_FONT,
-      fontSize: '8px',
-      color: '#6ee1df',
       letterSpacing: 0.2
     }).setDepth(154);
-    if (!this.compactMenu) {
-      menuText(this, 38, 252, player.gameplay.summary, {
-        originY: 0,
-        fontFamily: PIXEL_FONT,
-        fontSize: '7px',
-        color: '#c5d2dc',
-        letterSpacing: 0.1,
-        lineSpacing: 1,
-        wordWrap: { width: 174 }
-      }).setDepth(154);
-    }
+    const plateW = Math.ceil(nameplate.displayWidth) + 20;
+    const card = this.add.graphics().setDepth(150);
+    drawPremiumPanel(card, Math.round(116 - plateW / 2), 207, plateW, 20, {
+      fill: 0x0b244a,
+      bottom: 0x06142d
+    });
+    this.heroNameplate = nameplate;
 
     this.kicker = new Kicker(this, 116, 198, {
       kitId: equippedKit,
@@ -848,9 +814,12 @@ export class MenuScene extends Phaser.Scene {
     }).setDepth(230);
     this.menuActionButtons.push(continueButton);
 
+    // Secondary rows say something true about the player's own save - where
+    // the career stands, a streak, a best score - or nothing at all.
+    const continueCup = CUPS.find((cup) => cup.id === LEVELS[continueIndex]?.cup);
     this.menuActionButtons.push(makeMenuAction(this, actionX, 107, actionW, 35, {
       label: 'CAREER',
-      subtitle: 'FIVE CUP TOUR',
+      subtitle: continueCup?.name ?? '',
       subtitleColor: SECONDARY_SUBTITLE,
       color: SECONDARY_FACE,
       accent: 0x58c6ff,
@@ -858,10 +827,10 @@ export class MenuScene extends Phaser.Scene {
     }, () => this.scene.start('LevelSelect')).setDepth(230));
 
     const dailySubtitle = daily.completed
-      ? `BEST ${formatCompact(SaveManager.getBestDaily(today))}`
+      ? `Best ${formatCompact(SaveManager.getBestDaily(today))}`
       : daily.streak > 0
-        ? `${daily.streak} DAY STREAK`
-        : 'NEW CHALLENGE';
+        ? `${daily.streak}-day streak`
+        : 'New today';
     this.menuActionButtons.push(makeMenuAction(this, actionX, 147, actionW, 35, {
       label: 'DAILY KICK',
       subtitle: dailySubtitle,
@@ -874,9 +843,10 @@ export class MenuScene extends Phaser.Scene {
       this.scene.start('Game', { mode: 'daily', dailyDate: today });
     }).setDepth(230));
 
+    const bestArcade = SaveManager.getBestArcade?.() ?? 0;
     this.menuActionButtons.push(makeMenuAction(this, actionX, 187, actionW, 35, {
       label: 'TIME ATTACK',
-      subtitle: '60 SEC',
+      subtitle: bestArcade > 0 ? `Best ${formatCompact(bestArcade)}` : '60 seconds',
       subtitleColor: SECONDARY_SUBTITLE,
       color: SECONDARY_FACE,
       accent: 0xff8551,
@@ -888,7 +858,6 @@ export class MenuScene extends Phaser.Scene {
 
     this.menuActionButtons.push(makeMenuAction(this, actionX, 227, actionW, 35, {
       label: 'LOCKER',
-      subtitle: 'MAKE IT YOURS',
       subtitleColor: SECONDARY_SUBTITLE,
       color: SECONDARY_FACE,
       accent: 0xc79bff,
