@@ -16,6 +16,7 @@ import { addMenuCrowd } from '../art/CrowdStand.js';
 import { addPitchSurface } from '../art/PitchSurface.js';
 import { getCosmetic } from '../data/cosmetics.js';
 import { prefetchMatchPack } from '../data/matchAssets.js';
+import { ensureLoaded, queueKickerSet } from '../data/kickerAssets.js';
 
 // Every menu role shares the settings face; hierarchy comes from size, colour
 // and spacing instead of swapping type families.
@@ -517,7 +518,15 @@ export class MenuScene extends Phaser.Scene {
     // with 4 MB of goalkeeper atlases. This only fills the HTTP cache - the
     // match scene stays the sole owner of those texture keys.
     this.time.delayedCall(240, () => {
-      if (this.scene.isActive()) prefetchMatchPack();
+      if (!this.scene.isActive()) return;
+      prefetchMatchPack();
+      // A striker equipped in the locker arrives with only his idle still.
+      // Stream the rest of his poses so the Continue flourish kicks in HD.
+      ensureLoaded(this, (scene) => queueKickerSet(scene, equippedCharacter, equippedKit)).then((loaded) => {
+        if (!loaded || !this.scene.isActive() || !this.kicker || this.kicker.activeKick) return;
+        this.kicker.applyPoseTexture?.();
+        this.kicker.setupActionAnimation?.();
+      });
     });
   }
 
@@ -822,6 +831,12 @@ export class MenuScene extends Phaser.Scene {
       continueButton?.buttonLabel?.setText('KICKING OFF...').setFontSize('11px');
       const level = LEVELS[continueIndex];
       SaveManager.setLastPlayed?.({ mode: 'career', levelId: levelId(level, continueIndex) });
+      // Never play the flourish on placeholder frames: if the equipped
+      // striker's kick is still streaming, go straight to the match.
+      if (this.kicker.hasHdPoses && !this.kicker.hasHdPoses()) {
+        this.scene.start('Game', { mode: 'career', levelIndex: continueIndex });
+        return;
+      }
       const started = this.kicker.previewStrike(() => {
         this.scene.start('Game', { mode: 'career', levelIndex: continueIndex });
       });

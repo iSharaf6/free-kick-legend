@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Kicker } from '../src/objects/Kicker.js';
+import {
+  COMPACT_CONTACT_MS,
+  Kicker,
+  POSE_REGISTRATION,
+  RUN_UP_CONTACT_MS,
+  STRIKE_GEOMETRY,
+  planStrikerContact
+} from '../src/objects/Kicker.js';
 
 // Every V3 frame is normalized to one fixed canvas and content baseline. That
 // turns texture swaps into stable animation frames instead of registration
@@ -82,6 +89,13 @@ function animatedSpriteStub(x, y, key) {
     const frame = clip.frames.find((entry) => entry.key.endsWith(`-${pose}`));
     sprite.setTexture(frame.key);
     sprite.emit('animationupdate', { key: 'kicker-action' }, { textureKey: frame.key });
+  };
+  // Phaser frames carry a 1-based index; the run-up clip needs it because
+  // its stride frames reuse the ready/recover textures.
+  sprite.advanceFrame = (clipKey, index) => {
+    const frame = clips.get(clipKey).frames[index - 1];
+    sprite.setTexture(frame.key);
+    sprite.emit('animationupdate', { key: clipKey }, { textureKey: frame.key, index });
   };
   return sprite;
 }
@@ -259,7 +273,7 @@ test('the Phaser sprite clip owns frame timing and never skips contact', () => {
   assert.equal(clip.skipMissedFrames, false);
   assert.deepEqual(
     clip.frames.map(({ duration }) => duration),
-    [44, 78, 52, 68, 82, 92]
+    [58, 92, 92, 112, 132, 150]
   );
 
   let contacts = 0;
@@ -304,10 +318,104 @@ test('every selectable character reaches ball contact on the same Time Attack cl
     const frames = kicker.sprite.animationClips.get('kicker-action').frames;
     assert.equal(
       frames[0].duration + frames[1].duration,
-      122,
+      COMPACT_CONTACT_MS,
       `${characterId} must not gain or lose round time before contact`
     );
+    const runUp = kicker.sprite.animationClips.get('kicker-runup').frames;
+    const strikeIndex = runUp.findIndex((frame) => frame.key.endsWith('-strike'));
+    assert.ok(strikeIndex > 2, 'the run-up has strides and a plant before contact');
+    assert.equal(
+      runUp.slice(0, strikeIndex).reduce((sum, frame) => sum + frame.duration, 0),
+      RUN_UP_CONTACT_MS,
+      `${characterId} run-up must reach the ball on the shared tick`
+    );
   }
+});
+
+test('the planted boot stays on one screen column through wind-up, strike and follow-through', () => {
+  for (const characterId of Object.keys(POSE_REGISTRATION)) {
+    const kicker = new Kicker(withTweenManager(sceneStub()), 200, 180, {
+      characterId, kitId: 'kit-home', scale: 2.4, ambient: false
+    });
+    const columns = ['windup', 'strike', 'follow'].map((pose) => {
+      kicker.setPose(pose);
+      const reg = POSE_REGISTRATION[characterId][pose];
+      // Screen x of the registration column = sprite centre + offset from 128.
+      return kicker.sprite.x + (reg - 128) * kicker.sprite.scaleX;
+    });
+    for (const column of columns) assert.ok(Math.abs(column - 200) < 1e-9, `${characterId} plant foot slid`);
+  }
+});
+
+test('the strike plan puts the boot on the ball for every striker', () => {
+  const ball = { x: 240, y: 196, groundY: 204, r: 8 };
+  for (const characterId of Object.keys(STRIKE_GEOMETRY)) {
+    const plan = planStrikerContact({ characterId, ball, scaleAtGroundY: () => 2.37 });
+    const kicker = new Kicker(withTweenManager(sceneStub()), plan.x, plan.y, {
+      characterId, kitId: 'kit-home', scale: plan.scale, ambient: false
+    });
+    kicker.setPose('strike');
+    const [bootX, bootY] = STRIKE_GEOMETRY[characterId].strikeBoot;
+    const boot = kicker.sourcePoint('strike', bootX, bootY);
+    assert.ok(Math.abs(boot.x - (ball.x - ball.r * 0.55)) < 1e-6, `${characterId} boot misses the ball horizontally`);
+    assert.ok(boot.y >= ball.y - ball.r * 1.6 && boot.y <= ball.y + ball.r, `${characterId} boot is not at ball height`);
+    assert.ok(plan.y >= ball.groundY - 1 && plan.y <= ball.groundY + 5, 'the plant stays beside the ball');
+  }
+});
+
+test('a match kick runs from the mark, plants on the planned spot and fires contact once', () => {
+  const scene = withTweenManager(sceneStub({ animated: true }));
+  const tweens = [];
+  const add = scene.tweens.add;
+  scene.tweens.add = (config) => {
+    tweens.push(config);
+    return add(config);
+  };
+  const kicker = new Kicker(scene, 160, 230, { kitId: 'kit-home', scale: 2.9, ambient: false });
+  const plant = { x: 225, y: 208, scale: 2.45 };
+  let contacts = 0;
+  const steps = [];
+  kicker.playKick({
+    approach: { to: plant },
+    onStep: (step) => steps.push(step),
+    onContact: () => contacts++
+  });
+  assert.equal(kicker.sprite.playedAnimation, 'kicker-runup');
+
+  // Half-way through the run the striker is between the mark and the ball,
+  // and perspective has already shrunk him.
+  const clock = tweens.find((config) => config.targets && 't' in config.targets);
+  clock.targets.t = 0.5;
+  clock.onUpdate();
+  assert.ok(kicker.x > 160 && kicker.x < plant.x);
+  assert.ok(kicker.scale < 2.9 && kicker.scale > plant.scale);
+
+  const frames = kicker.sprite.animationClips.get('kicker-runup').frames;
+  const windup = frames.findIndex((frame) => frame.key.endsWith('-windup')) + 1;
+  const strike = frames.findIndex((frame) => frame.key.endsWith('-strike')) + 1;
+  kicker.sprite.advanceFrame('kicker-runup', 2);
+  assert.equal(kicker.pose, 'recover', 'the passing frame is a run frame, not the post-kick recovery');
+  assert.equal(contacts, 0);
+  kicker.sprite.advanceFrame('kicker-runup', windup);
+  assert.deepEqual({ x: kicker.x, y: kicker.y, scale: kicker.scale }, plant, 'the plant lands exactly on the plan');
+  assert.ok(steps.some((step) => step.heavy), 'the plant reports a heavy footfall');
+  kicker.sprite.advanceFrame('kicker-runup', strike);
+  kicker.sprite.advanceFrame('kicker-runup', strike);
+  assert.equal(contacts, 1);
+});
+
+test('mirrored stride frames never leak into the kick or the next stance', () => {
+  const scene = withTweenManager(sceneStub({ animated: true }));
+  const kicker = new Kicker(scene, 160, 230, { kitId: 'kit-home', scale: 2.9, ambient: false });
+  kicker.playKick({ approach: { to: { x: 225, y: 208, scale: 2.45 } } });
+  kicker.sprite.advanceFrame('kicker-runup', 3);
+  assert.equal(kicker.sprite.flipX, true, 'Mica mirrors his second stride');
+  const frames = kicker.sprite.animationClips.get('kicker-runup').frames;
+  kicker.sprite.advanceFrame('kicker-runup', frames.findIndex((frame) => frame.key.endsWith('-windup')) + 1);
+  assert.equal(kicker.sprite.flipX, false);
+  kicker.cancelSequence();
+  kicker.setPose('idle');
+  assert.equal(kicker.sprite.flipX, false);
 });
 
 test('cancelling an active Phaser clip invalidates late frame events', () => {
